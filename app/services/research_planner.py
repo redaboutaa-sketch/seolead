@@ -104,6 +104,22 @@ def plan_authoritative_research(
         if len(plan.queries) >= max_queries:
             break
         template = templates.get(category.value)
+        # A category may carry region-specific variants (`SUBSIDY_VLG`), because a
+        # single national query can miss a region entirely — Phase 3.2's
+        # tri-regional subsidy query returned no Flemish authority, so BE-VLG
+        # claims had no official evidence at all.
+        for suffix in ("_WAL", "_BRU", "_VLG"):
+            variant = templates.get(f"{category.value}{suffix}")
+            if not variant or len(plan.queries) >= max_queries:
+                continue
+            variant_key = normalize_query(variant)
+            if variant_key in seen:
+                continue
+            seen.add(variant_key)
+            plan.queries.append(AuthoritativeQuery(
+                query=variant.strip(), category=category, domains=domains,
+                reason=(f"regional variant for {suffix.lstrip('_')}: a national "
+                        f"query does not reach this region's authorities")))
         if not template:
             # No template means the vertical has not said how to look for this
             # category. Guessing a query would spend money on a shape nobody

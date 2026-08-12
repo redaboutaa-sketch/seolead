@@ -144,6 +144,10 @@ class ClaimCategory(StrEnum):
     GUARANTEED_SAVINGS = "GUARANTEED_SAVINGS"
     ROI = "ROI"
     ENERGY_PRICE = "ENERGY_PRICE"
+    # Narrow categories added in Phase 3.2/3.3, each justified by evidence the
+    # live authoritative run actually returned (CWaPE and ORES tariff pages).
+    TARIFF = "TARIFF"                  # a regulated periodic tariff
+    GRID_FEE = "GRID_FEE"              # a connection or network charge
     MARKET_PRICE = "MARKET_PRICE"      # market-wide averages — needs corroboration
     VENDOR_PRICE = "VENDOR_PRICE"      # a specific vendor's own displayed price
     PRODUCT_SPEC = "PRODUCT_SPEC"

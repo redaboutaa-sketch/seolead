@@ -362,9 +362,13 @@ class TestExecutor:
             "https://energie.wallonie.be/fr/prime.html",
             "Prime photovoltaïque", "La prime est actuellement de 1 750 €.",
             "o1")])
-        assert len(run.accepted) == 1
-        assert run.accepted[0].entry.authority_type is AuthorityType.GOVERNMENT
-        assert run.accepted[0].region is Region.BE_WAL
+        # A category may carry regional query variants, so the same stub source
+        # can be returned by more than one query. Assert on distinct pages.
+        assert {a.source.url for a in run.accepted} == {
+            "https://energie.wallonie.be/fr/prime.html"}
+        assert all(a.entry.authority_type is AuthorityType.GOVERNMENT
+                   for a in run.accepted)
+        assert all(a.region is Region.BE_WAL for a in run.accepted)
 
     async def test_off_domain_pages_are_rejected_even_in_the_official_pass(
             self, solar_profile):
@@ -399,7 +403,8 @@ class TestExecutor:
             "La prime est actuellement de 1 750 €.", "o1")])
         result = run.to_provider_result(query="q", market="BE", language="fr")
         assert result.provider == "tavily_authoritative"
-        assert len(result.sources) == 1
+        assert {s.url for s in result.sources} == {
+            "https://energie.wallonie.be/fr/prime.html"}
 
     async def test_an_empty_run_says_so_rather_than_failing(self, solar_profile):
         run, _ = await self._run(solar_profile, [])
@@ -486,3 +491,45 @@ class TestAuthorityRegionPrecedence:
         """Only registered authorities have a jurisdiction to defer to."""
         assert detect_region(
             "La prime wallonne s'élève à 1 750 €.").region is Region.BE_WAL
+
+
+class TestRegionalQueryVariants:
+    """Phase 3.2 found no Flemish authority at all.
+
+    A single tri-regional French query does not reach `energiesparen.be`, which
+    publishes in Dutch — so BE-VLG claims had no official evidence and never could.
+    """
+
+    def test_a_regional_variant_is_planned_alongside_the_national_query(
+            self, solar_profile):
+        claim = _claim("La prime régionale s'élève à 1 750 €.")
+        unresolved = [evaluate_claim(
+            claim, [_ref(claim.text, SourceQuality.COMMERCIAL, published=NOW)],
+            solar_profile)]
+        plan = plan_authoritative_research(topic="prime", market="BE",
+                                           unresolved=unresolved,
+                                           profile=solar_profile)
+        queries = [q.query for q in plan.queries]
+        assert any("Vlaanderen" in q for q in queries), queries
+        assert any("Wallonie" in q for q in queries), queries
+
+    def test_the_variant_keeps_the_category(self, solar_profile):
+        claim = _claim("La prime régionale s'élève à 1 750 €.")
+        unresolved = [evaluate_claim(
+            claim, [_ref(claim.text, SourceQuality.COMMERCIAL, published=NOW)],
+            solar_profile)]
+        plan = plan_authoritative_research(topic="prime", market="BE",
+                                           unresolved=unresolved,
+                                           profile=solar_profile)
+        flemish = [q for q in plan.queries if "Vlaanderen" in q.query]
+        assert flemish and flemish[0].category is ClaimCategory.SUBSIDY
+
+    def test_variants_respect_the_ceiling(self, solar_profile):
+        claim = _claim("La prime régionale s'élève à 1 750 €.")
+        unresolved = [evaluate_claim(
+            claim, [_ref(claim.text, SourceQuality.COMMERCIAL, published=NOW)],
+            solar_profile)]
+        plan = plan_authoritative_research(topic="prime", market="BE",
+                                           unresolved=unresolved,
+                                           profile=solar_profile)
+        assert len(plan.queries) <= solar_profile.official_source_policy["max_queries"]

@@ -169,7 +169,7 @@ authority_policy:
 # unresolved. Placeholder shape: populate without changing orchestration code.
 official_source_policy:
   enabled: true
-  max_queries: 4
+  max_queries: 5
 
   # Each domain carries what it is authoritative ABOUT and FOR WHOM. The Walloon
   # energy portal establishes Walloon premiums and says nothing about Flemish grid
@@ -325,7 +325,11 @@ official_source_policy:
   # "Belgium" query returns the federal level and misses the regional schemes
   # that actually set the premiums.
   query_templates:
-    SUBSIDY: "prime panneaux photovoltaiques Wallonie Bruxelles Flandre conditions officielles"
+    SUBSIDY: "prime panneaux photovoltaiques Wallonie Bruxelles conditions officielles"
+    # Phase 3.2's tri-regional query returned no Flemish authority at all, so
+    # BE-VLG claims had no official evidence. Flemish sources publish in Dutch, so
+    # a French query does not reach them. A Flemish rule stays scoped BE-VLG.
+    SUBSIDY_VLG: "premie zonnepanelen Vlaanderen voorwaarden officieel"
     GRID_RULE: "tarif prosumer injection compteur photovoltaique regulateur reseau"
     TAX: "taux TVA installation photovoltaique habitation"
     REGULATION: "reglementation installation photovoltaique obligations"
@@ -334,3 +338,60 @@ official_source_policy:
     ROI: "rentabilite installation photovoltaique etude officielle"
     TARIFF: "tarif periodique reseau distribution electricite"
     GRID_FEE: "cout raccordement installation photovoltaique reseau"
+
+# ── Matching vocabulary (Phase 3.3) ──────────────────────────────────────────
+# Context words, not topic words. Every page in this corpus contains them, so on
+# their own they say nothing about whether two statements are about the same
+# proposition. Phase 3.2 paired a prosumer-tariff claim with a market-price
+# passage on `photovoltaique` + `installation` alone.
+generic_terms:
+  - prix
+  - cout
+  - coût
+  - tarif
+  - solaire
+  - solaires
+  - photovoltaique
+  - photovoltaïque
+  - panneau
+  - panneaux
+  - installation
+  - installations
+  - energie
+  - énergie
+  - electricite
+  - électricité
+  - belgique
+  - belge
+  - euro
+  - euros
+  - zonnepanelen
+  - prijs
+
+# Multi-word concepts that act as a claim's semantic head. The most specific
+# phrase present wins, so "tarif prosumer" beats "tarif".
+concept_phrases:
+  - tarif prosumer
+  - tarif d'injection
+  - tarif de reseau
+  - compteur qui tourne a l'envers
+  - compteur bidirectionnel
+  - compteur communicant
+  - certificat vert
+  - certificats verts
+  - prime regionale
+  - prime a l'installation
+  - prime energie
+  - retour sur investissement
+  - temps de retour
+  - duree d'amortissement
+  - taux de tva
+  - puissance installee
+  - watt crete
+  - autoconsommation
+  - batterie domestique
+  - onduleur hybride
+  - raccordement au reseau
+  - injection sur le reseau
+  - gestionnaire de reseau
+  - facture d'electricite

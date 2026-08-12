@@ -27,8 +27,11 @@ from datetime import datetime
 from app.core.enums import (AuthorityRequirement, ClaimCategory, EvidenceStatus,
                             FreshnessRequirement, ObservationStatus)
 from app.services.claim_extraction import AtomicClaim
+from app.services.claim_matching import (MatchResult, extract_concepts,
+                                         match as claim_match)
 from app.services.claim_policy import (ClaimRequirements, ClaimRisk,
-                                       authority_is_sufficient, requirements_for)
+                                       authority_is_sufficient, classify_category,
+                                       requirements_for)
 from app.services.intent import normalize_query
 from app.services.relevance import RelevanceStatus
 from app.services.conflict import ConflictKind, classify as classify_conflict
@@ -185,28 +188,61 @@ class EvaluatedClaim:
         }
 
 
-def passage_supports_claim(claim_text: str, passage: str) -> tuple[bool, bool | None]:
+def passage_supports_claim(
+    claim_text: str, passage: str, *,
+    profile: VerticalProfile | None = None,
+    claim_category: ClaimCategory | None = None,
+    claim_region: Region | None = None,
+    passage_region: Region | None = None,
+) -> tuple[bool, bool | None]:
     """Does this passage materially state this claim?
 
+    Delegates to the staged matcher when a vertical profile is available. The
+    Phase 3.2 implementation accepted a two-content-word overlap and produced 163
+    false conflicts from 23 sources; `claim_matching` requires the claim's
+    semantic head, discriminative (not generic) terms, compatible region and
+    category, and comparable numeric TYPES before any figure is compared.
+
     Returns (supports, agrees_numerically). `agrees_numerically` is None when the
-    claim carries no figure — a distinction that matters, because a passage that
-    is on-topic but silent about the number is not the same as one that states a
-    different number.
+    claim carries no comparable figure — a distinction that matters, because a
+    passage silent about a number is not one that states a different number.
     """
-    claim_words = _content_words(claim_text)
-    passage_words = _content_words(passage)
-    if len(claim_words & passage_words) < _TOPIC_MATCH_MIN:
-        return False, None
+    if profile is None:
+        # Kept for callers with no vertical context. Same shape, coarser rule.
+        claim_words = _content_words(claim_text)
+        passage_words = _content_words(passage)
+        if len(claim_words & passage_words) < _TOPIC_MATCH_MIN:
+            return False, None
+        claim_numbers = _numbers(claim_text)
+        if not claim_numbers:
+            return True, None
+        passage_numbers = _numbers(passage)
+        if claim_numbers & passage_numbers:
+            return True, True
+        return False, False
 
-    claim_numbers = _numbers(claim_text)
-    if not claim_numbers:
-        return True, None
+    result = match_passage(claim_text, passage, profile=profile,
+                           claim_category=claim_category,
+                           claim_region=claim_region,
+                           passage_region=passage_region)
+    return result.supports, result.agrees_numerically
 
-    passage_numbers = _numbers(passage)
-    if claim_numbers & passage_numbers:
-        return True, True
-    # On-topic and quantified, but the figure is absent or different.
-    return False, False
+
+def match_passage(
+    claim_text: str, passage: str, *, profile: VerticalProfile,
+    claim_category: ClaimCategory | None = None,
+    claim_region: Region | None = None,
+    passage_region: Region | None = None,
+) -> MatchResult:
+    """Full matcher result, including the reason codes."""
+    claim_concepts = extract_concepts(claim_text, profile,
+                                      category=claim_category,
+                                      region=claim_region)
+    passage_concepts = extract_concepts(
+        passage, profile,
+        category=classify_category(passage, profile) if profile else None,
+        region=passage_region)
+    return claim_match(claim_concepts, passage_concepts)
 
 
 def evaluate_claim(
@@ -348,6 +384,10 @@ def build_candidates(
     claim: AtomicClaim,
     sources_by_ref: dict[str, dict],
     passages_by_ref: dict[str, list[str]],
+    *,
+    profile: VerticalProfile | None = None,
+    claim_category: ClaimCategory | None = None,
+    claim_region: Region | None = None,
 ) -> list[EvidenceRef]:
     """Find every eligible source whose passages bear on this claim.
 
@@ -361,16 +401,26 @@ def build_candidates(
         if not relevance.is_eligible:
             continue
 
-        best: tuple[bool, bool | None, str] | None = None
+        source_region = source.get("region_enum", Region.UNKNOWN)
+        best: tuple[bool, bool | None, str, list[str]] | None = None
         for passage in passages_by_ref.get(source_ref, []):
-            supports, agrees = passage_supports_claim(claim.text, passage)
+            if profile is not None:
+                result = match_passage(
+                    claim.text, passage, profile=profile,
+                    claim_category=claim_category, claim_region=claim_region,
+                    passage_region=source_region)
+                supports, agrees = result.supports, result.agrees_numerically
+                reasons = [r.value for r in result.reasons]
+            else:
+                supports, agrees = passage_supports_claim(claim.text, passage)
+                reasons = []
             if best is None or (supports and not best[0]):
-                best = (supports, agrees, passage)
+                best = (supports, agrees, passage, reasons)
             if supports:
                 break
         if best is None:
             continue
-        supports, agrees, passage = best
+        supports, agrees, passage, reasons = best
         if not supports and agrees is None:
             # Off-topic for this claim; not evidence either way.
             continue
@@ -390,7 +440,8 @@ def build_candidates(
             provider=source.get("provider", ""),
             supports=supports,
             agrees_numerically=agrees,
-            region=source.get("region_enum", Region.UNKNOWN),
+            note="; ".join(reasons),
+            region=source_region,
             authority_type=source.get("authority_type"),
             freshness_status=source.get("freshness_enum"),
             effective_from=source.get("effective_from"),

@@ -154,8 +154,14 @@ def build_package_v3(
     # ── Evidence mapping and classification ──────────────────────────────────
     evaluated: list[EvaluatedClaim] = []
     for claim in claim_set.claims:
-        candidates = evidence_model.build_candidates(claim, sources_by_ref,
-                                                     passages_by_ref)
+        # Category and region are computed once and handed to the matcher, so a
+        # passage is judged against the claim's own scope rather than re-derived
+        # per passage.
+        requirements = claim_policy.requirements_for(claim.text, profile)
+        claim_region = detect_region(claim.text, default=default_region).region
+        candidates = evidence_model.build_candidates(
+            claim, sources_by_ref, passages_by_ref, profile=profile,
+            claim_category=requirements.category, claim_region=claim_region)
         evaluated.append(evidence_model.evaluate_claim(
             claim, candidates, profile, default_region=default_region))
 

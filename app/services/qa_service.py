@@ -440,6 +440,35 @@ def run_seo_qa_v2(
                 f"{repeats} sentence opening(s) repeat almost verbatim.",
                 blocking=False))
 
+    # ── Outbound links ───────────────────────────────────────────────────────
+    # The Phase 3.3 live draft emitted a markdown link to a commercial competitor
+    # page. Sources belong in the evidence ledger, not as links in the copy: a
+    # published page linking a competitor sends the reader away, and the writer
+    # was never asked to cite by hyperlink.
+    external_links = re.findall(r"\]\((https?://[^)]+)\)", body)
+    if external_links:
+        findings.append(_finding(
+            "EXTERNAL_LINK_IN_BODY",
+            f"The draft emits {len(external_links)} outbound link(s). Sources "
+            f"belong in the evidence ledger, not in the copy.",
+            blocking=True, detail=", ".join(external_links[:3])))
+
+    # ── Did it actually answer a quantified question? ────────────────────────
+    # Factual QA passing means "asserted nothing false". For a price query it can
+    # also mean "asserted nothing at all" — the live draft was titled "Prix des
+    # panneaux solaires" and contained no price. That is not a factual failure,
+    # so it is reported here, where usefulness is judged.
+    if intent in ("COMMERCIAL", "TRANSACTIONAL"):
+        quantified = re.search(
+            r"\d[\d\s.,]*\s*(?:%|€|\$|£|eur|euros?|kwh|kwc|kwp|ans?)",
+            body, re.IGNORECASE)
+        if not quantified:
+            findings.append(_finding(
+                "NO_QUANTIFIED_ANSWER",
+                f"Brief targets {intent} intent but the body states no figure at "
+                f"all. The page may be honest and still not answer the query.",
+                blocking=False))
+
     # ── Content gap the SERP revealed ────────────────────────────────────────
     for gap in (package.get("content_gap") or [])[:3]:
         findings.append(_finding("SERP_CONTENT_GAP", f"Opportunity: {gap}",

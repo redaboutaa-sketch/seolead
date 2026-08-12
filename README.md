@@ -7,7 +7,7 @@ attributable qualified lead.
 Workspace: `/opt/seolead`. All documentation, architecture, configuration and code
 live here and nowhere else.
 
-## Status — Phase 3.2 authoritative research executed
+## Status — Phase 3.3 matching precision corrected
 
 ```
 seed query → provider policy → DataForSEO (SERP) + Tavily (web research)
@@ -38,9 +38,17 @@ data, with all HIGH-risk claims still correctly refused.
 **No official evidence had ever been retrieved** (Phase 3.2). A general web search
 does not surface a regulator for a pricing query, so HIGH-risk claims were
 permanently unresolvable. Targeted domain-restricted research now runs against a
-configured authority registry: 40 official pages from CREG, CWaPE, ORES, the
-Walloon energy portal and Bruxelles Environnement, and the first four HIGH-risk
-claims supported — each scoped to its region. `PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md`.
+configured authority registry: official pages from CREG, CWaPE, ORES, the Walloon
+energy portal, Bruxelles Environnement and the Flemish government.
+`PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md`.
+
+**Claim↔passage matching was far too loose** (Phase 3.3). Two shared content words
+counted as support, so across one topical corpus a prosumer-tariff claim was paired
+with a market-price passage and their unrelated numbers compared — 163 false
+conflicts. A staged matcher now requires the claim's semantic head, discriminative
+rather than generic terms, compatible region and category, and comparable numeric
+*types* before any figure is compared. `TRUE_CONFLICT` 163 → 0, with nothing
+downstream weakened. `PHASE3_3_MATCHING_PRECISION_REPORT.md`.
 
 No website, no domain, no simulator, no Prospect 360 writes. Those are Phases 5–6.
 
@@ -72,6 +80,7 @@ Full instructions: [`docs/runbooks/LOCAL_PIPELINE.md`](docs/runbooks/LOCAL_PIPEL
 | [`PHASE3_IMPLEMENTATION_REPORT.md`](PHASE3_IMPLEMENTATION_REPORT.md) | Phase 3 — search intelligence, relevance gate, live validation |
 | [`PHASE3_1_EVIDENCE_MODEL_REPORT.md`](PHASE3_1_EVIDENCE_MODEL_REPORT.md) | Phase 3.1 — atomic claims, authority policy, support semantics |
 | [`PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md`](PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md) | Phase 3.2 — official evidence, regional scope, freshness, conflict kinds |
+| [`PHASE3_3_MATCHING_PRECISION_REPORT.md`](PHASE3_3_MATCHING_PRECISION_REPORT.md) | Phase 3.3 — staged matcher, numeric typing, first live draft |
 | [`docs/RELEVANCE_GATE.md`](docs/RELEVANCE_GATE.md) | The Phase 2 failure and how it is fixed |
 | [`docs/RESEARCH_PACKAGE_V2.md`](docs/RESEARCH_PACKAGE_V2.md) | Evidence assembly, eligibility, traceability |
 | [`docs/SEO_OPPORTUNITY_SCORE.md`](docs/SEO_OPPORTUNITY_SCORE.md) | Scoring, and why unknown never becomes zero |
@@ -117,6 +126,10 @@ to support anything: it required a publication date Tavily never returns.
 **Belgium is not one regulatory unit.** Wallonia, Flanders and Brussels set their
 own premiums and grid rules, so evidence and claims both carry a region. National
 evidence covers a regional claim; regional evidence never covers a national one.
+
+**Quantities are typed before they are compared.** €5 000 and 5 ans share digits and
+nothing else. A passage must be established as being about the same proposition —
+same head concept, same region, compatible category — before any figure is read.
 
 **Relevance, quality and risk are three separate questions.** A forum thread can be
 perfectly relevant and a poor authority for a tax rate; a government page can be

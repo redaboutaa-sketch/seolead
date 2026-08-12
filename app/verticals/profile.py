@@ -80,6 +80,16 @@ class VerticalProfile(BaseModel):
     # deliberate: it can be populated without touching orchestration code.
     official_source_policy: dict = Field(default_factory=dict)
 
+    # ── Matching vocabulary (Phase 3.3) ──────────────────────────────────────
+    # Terms that are CONTEXT rather than TOPIC in this vertical. `solaire` is
+    # generic for Solar Belgium and highly discriminative for a roofing vertical,
+    # so this is per-vertical rather than a global list.
+    generic_terms: list[str] = Field(default_factory=list)
+    # Multi-word domain concepts that act as a claim's semantic head:
+    # "tarif prosumer", "retour sur investissement". A passage must contain the
+    # claim's head before it can be treated as bearing on the same proposition.
+    concept_phrases: list[str] = Field(default_factory=list)
+
     def official_domains(self) -> list[str]:
         """Domains a targeted authoritative search may be restricted to.
 
