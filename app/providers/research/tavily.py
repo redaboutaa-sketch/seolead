@@ -72,9 +72,27 @@ class TavilyResearchProvider:
         return {"configured": self.configured, "provider": self.code,
                 "reachable": None}
 
+    async def research_restricted(
+        self, *, query: str, market: str, language: str, correlation_id: str,
+        include_domains: list[str],
+    ) -> ResearchProviderResult:
+        """Search restricted to a domain allow-list.
+
+        Tavily's contract documents `include_domains` (max 300). Used for the
+        authoritative pass, where mixing commercial results into the same call
+        would defeat the point. The caller re-checks every returned URL against
+        the authority registry regardless — a provider that honours the
+        restriction loosely must not be able to smuggle a page through.
+        """
+        return await self.research(
+            query=query, market=market, language=language,
+            correlation_id=correlation_id,
+            include_domains=[d for d in include_domains if d][:300])
+
     async def research(
         self, *, query: str, market: str, language: str, correlation_id: str,
         idempotency_key: str | None = None,
+        include_domains: list[str] | None = None,
     ) -> ResearchProviderResult:
         if not self.configured:
             raise ProviderNotConfigured("Tavily API key is not configured")
@@ -90,6 +108,8 @@ class TavilyResearchProvider:
         country = _COUNTRY_BY_MARKET.get(market.upper())
         if country:
             body["country"] = country
+        if include_domains:
+            body["include_domains"] = include_domains
 
         started_at = datetime.now(timezone.utc)
         monotonic = time.monotonic()
@@ -134,7 +154,8 @@ class TavilyResearchProvider:
         # Tavily bills in credits, not money, and does not return a monetary cost.
         # Recording `cost_usd=None` keeps "unknown" distinct from "free".
         self._usage.record(
-            provider=self.code, operation="search",
+            provider=self.code,
+            operation="search_restricted" if include_domains else "search",
             correlation_id=correlation_id, requests=1,
             units=len(result.sources), cost_usd=None, cost_is_actual=False,
             duration_ms=duration_ms,

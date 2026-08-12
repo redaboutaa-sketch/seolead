@@ -35,6 +35,9 @@ from app.providers.llm.base import LLMProvider
 from app.providers.research.base import ResearchProvider
 from app.providers.search.base import SearchIntelligenceProvider
 from app.providers.search.location import get_search_context
+from app.services.authoritative_research import execute_plan
+from app.services.authority_registry import build_registry
+from app.services.research_planner import plan_authoritative_research
 from app.schemas.serp import KeywordMetric, SerpSnapshot
 from app.services import (brief_service, draft_service, factual_qa_v2,
                           opportunity_score, package_builder_v3, qa_service,
@@ -66,6 +69,7 @@ class PipelineV2Result:
     provider_plan: dict = field(default_factory=dict)
     serp_summary: dict = field(default_factory=dict)
     relevance_summary: dict = field(default_factory=dict)
+    authoritative: dict = field(default_factory=dict)
     package_summary: dict = field(default_factory=dict)
     opportunity_summary: dict = field(default_factory=dict)
     factual_qa: dict = field(default_factory=dict)
@@ -96,6 +100,7 @@ class PipelineV2Result:
             "provider_plan": self.provider_plan,
             "serp": self.serp_summary,
             "relevance": self.relevance_summary,
+            "authoritative": self.authoritative,
             "package": self.package_summary,
             "opportunity": self.opportunity_summary,
             "factual_qa": self.factual_qa,
@@ -242,6 +247,7 @@ async def run_pipeline_v2(
     force_refresh: bool = False,
     force_community: bool | None = None,
     stop_after: str | None = None,
+    authoritative: bool = True,
 ) -> PipelineV2Result:
     correlation_id = correlation_id or uuid.uuid4().hex
     profile: VerticalProfile = load_profile(vertical_code)
@@ -460,13 +466,73 @@ async def run_pipeline_v2(
     keyword.status = KeywordStatus.RESEARCHED.value
     await session.commit()
 
-    # ── Stage 5: package V2 ──────────────────────────────────────────────────
+    # ── Stage 5: package ─────────────────────────────────────────────────────
+    registry = build_registry(profile)
     payload = package_builder_v3.build_package_v3(
         query=query, market=market, language=language, intent=intent,
         profile=profile, serp=snapshot, serp_analysis=analysis,
         keyword_metrics=metrics, research_results=research_results,
-        relevance_decisions=decisions, thresholds=thresholds,
+        relevance_decisions=decisions, thresholds=thresholds, registry=registry,
     )
+
+    # ── Stage 5b: targeted authoritative research ────────────────────────────
+    # A general web search does not surface a regulator for a pricing query, so
+    # HIGH-risk claims would stay permanently unresolvable without this pass.
+    # It runs only when something is actually blocked, and only against domains
+    # the vertical configured.
+    authoritative_summary: dict = {}
+    if authoritative:
+        unresolved = [c for c in payload["claims"]
+                      if c["claim_risk"] == "HIGH"
+                      and c["evidence_status"] != EvidenceStatus.SUPPORTED.value]
+        if unresolved:
+            plan = plan_authoritative_research(
+                topic=query, market=market,
+                unresolved=_as_evaluated(payload["claims"], profile),
+                profile=profile)
+            if not plan.is_empty:
+                run = await execute_plan(
+                    plan, profile=profile, registry=registry,
+                    web_provider=web_provider, market=market, language=language,
+                    correlation_id=correlation_id, usage=usage)
+                authoritative_summary = run.as_dict()
+                result.authoritative = authoritative_summary
+
+                if run.accepted:
+                    official_result = run.to_provider_result(
+                        query=query, market=market, language=language)
+                    research_results.append(official_result)
+
+                    # Official pages go through the same relevance gate as
+                    # everything else — being official does not make a page
+                    # on-topic.
+                    for index, source in enumerate(official_result.sources):
+                        ref = source.candidate_id or f"official-{index:03d}"
+                        decisions[ref] = score_source(
+                            query=query, profile=profile, title=source.title,
+                            body=source.summary, url=source.url,
+                            thresholds=thresholds)
+
+                    run_row = await _persist_research(
+                        session, keyword=keyword, result=official_result,
+                        decisions=decisions, correlation_id=correlation_id)
+                    result.research_run_ids.append(run_row.id)
+                    await session.commit()
+
+                    # Rebuild rather than patch: the enriched package supersedes
+                    # the first, and its version records what it replaced.
+                    payload = package_builder_v3.build_package_v3(
+                        query=query, market=market, language=language,
+                        intent=intent, profile=profile, serp=snapshot,
+                        serp_analysis=analysis, keyword_metrics=metrics,
+                        research_results=research_results,
+                        relevance_decisions=decisions, thresholds=thresholds,
+                        registry=registry,
+                        authoritative_run=authoritative_summary,
+                        previous_package_version=package_builder_v3.PACKAGE_VERSION,
+                    )
+                else:
+                    payload["authoritative_run"] = authoritative_summary
 
     # Attach claim risk to the persisted evidence rows.
     await _persist_evidence(session, result.research_run_ids, payload, profile)
@@ -743,3 +809,30 @@ async def _persist_usage(session, usage: UsageRecorder, correlation_id: str) -> 
             duration_ms=event.duration_ms,
         ))
     await session.commit()
+
+
+def _as_evaluated(claims: list[dict], profile) -> list:
+    """Rehydrate unresolved HIGH-risk claims for the planner.
+
+    The planner reasons over `EvaluatedClaim`, and the package carries dicts. A
+    thin shim beats threading the objects through the whole builder just so one
+    consumer can read two fields.
+    """
+    from app.services.claim_extraction import AtomicClaim
+    from app.services.claim_policy import requirements_for
+    from app.services.evidence_model import EvaluatedClaim
+
+    out = []
+    for claim in claims:
+        if claim.get("claim_risk") != "HIGH":
+            continue
+        if claim.get("evidence_status") == EvidenceStatus.SUPPORTED.value:
+            continue
+        atomic = AtomicClaim(text=claim["claim"], passage=claim.get("passage", ""),
+                             source_ref=claim.get("source_ref", ""), offset=0)
+        evaluated = EvaluatedClaim(claim=atomic,
+                                   requirements=requirements_for(claim["claim"],
+                                                                 profile))
+        evaluated.status = EvidenceStatus(claim["evidence_status"])
+        out.append(evaluated)
+    return out

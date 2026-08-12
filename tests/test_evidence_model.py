@@ -277,7 +277,10 @@ class TestSupportClassification:
                          published=None)]
         result = evaluate_claim(claim, evidence, solar_profile)
         assert result.status is EvidenceStatus.PARTIALLY_SUPPORTED
-        assert "no supporting source carries a date" in result.reason
+        # Phase 3.2 wording: "dated" alone is no longer the test — an undated page
+        # that presents as in force is usable, and this one does not.
+        assert "no supporting source is dated or presents as in force" \
+            in result.reason
 
     def test_vendor_price_supports_its_own_price(self, solar_profile):
         claim = _claim("Nos tarifs pour une installation de 5 kWc sont de 4 400 €.")
@@ -454,7 +457,11 @@ class TestResearchPlanner:
         plan = plan_authoritative_research(topic="x", market="BE",
                                            unresolved=unresolved,
                                            profile=solar_profile)
-        assert len(plan.queries) <= 2      # solar_be sets max_queries: 2
+        # Read the ceiling from configuration rather than restating it: a test
+        # that hard-codes the value fails whenever the policy is tuned, for a
+        # reason that has nothing to do with the behaviour under test.
+        configured = solar_profile.official_source_policy["max_queries"]
+        assert len(plan.queries) <= configured
 
     def test_no_solar_domain_is_hard_coded_in_the_planner(self):
         """Domains come from configuration, never from the module.
@@ -541,3 +548,37 @@ class TestCategoryPrecision:
     def test_a_real_subsidy_claim_still_matches(self, solar_profile):
         assert classify_category("La prime régionale s'élève à 1 750 €.",
                                  solar_profile) is ClaimCategory.SUBSIDY
+
+
+class TestFreshnessDerivation:
+    """A dated source must not silently fail the freshness bar.
+
+    `EvidenceRef` carries a rich `freshness_status` for the authoritative path,
+    which assesses the page text. The ordinary web path only knows whether a date
+    exists — and if that defaulted to UNDATED, every HIGH-risk claim would come
+    back PARTIAL even when properly evidenced.
+    """
+
+    def test_a_published_date_yields_dated_current(self):
+        from app.services.freshness import FreshnessStatus
+
+        ref = _ref("s1", "text", SourceQuality.OFFICIAL, published=NOW)
+        assert ref.freshness_status is FreshnessStatus.DATED_CURRENT
+
+    def test_no_date_yields_undated(self):
+        from app.services.freshness import FreshnessStatus
+
+        ref = _ref("s1", "text", SourceQuality.OFFICIAL, published=None)
+        assert ref.freshness_status is FreshnessStatus.UNDATED
+
+    def test_an_explicit_status_is_never_overwritten(self):
+        from app.services.evidence_model import EvidenceRef
+        from app.services.freshness import FreshnessStatus
+
+        ref = EvidenceRef(
+            source_ref="s1", passage="p", url="https://x.be", source_type="web",
+            quality=SourceQuality.OFFICIAL, relevance=RelevanceStatus.RELEVANT,
+            observation=ObservationStatus.ESTIMATED, published_at=None,
+            retrieved_at=None, provider="tavily", supports=True,
+            freshness_status=FreshnessStatus.UNDATED_CURRENT)
+        assert ref.freshness_status is FreshnessStatus.UNDATED_CURRENT

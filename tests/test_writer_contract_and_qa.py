@@ -153,9 +153,16 @@ class TestPackageV3Integration:
                    for s in package["eligible_evidence"])
         assert package["confidence_summary"]["supported"] >= 1
 
-    def test_package_is_version_3(self, solar_profile):
+    def test_package_version_is_recorded_with_its_predecessor(self,
+                                                               solar_profile):
+        from app.services.package_builder_v3 import PACKAGE_VERSION
+
         package = _package([GOOD_SOURCE], solar_profile)
-        assert package["provider_provenance"]["package_version"] == 3
+        provenance = package["provider_provenance"]
+        assert provenance["package_version"] == PACKAGE_VERSION
+        # Versioning field exists so an enriched package never silently
+        # overwrites the history of the one it supersedes.
+        assert "supersedes_package_version" in provenance
 
     def test_authoritative_plan_appears_when_high_risk_is_unresolved(self,
                                                                      solar_profile):

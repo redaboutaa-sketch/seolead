@@ -32,16 +32,21 @@ from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
 from app.models import (Approval, ContentBrief, ContentDraft, ProviderUsage,
-                        QAReview, ResearchPackage, SeoOpportunity, Site,
-                        SerpQuestionRow, SerpResultRow, SerpSnapshotRow, Vertical)
+                        QAReview, ResearchPackage, SeedKeyword, SeoOpportunity,
+                        Site, SerpQuestionRow, SerpResultRow, SerpSnapshotRow,
+                        Vertical)
 from app.providers.llm.registry import get_llm_provider
 from app.providers.research.last30days import Last30DaysProvider
 from app.providers.research.tavily import TavilyResearchProvider
 from app.providers.search.dataforseo import DataForSEOProvider
 from app.providers.search.location import supported_contexts
 from app.services import approval_service
+from app.services.authoritative_research import execute_plan
+from app.services.authority_registry import build_registry
 from app.services.pipeline import run_pipeline
-from app.services.pipeline_v2 import run_pipeline_v2
+from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
+from app.services.provider_usage import UsageRecorder
+from app.services.research_planner import plan_authoritative_research
 from app.services.research_cache import freshness_policy
 from app.verticals.profile import available_profiles, load_profile
 
@@ -120,6 +125,7 @@ async def cmd_research_run(args: argparse.Namespace) -> int:
                     force_refresh=args.force_refresh,
                     force_community=args.force_community,
                     stop_after=args.stop_after,
+                    authoritative=getattr(args, "authoritative", True),
                 )
         except SeoLeadError as exc:
             _emit({"error_code": exc.code, "detail": exc.detail})
@@ -128,6 +134,50 @@ async def cmd_research_run(args: argparse.Namespace) -> int:
     _emit(result.as_dict())
     if result.error_code:
         return EXIT_BLOCKED
+    return EXIT_OK
+
+
+async def cmd_authoritative_run(args: argparse.Namespace) -> int:
+    """Execute the authoritative plan for an existing ResearchPackage.
+
+    Enriches the package in place rather than starting a new job: the commercial
+    evidence has already been paid for, and only the official gap needs filling.
+    """
+    settings = get_settings()
+    async with get_sessionmaker()() as session:
+        package = await session.get(ResearchPackage, uuid.UUID(args.package_id))
+        if package is None:
+            _emit({"error": "package not found"})
+            return EXIT_ERROR
+
+        keyword = await session.get(SeedKeyword, package.keyword_id)
+        profile = load_profile(
+            (await session.get(Vertical, keyword.vertical_id)).code)
+        registry = build_registry(profile)
+
+        unresolved = _as_evaluated(package.facts or [], profile)
+        plan = plan_authoritative_research(
+            topic=package.query, market=package.market, unresolved=unresolved,
+            profile=profile)
+
+        if args.plan_only or plan.is_empty:
+            _emit({"package_id": str(package.id), "query": package.query,
+                   "unresolved_high_risk": len(unresolved),
+                   "plan": plan.as_dict(),
+                   "executed": False})
+            return EXIT_OK if not plan.is_empty else EXIT_BLOCKED
+
+        usage = UsageRecorder()
+        run = await execute_plan(
+            plan, profile=profile, registry=registry,
+            web_provider=TavilyResearchProvider(settings, usage=usage),
+            market=package.market, language=package.language,
+            correlation_id=f"authoritative-{package.id.hex[:16]}", usage=usage)
+
+        _emit({"package_id": str(package.id), "query": package.query,
+               "unresolved_high_risk_before": len(unresolved),
+               "plan": plan.as_dict(), "run": run.as_dict(),
+               "provider_usage": usage.summary()})
     return EXIT_OK
 
 
@@ -410,6 +460,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stop-after", dest="stop_after",
                      choices=["package", "brief"],
                      help="stop early (useful without an LLM credential)")
+    run.add_argument("--no-authoritative", dest="authoritative",
+                     action="store_false", default=True,
+                     help="skip the targeted official-domain research pass")
     run.add_argument("--engine", choices=["v1", "v2"], default="v2",
                      help="v2 = SERP + relevance gate (default); v1 = Phase 2 path")
     run.add_argument("--device", choices=["desktop", "mobile"], default="desktop")
@@ -423,6 +476,14 @@ def build_parser() -> argparse.ArgumentParser:
                            action="store_false",
                            help="force community research off for this job")
     run.set_defaults(func=cmd_research_run)
+
+    authoritative = research_sub.add_parser(
+        "authoritative-run",
+        help="execute targeted official-domain research for a package")
+    authoritative.add_argument("--package", dest="package_id", required=True)
+    authoritative.add_argument("--plan-only", action="store_true",
+                               help="show the plan without spending on queries")
+    authoritative.set_defaults(func=cmd_authoritative_run)
 
     package = sub.add_parser("package", help="research package commands")
     package_sub = package.add_subparsers(dest="action", required=True)

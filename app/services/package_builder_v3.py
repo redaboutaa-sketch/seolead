@@ -26,11 +26,14 @@ from app.services.evidence_model import EvaluatedClaim, EvidenceStatus as ES
 from app.services.passage_extraction import extract_passages
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
                                     RelevanceThresholds, score_source)
+from app.services.authority_registry import AuthorityRegistry, build_registry
+from app.services.freshness import FreshnessStatus, assess as assess_freshness
+from app.services.region import Region, detect_region, region_for_market
 from app.services.research_planner import plan_authoritative_research
 from app.services.source_quality import SourceQuality
 from app.verticals.profile import VerticalProfile
 
-PACKAGE_VERSION = 3
+PACKAGE_VERSION = 4
 
 
 def build_package_v3(
@@ -46,9 +49,14 @@ def build_package_v3(
     research_results: list[ResearchProviderResult],
     relevance_decisions: dict[str, RelevanceDecision] | None = None,
     thresholds: RelevanceThresholds | None = None,
+    registry: AuthorityRegistry | None = None,
+    authoritative_run: dict | None = None,
+    previous_package_version: int | None = None,
 ) -> dict:
     thresholds = thresholds or RelevanceThresholds()
     supplied = relevance_decisions or {}
+    registry = registry if registry is not None else build_registry(profile)
+    default_region = region_for_market(market)
 
     sources_by_ref: dict[str, dict] = {}
     passages_by_ref: dict[str, list[str]] = {}
@@ -68,12 +76,30 @@ def build_package_v3(
 
             quality = quality_module.classify_domain(
                 source.url, source_type=source.source_type)
-            if source.url and any(d.lower() in source.url.lower()
-                                  for d in profile.official_domains()):
-                quality = SourceQuality.OFFICIAL
+            # OFFICIAL comes from the registry, never from which query returned
+            # the page. A commercial installer is not in the registry and so can
+            # never acquire OFFICIAL through this path.
+            authority = registry.lookup(source.url)
+            authority_type = None
+            if authority is not None:
+                quality = authority.authority_type.source_quality
+                authority_type = authority.authority_type.value
 
             observation = (ObservationStatus.OBSERVED if source.published_at
                            else ObservationStatus.ESTIMATED)
+
+            body_text = f"{source.title or ''}\n{source.summary or ''}"
+            freshness = assess_freshness(body_text,
+                                         published_at=source.published_at,
+                                         retrieved_at=source.retrieved_at)
+            # For a registered authority its own jurisdiction is definitive; a
+            # Walloon portal does not become a Brussels source because a page
+            # mentions Brussels. Text detection applies only to unregistered
+            # sources, where there is nothing better to go on.
+            if authority is not None and authority.region is not Region.UNKNOWN:
+                region = authority.region
+            else:
+                region = detect_region(body_text).region
 
             # Two views of the same source: `internal` keeps live datetimes for
             # the evidence mapper, `entry` is the JSON-serialisable form that gets
@@ -88,8 +114,11 @@ def build_package_v3(
                 "published_at": source.published_at.isoformat() if source.published_at else None,
                 "retrieved_at": source.retrieved_at.isoformat() if source.retrieved_at else None,
                 "source_quality": quality.value,
+                "authority_type": authority_type,
+                "region": region.value,
                 # Kept as its own dimension. It says when, not whether.
                 "observation_status": observation.value,
+                **freshness.as_dict(),
                 "relevance_status": decision.status.value,
                 "relevance": decision.as_dict(),
             }
@@ -100,6 +129,8 @@ def build_package_v3(
                     **entry,
                     "published_at_dt": source.published_at,
                     "retrieved_at_dt": source.retrieved_at,
+                    "region_enum": region,
+                    "freshness_enum": freshness.status,
                 }
                 eligible.append(entry)
                 # Passage extraction happens ONLY for eligible sources: a rejected
@@ -125,7 +156,8 @@ def build_package_v3(
     for claim in claim_set.claims:
         candidates = evidence_model.build_candidates(claim, sources_by_ref,
                                                      passages_by_ref)
-        evaluated.append(evidence_model.evaluate_claim(claim, candidates, profile))
+        evaluated.append(evidence_model.evaluate_claim(
+            claim, candidates, profile, default_region=default_region))
 
     claims = [c.as_dict() for c in evaluated]
     supported = [c for c in evaluated if c.status is ES.SUPPORTED]
@@ -205,6 +237,13 @@ def build_package_v3(
         "sources": all_sources,
         "eligible_evidence": eligible,
         "rejected_evidence": rejected,
+        # Provenance split, so a reviewer can see at a glance what rests on a
+        # regulator and what rests on an installer's marketing page.
+        "official_evidence": [e for e in eligible
+                              if e.get("source_quality") == SourceQuality.OFFICIAL.value],
+        "commercial_evidence": [e for e in eligible
+                                if e.get("source_quality") != SourceQuality.OFFICIAL.value],
+        "authoritative_run": authoritative_run or {},
         "passage_extraction": passage_stats,
         "claim_extraction": claim_set.summary(),
         "authoritative_research_plan": plan.as_dict(),
@@ -229,7 +268,9 @@ def build_package_v3(
         "confidence_summary": confidence_summary,
         "provider_provenance": {
             "package_version": PACKAGE_VERSION,
+            "supersedes_package_version": previous_package_version,
             "built_at": datetime.now(timezone.utc).isoformat(),
+            "authority_registry": [e.as_dict() for e in registry.entries],
             "providers": [
                 {"provider": r.provider, "status": r.status,
                  "engine_commit": r.engine_commit, "duration_ms": r.duration_ms,

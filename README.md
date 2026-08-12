@@ -7,7 +7,7 @@ attributable qualified lead.
 Workspace: `/opt/seolead`. All documentation, architecture, configuration and code
 live here and nowhere else.
 
-## Status — Phase 3.1 evidence model hardened
+## Status — Phase 3.2 authoritative research executed
 
 ```
 seed query → provider policy → DataForSEO (SERP) + Tavily (web research)
@@ -32,8 +32,15 @@ into topic, modifier and market tokens. `docs/RELEVANCE_GATE.md`.
 never returns, so no web evidence could ever be supported *for any query*. And a
 2 KB page excerpt was treated as one claim, so risk classification was scanning
 documents rather than propositions. Both fixed: 0 → 54 supported claims on live
-data, with all 18 HIGH-risk claims still correctly refused.
+data, with all HIGH-risk claims still correctly refused.
 `PHASE3_1_EVIDENCE_MODEL_REPORT.md`.
+
+**No official evidence had ever been retrieved** (Phase 3.2). A general web search
+does not surface a regulator for a pricing query, so HIGH-risk claims were
+permanently unresolvable. Targeted domain-restricted research now runs against a
+configured authority registry: 40 official pages from CREG, CWaPE, ORES, the
+Walloon energy portal and Bruxelles Environnement, and the first four HIGH-risk
+claims supported — each scoped to its region. `PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md`.
 
 No website, no domain, no simulator, no Prospect 360 writes. Those are Phases 5–6.
 
@@ -64,6 +71,7 @@ Full instructions: [`docs/runbooks/LOCAL_PIPELINE.md`](docs/runbooks/LOCAL_PIPEL
 | [`docs/PHASE2_IMPLEMENTATION.md`](docs/PHASE2_IMPLEMENTATION.md) | Design decisions and their reasoning |
 | [`PHASE3_IMPLEMENTATION_REPORT.md`](PHASE3_IMPLEMENTATION_REPORT.md) | Phase 3 — search intelligence, relevance gate, live validation |
 | [`PHASE3_1_EVIDENCE_MODEL_REPORT.md`](PHASE3_1_EVIDENCE_MODEL_REPORT.md) | Phase 3.1 — atomic claims, authority policy, support semantics |
+| [`PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md`](PHASE3_2_AUTHORITATIVE_RESEARCH_REPORT.md) | Phase 3.2 — official evidence, regional scope, freshness, conflict kinds |
 | [`docs/RELEVANCE_GATE.md`](docs/RELEVANCE_GATE.md) | The Phase 2 failure and how it is fixed |
 | [`docs/RESEARCH_PACKAGE_V2.md`](docs/RESEARCH_PACKAGE_V2.md) | Evidence assembly, eligibility, traceability |
 | [`docs/SEO_OPPORTUNITY_SCORE.md`](docs/SEO_OPPORTUNITY_SCORE.md) | Scoring, and why unknown never becomes zero |
@@ -105,6 +113,10 @@ the claim's truth depends on when it was published.
 this source establish it), freshness (does the claim depend on when), support (does
 a passage materially state it). Collapsing any two is how Phase 3 ended up unable
 to support anything: it required a publication date Tavily never returns.
+
+**Belgium is not one regulatory unit.** Wallonia, Flanders and Brussels set their
+own premiums and grid rules, so evidence and claims both carry a region. National
+evidence covers a regional claim; regional evidence never covers a national one.
 
 **Relevance, quality and risk are three separate questions.** A forum thread can be
 perfectly relevant and a poor authority for a tax rate; a government page can be

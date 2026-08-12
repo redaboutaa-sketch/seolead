@@ -169,26 +169,168 @@ authority_policy:
 # unresolved. Placeholder shape: populate without changing orchestration code.
 official_source_policy:
   enabled: true
-  max_queries: 2
-  # Region-specific because Wallonia, Flanders and Brussels genuinely differ.
+  max_queries: 4
+
+  # Each domain carries what it is authoritative ABOUT and FOR WHOM. The Walloon
+  # energy portal establishes Walloon premiums and says nothing about Flemish grid
+  # rules; a federal tax page covers the whole country. A flat list could not
+  # express that, and generalising a regional rule to Belgium is a false statement
+  # of law.
   domains:
-    - energie.wallonie.be
-    - energiesparen.be
-    - environnement.brussels
-    - leefmilieu.brussels
-    - cwape.be
-    - vreg.be
-    - brugel.brussels
-    - creg.be
-    - fluvius.be
-    - ores.be
-    - resa.be
-    - sibelga.be
-    - economie.fgov.be
-    - finances.belgium.be
+    # ── Wallonia ────────────────────────────────────────────────────────────
+    - domain: energie.wallonie.be
+      name: Portail Énergie de Wallonie
+      authority_type: GOVERNMENT
+      region: BE-WAL
+      market: BE
+      languages: [fr]
+      priority: 95
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI]
+    - domain: cwape.be
+      name: CWaPE — régulateur wallon de l'énergie
+      authority_type: REGULATOR
+      region: BE-WAL
+      market: BE
+      languages: [fr]
+      priority: 95
+      claim_categories: [GRID_RULE, ENERGY_PRICE, REGULATION, TARIFF]
+    - domain: ores.be
+      name: ORES — gestionnaire de réseau wallon
+      authority_type: GRID_OPERATOR
+      region: BE-WAL
+      market: BE
+      languages: [fr]
+      priority: 85
+      claim_categories: [GRID_RULE, TARIFF, GRID_FEE]
+    - domain: resa.be
+      name: RESA — gestionnaire de réseau (Liège)
+      authority_type: GRID_OPERATOR
+      region: BE-WAL
+      market: BE
+      languages: [fr]
+      priority: 75
+      claim_categories: [GRID_RULE, TARIFF, GRID_FEE]
+
+    # ── Brussels ────────────────────────────────────────────────────────────
+    - domain: environnement.brussels
+      name: Bruxelles Environnement
+      authority_type: PUBLIC_AGENCY
+      region: BE-BRU
+      market: BE
+      languages: [fr]
+      priority: 95
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION]
+    - domain: leefmilieu.brussels
+      name: Leefmilieu Brussel
+      authority_type: PUBLIC_AGENCY
+      region: BE-BRU
+      market: BE
+      languages: [nl]
+      priority: 90
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION]
+    - domain: brugel.brussels
+      name: BRUGEL — régulateur bruxellois
+      authority_type: REGULATOR
+      region: BE-BRU
+      market: BE
+      languages: [fr, nl]
+      priority: 95
+      claim_categories: [GRID_RULE, ENERGY_PRICE, REGULATION, TARIFF]
+    - domain: sibelga.be
+      name: Sibelga — gestionnaire de réseau bruxellois
+      authority_type: GRID_OPERATOR
+      region: BE-BRU
+      market: BE
+      languages: [fr, nl]
+      priority: 85
+      claim_categories: [GRID_RULE, TARIFF, GRID_FEE]
+
+    # ── Flanders ────────────────────────────────────────────────────────────
+    - domain: energiesparen.be
+      name: Vlaams Energie- en Klimaatagentschap
+      authority_type: PUBLIC_AGENCY
+      region: BE-VLG
+      market: BE
+      languages: [nl]
+      priority: 95
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI]
+    - domain: vreg.be
+      name: VREG — Vlaamse regulator
+      authority_type: REGULATOR
+      region: BE-VLG
+      market: BE
+      languages: [nl]
+      priority: 95
+      claim_categories: [GRID_RULE, ENERGY_PRICE, REGULATION, TARIFF]
+    - domain: fluvius.be
+      name: Fluvius — Vlaamse netbeheerder
+      authority_type: GRID_OPERATOR
+      region: BE-VLG
+      market: BE
+      languages: [nl]
+      priority: 85
+      claim_categories: [GRID_RULE, TARIFF, GRID_FEE]
+    - domain: vlaanderen.be
+      name: Vlaamse overheid
+      authority_type: GOVERNMENT
+      region: BE-VLG
+      market: BE
+      languages: [nl]
+      priority: 80
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION]
+
+    # ── Federal ─────────────────────────────────────────────────────────────
+    - domain: economie.fgov.be
+      name: SPF Économie
+      authority_type: GOVERNMENT
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 90
+      claim_categories: [TAX, REGULATION, ENERGY_PRICE]
+    - domain: finances.belgium.be
+      name: SPF Finances
+      authority_type: GOVERNMENT
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 95
+      claim_categories: [TAX, ELIGIBILITY]
+    - domain: creg.be
+      name: CREG — régulateur fédéral de l'énergie
+      authority_type: REGULATOR
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 90
+      claim_categories: [ENERGY_PRICE, TARIFF, REGULATION]
+    - domain: elia.be
+      name: Elia — gestionnaire du réseau de transport
+      authority_type: GRID_OPERATOR
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 70
+      claim_categories: [GRID_RULE, TARIFF]
+    - domain: apere.org
+      name: APERe — association pour la promotion des énergies renouvelables
+      authority_type: OFFICIAL_PROGRAM
+      region: BE
+      market: BE
+      languages: [fr]
+      priority: 60
+      claim_categories: [SUBSIDY, ROI, ENERGY_PRICE]
+
+  # Claim-category-specific official queries. Regional variants matter: a single
+  # "Belgium" query returns the federal level and misses the regional schemes
+  # that actually set the premiums.
   query_templates:
-    SUBSIDY: "{topic} prime officielle {market}"
-    TAX: "{topic} taux TVA officiel {market}"
-    GRID_RULE: "{topic} tarif prosumer regulateur {market}"
-    REGULATION: "{topic} reglementation officielle {market}"
-    ELIGIBILITY: "{topic} conditions officielles {market}"
+    SUBSIDY: "prime panneaux photovoltaiques Wallonie Bruxelles Flandre conditions officielles"
+    GRID_RULE: "tarif prosumer injection compteur photovoltaique regulateur reseau"
+    TAX: "taux TVA installation photovoltaique habitation"
+    REGULATION: "reglementation installation photovoltaique obligations"
+    ELIGIBILITY: "conditions octroi prime photovoltaique particuliers"
+    ENERGY_PRICE: "prix electricite tarif regule menages"
+    ROI: "rentabilite installation photovoltaique etude officielle"
+    TARIFF: "tarif periodique reseau distribution electricite"
+    GRID_FEE: "cout raccordement installation photovoltaique reseau"

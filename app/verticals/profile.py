@@ -81,9 +81,21 @@ class VerticalProfile(BaseModel):
     official_source_policy: dict = Field(default_factory=dict)
 
     def official_domains(self) -> list[str]:
-        """Domains a targeted authoritative search may be restricted to."""
-        configured = (self.official_source_policy or {}).get("domains") or []
-        return list(dict.fromkeys([*configured, *self.authoritative_domains]))
+        """Domains a targeted authoritative search may be restricted to.
+
+        Accepts both configuration shapes: the Phase 3.1 flat list of strings and
+        the Phase 3.2 entries carrying authority metadata. Supporting both means a
+        vertical that has not been migrated keeps its authorities rather than
+        silently losing them.
+        """
+        names: list[str] = []
+        for entry in (self.official_source_policy or {}).get("domains") or []:
+            if isinstance(entry, str):
+                names.append(entry.strip().lower())
+            elif isinstance(entry, dict) and entry.get("domain"):
+                names.append(str(entry["domain"]).strip().lower())
+        names.extend(d.strip().lower() for d in self.authoritative_domains)
+        return list(dict.fromkeys(n for n in names if n))
 
     def selectable_content_types(self) -> list[ContentType]:
         """Only Phase 2 types are selectable, whatever the profile lists.

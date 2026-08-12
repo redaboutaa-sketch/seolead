@@ -297,14 +297,21 @@ class TestOpportunityAndPackage:
         assert 0 <= (opportunity.overall_score or 0) <= 100
         assert "search_demand" in opportunity.missing_inputs
 
-    async def test_package_is_marked_v3(self, seeded_session,
-                                        settings_all_providers):
-        """Phase 3.1 replaced the excerpt-level builder with the claim-level one."""
+    async def test_package_version_tracks_the_builder(self, seeded_session,
+                                                      settings_all_providers):
+        """V3 introduced atomic claims; V4 added authority, region and freshness.
+
+        Asserted against the builder's own constant rather than a literal, so the
+        test tracks the model instead of failing on every version bump.
+        """
+        from app.services.package_builder_v3 import PACKAGE_VERSION
+
         result = await _run(seeded_session, settings_all_providers,
                             llm=StubLLM(configured=False))
         package = await seeded_session.get(ResearchPackage,
                                            result.research_package_id)
-        assert package.package_version == 3
+        assert package.package_version == PACKAGE_VERSION
+        assert PACKAGE_VERSION >= 3
         assert package.serp_snapshot_id is not None
         assert package.user_questions
         assert package.content_gap

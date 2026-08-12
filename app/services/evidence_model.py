@@ -31,6 +31,9 @@ from app.services.claim_policy import (ClaimRequirements, ClaimRisk,
                                        authority_is_sufficient, requirements_for)
 from app.services.intent import normalize_query
 from app.services.relevance import RelevanceStatus
+from app.services.conflict import ConflictKind, classify as classify_conflict
+from app.services.freshness import FreshnessStatus
+from app.services.region import Region, describe_mismatch, detect_region
 from app.services.source_quality import SourceQuality
 from app.verticals.profile import VerticalProfile
 
@@ -71,6 +74,26 @@ class EvidenceRef:
     supports: bool
     agrees_numerically: bool | None = None
     note: str = ""
+    # ── Phase 3.2 ────────────────────────────────────────────────────────────
+    region: Region = Region.UNKNOWN
+    authority_type: str | None = None
+    freshness_status: FreshnessStatus | None = None
+    effective_from: str | None = None
+    effective_until: str | None = None
+
+    def __post_init__(self) -> None:
+        """Derive freshness from the publication date when not stated.
+
+        The authoritative path assesses freshness from the page text and passes a
+        rich status. The ordinary web path only knows whether a date exists — and
+        if that silently defaulted to UNDATED, every dated source would fail the
+        freshness bar and every HIGH-risk claim would come back PARTIAL even when
+        properly evidenced.
+        """
+        if self.freshness_status is None:
+            self.freshness_status = (FreshnessStatus.DATED_CURRENT
+                                     if self.published_at is not None
+                                     else FreshnessStatus.UNDATED)
 
     def as_dict(self) -> dict:
         return {
@@ -87,6 +110,11 @@ class EvidenceRef:
             "supports": self.supports,
             "agrees_numerically": self.agrees_numerically,
             "note": self.note,
+            "region": self.region.value,
+            "authority_type": self.authority_type,
+            "freshness_status": self.freshness_status.value,
+            "effective_from": self.effective_from,
+            "effective_until": self.effective_until,
         }
 
 
@@ -99,6 +127,9 @@ class EvaluatedClaim:
     evidence: list[EvidenceRef] = field(default_factory=list)
     status: EvidenceStatus = EvidenceStatus.UNSUPPORTED
     reason: str = ""
+    _claim_region: Region = Region.UNKNOWN
+    _conflict_kind: ConflictKind | None = None
+    _conflicts: list[dict] = field(default_factory=list)
 
     @property
     def corroborating_sources(self) -> int:
@@ -111,7 +142,22 @@ class EvaluatedClaim:
 
     @property
     def has_dated_support(self) -> bool:
-        return any(e.supports and e.published_at is not None for e in self.evidence)
+        """Whether supporting evidence can carry a claim about the present.
+
+        `UNDATED_CURRENT` counts: an official portal describing a scheme in the
+        present tense is meaningfully different from an undated blog post, and
+        the mission asks for that distinction rather than a single date bit.
+        """
+        return any(e.supports and e.freshness_status.can_support_current_claim
+                   for e in self.evidence)
+
+    @property
+    def claim_region(self) -> Region:
+        return self._claim_region
+
+    @property
+    def conflict_kind(self) -> ConflictKind | None:
+        return self._conflict_kind
 
     def as_dict(self) -> dict:
         return {
@@ -130,6 +176,9 @@ class EvaluatedClaim:
             "corroborating_sources": self.corroborating_sources,
             "best_source_quality": self.best_quality.value,
             "has_dated_support": self.has_dated_support,
+            "region": self._claim_region.value,
+            "conflict_kind": self._conflict_kind.value if self._conflict_kind else None,
+            "conflicts": self._conflicts,
             "evidence": [e.as_dict() for e in self.evidence],
             # Kept so Phase 2/3 consumers that read `supported` keep working.
             "supported": self.status is EvidenceStatus.SUPPORTED,
@@ -164,38 +213,78 @@ def evaluate_claim(
     claim: AtomicClaim,
     candidates: list[EvidenceRef],
     profile: VerticalProfile,
+    *,
+    default_region: Region = Region.UNKNOWN,
 ) -> EvaluatedClaim:
     """Classify one claim against its candidate evidence."""
     requirements = requirements_for(claim.text, profile)
+    claim_region = detect_region(claim.text, default=default_region).region
     evaluated = EvaluatedClaim(claim=claim, requirements=requirements,
                                evidence=candidates)
+    evaluated._claim_region = claim_region
 
     supporting = [e for e in candidates if e.supports]
     disagreeing = [e for e in candidates
                    if not e.supports and e.agrees_numerically is False]
 
+    # ── Classify disagreements before treating them as conflicts ─────────────
+    # Phase 3.1 flagged 23 of 121 claims CONFLICTING, and most were not
+    # disagreements: Wallonia vs Brussels premiums, or 2025 vs 2026 figures.
+    # Only a genuine same-scope same-period disagreement blocks.
+    true_conflicts = []
+    for ref in disagreeing:
+        assessment = classify_conflict(claim.text, ref.passage,
+                                       claim_region=claim_region,
+                                       other_region=ref.region)
+        evaluated._conflicts.append({**assessment.as_dict(),
+                                     "source_ref": ref.source_ref})
+        if assessment.blocks:
+            true_conflicts.append(ref)
+            evaluated._conflict_kind = assessment.kind
+
     # ── Nothing states it ────────────────────────────────────────────────────
     if not supporting:
-        if disagreeing:
+        if true_conflicts:
             evaluated.status = EvidenceStatus.CONFLICTING
             evaluated.reason = (
-                f"{len(disagreeing)} eligible source(s) discuss this and none "
-                f"states the figure claimed.")
+                f"{len(true_conflicts)} eligible source(s) state a different "
+                f"figure for the same scope and period.")
         else:
             evaluated.status = EvidenceStatus.UNSUPPORTED
-            evaluated.reason = "No eligible passage materially states this claim."
+            reason = "No eligible passage materially states this claim."
+            if disagreeing:
+                kinds = {c["kind"] for c in evaluated._conflicts}
+                reason += (f" {len(disagreeing)} source(s) differ, but only by "
+                           f"{', '.join(sorted(kinds))}.")
+            evaluated.reason = reason
         return evaluated
 
-    # ── Contradiction among supporters ───────────────────────────────────────
-    if supporting and disagreeing:
+    # ── Genuine contradiction among supporters ───────────────────────────────
+    if true_conflicts:
         evaluated.status = EvidenceStatus.CONFLICTING
         evaluated.reason = (
             f"{len(supporting)} source(s) support this figure and "
-            f"{len(disagreeing)} state a different one.")
+            f"{len(true_conflicts)} state a different one for the same scope "
+            f"and period.")
         return evaluated
 
+    # ── Regional scope ───────────────────────────────────────────────────────
+    # A Walloon premium may not establish a Belgium-wide claim. Enforced for
+    # HIGH-risk claims, where over-generalising is a false statement of law.
+    if requirements.risk == ClaimRisk.HIGH and claim_region is not Region.UNKNOWN:
+        in_scope = [e for e in supporting
+                    if e.region is Region.UNKNOWN or e.region.covers(claim_region)]
+        if not in_scope:
+            mismatch = describe_mismatch(supporting[0].region, claim_region)
+            evaluated.status = EvidenceStatus.UNSUPPORTED
+            evaluated.reason = (
+                f"Regional scope mismatch: {mismatch}. "
+                f"{requirements.rationale}")
+            return evaluated
+        supporting = in_scope
+
     # ── Authority ────────────────────────────────────────────────────────────
-    best = evaluated.best_quality
+    best = max((e.quality for e in supporting), key=lambda q: q.rank)
     if not authority_is_sufficient(requirements.authority, best):
         evaluated.status = EvidenceStatus.UNSUPPORTED
         evaluated.reason = (
@@ -219,20 +308,39 @@ def evaluate_claim(
             return evaluated
 
     # ── Freshness — only where the claim's category says it matters ──────────
-    if requirements.freshness is FreshnessRequirement.REQUIRED and \
-            not evaluated.has_dated_support:
-        evaluated.status = EvidenceStatus.PARTIALLY_SUPPORTED
-        evaluated.reason = (
-            f"Stated by a {best.value} source, but {requirements.category.value} "
-            f"claims depend on when they were published and no supporting source "
-            f"carries a date.")
-        return evaluated
+    if requirements.freshness is FreshnessRequirement.REQUIRED:
+        usable = [e for e in supporting
+                  if e.freshness_status.can_support_current_claim]
+        if not usable:
+            expired = [e for e in supporting
+                       if e.freshness_status in (FreshnessStatus.HISTORICAL,
+                                                 FreshnessStatus.DATED_EXPIRED)]
+            evaluated.status = EvidenceStatus.PARTIALLY_SUPPORTED
+            if expired:
+                # An archived page describing a scheme that ended must never
+                # establish a present-tense claim.
+                evaluated.reason = (
+                    f"Stated by a {best.value} source, but that source is "
+                    f"{expired[0].freshness_status.value} and cannot establish a "
+                    f"current {requirements.category.value} claim.")
+            else:
+                evaluated.reason = (
+                    f"Stated by a {best.value} source, but "
+                    f"{requirements.category.value} claims depend on when they "
+                    f"were published and no supporting source is dated or "
+                    f"presents as in force.")
+            return evaluated
 
     evaluated.status = EvidenceStatus.SUPPORTED
-    dated = "dated" if evaluated.has_dated_support else "undated"
+    freshness = next((e.freshness_status.value for e in supporting
+                      if e.freshness_status.can_support_current_claim),
+                     FreshnessStatus.UNDATED.value)
+    scope = (f", scoped {claim_region.value}" if claim_region is not Region.UNKNOWN
+             else "")
     evaluated.reason = (
         f"Materially stated by {evaluated.corroborating_sources} {best.value} "
-        f"source(s) ({dated}); meets the {requirements.category.value} bar.")
+        f"source(s) ({freshness}{scope}); meets the "
+        f"{requirements.category.value} bar.")
     return evaluated
 
 
@@ -282,6 +390,11 @@ def build_candidates(
             provider=source.get("provider", ""),
             supports=supports,
             agrees_numerically=agrees,
+            region=source.get("region_enum", Region.UNKNOWN),
+            authority_type=source.get("authority_type"),
+            freshness_status=source.get("freshness_enum"),
+            effective_from=source.get("effective_from"),
+            effective_until=source.get("effective_until"),
         ))
     return refs
 
