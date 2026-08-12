@@ -297,13 +297,14 @@ class TestOpportunityAndPackage:
         assert 0 <= (opportunity.overall_score or 0) <= 100
         assert "search_demand" in opportunity.missing_inputs
 
-    async def test_package_is_marked_v2(self, seeded_session,
+    async def test_package_is_marked_v3(self, seeded_session,
                                         settings_all_providers):
+        """Phase 3.1 replaced the excerpt-level builder with the claim-level one."""
         result = await _run(seeded_session, settings_all_providers,
                             llm=StubLLM(configured=False))
         package = await seeded_session.get(ResearchPackage,
                                            result.research_package_id)
-        assert package.package_version == 2
+        assert package.package_version == 3
         assert package.serp_snapshot_id is not None
         assert package.user_questions
         assert package.content_gap

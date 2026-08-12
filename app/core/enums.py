@@ -59,17 +59,95 @@ class FreshnessVerdict(StrEnum):
     UNSUPPORTED = "unsupported"
 
 
-class Observability(StrEnum):
-    """How much we actually know about a claim.
+class ObservationStatus(StrEnum):
+    """How well we can place a piece of retrieved material IN TIME.
 
-    OBSERVED  — a source we retrieved states it, and we hold the URL.
-    ESTIMATED — derived or inferred; must never be presented as fact.
-    UNKNOWN   — we do not know. Never upgraded by guessing.
+    This is a statement about publication metadata, and nothing else.
+
+    OBSERVED  — retrieved, and we hold a publication date.
+    ESTIMATED — retrieved, but undated; we saw it, we cannot place it in time.
+    UNKNOWN   — actively contradicted or unsupported by a freshness check.
+
+    Phase 3's live run proved why this must NOT decide factual support. Tavily's
+    general search returns no dates, so every web source is ESTIMATED — and while
+    `supported` required OBSERVED, the web-research path yielded zero usable
+    evidence for any query, forever. Whether a source is dated and whether it
+    supports a claim are different questions; `EvidenceStatus` answers the second.
     """
 
     OBSERVED = "OBSERVED"
     ESTIMATED = "ESTIMATED"
     UNKNOWN = "UNKNOWN"
+
+
+# Phase 2/3 name. Kept so existing code and stored rows keep working.
+Observability = ObservationStatus
+
+
+class EvidenceStatus(StrEnum):
+    """Whether a specific passage materially supports an atomic claim.
+
+    Independent of ObservationStatus, RelevanceStatus and SourceQuality. A claim
+    can be perfectly supported by an undated page, and a dated page can support
+    nothing.
+    """
+
+    SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    CONFLICTING = "CONFLICTING"
+
+    @property
+    def is_usable_by_writer(self) -> bool:
+        """Only SUPPORTED reaches the writer as a fact it may state.
+
+        PARTIALLY_SUPPORTED may be passed separately and explicitly labelled when
+        vertical policy allows; it is never presented as established.
+        """
+        return self is EvidenceStatus.SUPPORTED
+
+
+class FreshnessRequirement(StrEnum):
+    """Whether a claim's truth depends on when it was published.
+
+    "Panels are usually mounted facing south" is timeless. "The regional premium
+    is EUR 1,750" is worthless without a date. Treating both the same way is what
+    broke Phase 3.
+    """
+
+    REQUIRED = "REQUIRED"        # undated evidence cannot fully support it
+    PREFERRED = "PREFERRED"      # undated evidence downgrades, does not disqualify
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
+class AuthorityRequirement(StrEnum):
+    """The minimum source authority a claim needs before it may be stated."""
+
+    OFFICIAL = "OFFICIAL"
+    INSTITUTIONAL = "INSTITUTIONAL"
+    SPECIALIST = "SPECIALIST"
+    ANY = "ANY"
+
+
+class ClaimCategory(StrEnum):
+    """What KIND of assertion a claim makes.
+
+    Risk and requirements derive from the category, and the category is matched
+    per vertical from configuration — so nothing solar-specific lives in the core.
+    """
+
+    SUBSIDY = "SUBSIDY"
+    TAX = "TAX"
+    REGULATION = "REGULATION"
+    GRID_RULE = "GRID_RULE"
+    ELIGIBILITY = "ELIGIBILITY"
+    GUARANTEED_SAVINGS = "GUARANTEED_SAVINGS"
+    ROI = "ROI"
+    ENERGY_PRICE = "ENERGY_PRICE"
+    MARKET_PRICE = "MARKET_PRICE"      # market-wide averages — needs corroboration
+    VENDOR_PRICE = "VENDOR_PRICE"      # a specific vendor's own displayed price
+    PRODUCT_SPEC = "PRODUCT_SPEC"
+    GENERAL = "GENERAL"
 
 
 class RunStatus(StrEnum):

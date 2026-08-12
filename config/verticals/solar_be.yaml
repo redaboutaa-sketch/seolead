@@ -109,3 +109,86 @@ authoritative_domains:
   - fluvius.be
   - ores.be
   - economie.fgov.be
+
+# ── Claim policy (Phase 3.1) ─────────────────────────────────────────────────
+# Which vocabulary identifies which kind of assertion. Matched before the
+# cross-vertical fallback so Belgian regulatory language is recognised correctly.
+claim_categories:
+  SUBSIDY: [prime, primes, subside, subsides, prime energie, certificat vert,
+            certificats verts, subsidie, premie, groenestroomcertificaat]
+  TAX: [tva, btw, taux de tva, taxe, impot]
+  GRID_RULE: [tarif prosumer, prosumer, compteur qui tourne a l'envers,
+              injection, raccordement, gestionnaire de reseau, fluvius, ores,
+              sibelga, resa]
+  REGULATION: [obligation, obligatoire, reglementation, decret, arrete,
+               norme, peb]
+  ELIGIBILITY: [eligible, eligibilite, conditions d'octroi, avoir droit]
+  ROI: [retour sur investissement, amortissement, rentabilite, temps de retour]
+  ENERGY_PRICE: [prix de l'electricite, tarif electricite, prix du kwh]
+  GUARANTEED_SAVINGS: [rendement garanti, economies garanties, economie garantie]
+
+# Requirements per category. Only overrides; anything absent uses the
+# cross-vertical default in app/services/claim_policy.py.
+authority_policy:
+  SUBSIDY:
+    authority: OFFICIAL
+    freshness: REQUIRED
+    risk: HIGH
+    min_corroborating_sources: 1
+    rationale: >-
+      Belgian premiums differ by region and change annually. Only the granting
+      authority establishes one; an installer quoting a premium is reporting,
+      not establishing.
+  GRID_RULE:
+    authority: OFFICIAL
+    freshness: REQUIRED
+    risk: HIGH
+    min_corroborating_sources: 1
+    rationale: >-
+      Metering and injection rules come from the regional regulator or the grid
+      operator, and they have moved repeatedly in Belgium.
+  MARKET_PRICE:
+    authority: SPECIALIST
+    freshness: PREFERRED
+    risk: MEDIUM
+    min_corroborating_sources: 3
+    rationale: >-
+      A Belgian market average must not rest on one or two installer pages.
+      Three independent sources is a floor, not a survey — the figure should
+      still be published as a range.
+  VENDOR_PRICE:
+    authority: ANY
+    freshness: PREFERRED
+    risk: LOW
+    min_corroborating_sources: 1
+    rationale: >-
+      A vendor is the authority on its own displayed price, and establishes
+      that price only — never a market average.
+
+# Where targeted authoritative research looks when a HIGH-risk claim is
+# unresolved. Placeholder shape: populate without changing orchestration code.
+official_source_policy:
+  enabled: true
+  max_queries: 2
+  # Region-specific because Wallonia, Flanders and Brussels genuinely differ.
+  domains:
+    - energie.wallonie.be
+    - energiesparen.be
+    - environnement.brussels
+    - leefmilieu.brussels
+    - cwape.be
+    - vreg.be
+    - brugel.brussels
+    - creg.be
+    - fluvius.be
+    - ores.be
+    - resa.be
+    - sibelga.be
+    - economie.fgov.be
+    - finances.belgium.be
+  query_templates:
+    SUBSIDY: "{topic} prime officielle {market}"
+    TAX: "{topic} taux TVA officiel {market}"
+    GRID_RULE: "{topic} tarif prosumer regulateur {market}"
+    REGULATION: "{topic} reglementation officielle {market}"
+    ELIGIBILITY: "{topic} conditions officielles {market}"

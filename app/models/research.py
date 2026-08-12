@@ -128,6 +128,19 @@ class ResearchEvidence(Base):
     claim_risk: Mapped[str | None] = mapped_column(String(16), nullable=True)
     support_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
     evidence_sufficient: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    # ── Atomic claim model (Phase 3.1) ───────────────────────────────────────
+    # A row is now ONE materially testable proposition, not a page excerpt. The
+    # passage it came from is stored so QA and a human reviewer can quote the
+    # exact supporting text without refetching the page.
+    passage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claim_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    evidence_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    authority_requirement: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    freshness_requirement: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    corroborating_sources: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extraction_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    evaluation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at = created_column()
 
     source: Mapped[ResearchSource] = relationship(back_populates="evidence")
@@ -185,4 +198,36 @@ class ResearchPackage(Base):
     unresolved_questions: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     confidence_summary: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     provider_provenance: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    created_at = created_column()
+
+
+class EvidencePassage(Base):
+    """The link between one atomic claim and one supporting passage.
+
+    Many-to-many by design: one source usually supports several claims, and a
+    claim needing corroboration is supported by several sources. Phase 3's
+    one-fact-one-source shape could express neither.
+    """
+
+    __tablename__ = "evidence_passage"
+    __table_args__ = (
+        Index("ix_evidence_passage_evidence", "research_evidence_id"),
+        Index("ix_evidence_passage_source", "research_source_id"),
+    )
+
+    id: Mapped[uuid.UUID] = pk_column()
+    research_evidence_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("research_evidence.id", ondelete="CASCADE"),
+        nullable=False)
+    research_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("research_source.id", ondelete="CASCADE"),
+        nullable=False)
+    passage: Mapped[str] = mapped_column(Text, nullable=False)
+    supports: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # None when the claim carries no figure — distinct from "states a different
+    # figure", which is what makes CONFLICTING detectable.
+    agrees_numerically: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    observation_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source_quality: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at = created_column()

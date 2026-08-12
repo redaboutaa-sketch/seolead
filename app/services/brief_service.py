@@ -32,6 +32,11 @@ _MAX_REQUIRED_FACTS = 12
 _MAX_OUTLINE_SECTIONS = 9
 
 
+def _claim_text(item: dict) -> str:
+    """Claim text from a V3 claim or a V2 fact, whichever shape arrived."""
+    return str(item.get("claim") or item.get("fact") or "")
+
+
 def _default_outline(
     query: str, content_type: ContentType, profile: VerticalProfile,
     user_questions: list[str],
@@ -96,13 +101,22 @@ def build_brief_payload(
     intent = SearchIntent(package["intent"])
     content_type = select_content_type(query, intent, profile)
 
-    facts = package.get("facts") or []
     sources = package.get("sources") or []
 
-    supported_facts = [f for f in facts if f.get("supported")]
+    # V3 packages carry evaluated atomic claims; V2 carried page-level facts.
+    # Reading `supported_claims` first means the brief gets propositions rather
+    # than excerpts wherever the newer builder ran.
+    supported_facts = package.get("supported_claims")
+    if supported_facts is None:
+        supported_facts = [f for f in (package.get("facts") or [])
+                           if f.get("supported")]
+
     required_facts = [
-        {"fact": f["fact"], "source_ref": f["source_ref"],
-         "observability": f["observability"]}
+        {"fact": _claim_text(f), "source_ref": f.get("source_ref"),
+         "observability": f.get("observability")
+         or f.get("evidence_status"),
+         "category": f.get("category"),
+         "evidence_status": f.get("evidence_status")}
         for f in supported_facts[:_MAX_REQUIRED_FACTS]
     ]
 
@@ -113,11 +127,11 @@ def build_brief_payload(
         for s in sources if s["ref"] in used_refs and s.get("url")
     ]
 
-    # Restricted topics are cautionary unless a supported fact carries them.
+    # Restricted topics are cautionary unless a supported claim carries them.
     cautionary: list[dict] = []
     for claim in profile.restricted_claims:
         supported_here = any(
-            claim.casefold() in f["fact"].casefold() for f in supported_facts
+            claim.casefold() in _claim_text(f).casefold() for f in supported_facts
         )
         cautionary.append({
             "topic": claim,

@@ -201,3 +201,135 @@ class TestStemmerRegression:
             title="Le panneau solaire en Belgique",
             body="Un panneau solaire produit de l'électricité; le prix varie.")
         assert decision.status is RelevanceStatus.RELEVANT
+
+
+class TestPhase31EvidenceModelRegression:
+    """Phase 3 live run, 2026-08-12.
+
+    Two structural defects, both fatal to the web-research path:
+
+    1. Tavily returns ~2 KB page excerpts and one excerpt became one "fact", so
+       claim-risk classification degenerated into scanning a document for a risky
+       word — 9 of 10 live excerpts came out HIGH risk.
+    2. `supported` required `OBSERVED`, and Tavily's general search returns no
+       dates, so **no web evidence could ever be supported, for any query**.
+    """
+
+    LIVE_EXCERPT = (
+        "Aller au contenu\n\nEnergy Village\n\n"
+        "# Prix Panneaux Solaires 2026 en Belgique\n\n"
+        "Le prix des panneaux solaires en Belgique varie entre 1,1 € et 1,8 € par "
+        "Watt-crête installé. La prime régionale s'élève à 1 750 € en Wallonie.\n\n"
+        "La boutique ne fonctionnera pas correctement dans le cas où les cookies "
+        "sont désactivés.\n\n"
+        "Le rendement d'un panneau dépend de son orientation et de son inclinaison."
+    )
+
+    def test_an_undated_source_can_still_support_a_timeless_claim(self,
+                                                                   solar_profile):
+        """Defect 2, stated directly. This is the test that unblocks the pipeline."""
+        from datetime import datetime, timezone
+
+        from app.core.enums import EvidenceStatus, ObservationStatus
+        from app.services.claim_extraction import AtomicClaim
+        from app.services.evidence_model import EvidenceRef, evaluate_claim
+        from app.services.relevance import RelevanceStatus
+        from app.services.source_quality import SourceQuality
+
+        text = ("Le rendement d'un panneau dépend de son orientation et de son "
+                "inclinaison.")
+        claim = AtomicClaim(text=text, passage=text, source_ref="s1", offset=0)
+        evidence = [EvidenceRef(
+            source_ref="s1", passage=text, url="https://guide-solaire.be/x",
+            source_type="web", quality=SourceQuality.SPECIALIST,
+            relevance=RelevanceStatus.RELEVANT,
+            observation=ObservationStatus.ESTIMATED,   # undated, as Tavily returns
+            published_at=None, retrieved_at=datetime.now(timezone.utc),
+            provider="tavily", supports=True)]
+
+        result = evaluate_claim(claim, evidence, solar_profile)
+        assert result.status is EvidenceStatus.SUPPORTED
+        assert result.evidence[0].observation is ObservationStatus.ESTIMATED
+
+    def test_a_page_excerpt_becomes_several_atomic_claims(self):
+        """Defect 1: one excerpt was one fact."""
+        from app.services.claim_extraction import extract_claim_set
+        from app.services.passage_extraction import extract_passages
+
+        passages = extract_passages(self.LIVE_EXCERPT, source_ref="s1").passages
+        claims = extract_claim_set(passages)
+        assert len(claims.claims) >= 2
+
+    def test_cookie_and_navigation_text_never_becomes_a_claim(self):
+        from app.services.claim_extraction import extract_claim_set
+        from app.services.passage_extraction import extract_passages
+
+        passages = extract_passages(self.LIVE_EXCERPT, source_ref="s1").passages
+        texts = " ".join(c.text.lower() for c in extract_claim_set(passages).claims)
+        assert "cookie" not in texts
+        assert "aller au contenu" not in texts
+
+    def test_a_commercial_page_cannot_establish_a_subsidy(self, solar_profile):
+        """The 9 HIGH-risk refusals in the live run were correct, and stay correct."""
+        from datetime import datetime, timezone
+
+        from app.core.enums import EvidenceStatus, ObservationStatus
+        from app.services.claim_extraction import AtomicClaim
+        from app.services.evidence_model import EvidenceRef, evaluate_claim
+        from app.services.relevance import RelevanceStatus
+        from app.services.source_quality import SourceQuality
+
+        text = "La prime régionale s'élève à 1 750 € en Wallonie."
+        claim = AtomicClaim(text=text, passage=text, source_ref="s1", offset=0)
+        evidence = [EvidenceRef(
+            source_ref="s1", passage=text, url="https://installateur.be/primes",
+            source_type="web", quality=SourceQuality.COMMERCIAL,
+            relevance=RelevanceStatus.RELEVANT,
+            observation=ObservationStatus.OBSERVED,
+            published_at=datetime.now(timezone.utc),
+            retrieved_at=datetime.now(timezone.utc), provider="tavily",
+            supports=True)]
+
+        result = evaluate_claim(claim, evidence, solar_profile)
+        assert result.status is not EvidenceStatus.SUPPORTED
+        assert "OFFICIAL" in result.reason
+
+    def test_a_vendor_price_supports_itself_but_not_a_market_average(self,
+                                                                      solar_profile):
+        from app.core.enums import EvidenceStatus
+        from app.services.claim_extraction import AtomicClaim
+        from app.services.evidence_model import EvidenceRef, evaluate_claim
+        from app.core.enums import ObservationStatus
+        from app.services.relevance import RelevanceStatus
+        from app.services.source_quality import SourceQuality
+
+        def ref(text: str) -> EvidenceRef:
+            return EvidenceRef(
+                source_ref="vendor", passage=text,
+                url="https://installateur.be/tarifs", source_type="web",
+                quality=SourceQuality.COMMERCIAL,
+                relevance=RelevanceStatus.RELEVANT,
+                observation=ObservationStatus.ESTIMATED, published_at=None,
+                retrieved_at=None, provider="tavily", supports=True)
+
+        own = "Nos tarifs pour une installation de 5 kWc sont de 4 400 €."
+        market = "Le prix moyen d'une installation est de 4 400 € en Belgique."
+
+        own_claim = AtomicClaim(text=own, passage=own, source_ref="vendor", offset=0)
+        market_claim = AtomicClaim(text=market, passage=market,
+                                   source_ref="vendor", offset=0)
+
+        assert evaluate_claim(own_claim, [ref(own)], solar_profile).status \
+            is EvidenceStatus.SUPPORTED
+        assert evaluate_claim(market_claim, [ref(market)], solar_profile).status \
+            is not EvidenceStatus.SUPPORTED
+
+    def test_observation_status_and_evidence_status_are_separate_columns(self):
+        """They answer different questions and must never be one field again."""
+        from app.core.enums import EvidenceStatus, ObservationStatus
+        from app.models import ResearchEvidence
+
+        columns = {c.name for c in ResearchEvidence.__table__.columns}
+        assert "observability" in columns          # when
+        assert "evidence_status" in columns        # whether
+        assert set(ObservationStatus) != set(EvidenceStatus)

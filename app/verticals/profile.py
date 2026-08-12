@@ -69,6 +69,22 @@ class VerticalProfile(BaseModel):
     # generic classifier — regulators and grid operators for the market.
     authoritative_domains: list[str] = Field(default_factory=list)
 
+    # ── Claim policy (Phase 3.1) ─────────────────────────────────────────────
+    # category → vocabulary that identifies it. Matched before the cross-vertical
+    # fallback, so a vertical can name its own regulatory language.
+    claim_categories: dict[str, list[str]] = Field(default_factory=dict)
+    # category → {authority, freshness, risk, min_corroborating_sources,
+    # rationale}. Overrides the cross-vertical defaults in `claim_policy`.
+    authority_policy: dict[str, dict] = Field(default_factory=dict)
+    # Where to look when a HIGH-risk claim is unresolved. A placeholder here is
+    # deliberate: it can be populated without touching orchestration code.
+    official_source_policy: dict = Field(default_factory=dict)
+
+    def official_domains(self) -> list[str]:
+        """Domains a targeted authoritative search may be restricted to."""
+        configured = (self.official_source_policy or {}).get("domains") or []
+        return list(dict.fromkeys([*configured, *self.authoritative_domains]))
+
     def selectable_content_types(self) -> list[ContentType]:
         """Only Phase 2 types are selectable, whatever the profile lists.
 

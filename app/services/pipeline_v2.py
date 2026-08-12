@@ -20,13 +20,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.enums import (ApprovalState, ContentStatus, KeywordStatus, QAType,
+from app.core.enums import (ApprovalState, ContentStatus, EvidenceStatus,
+                            KeywordStatus, ObservationStatus, QAType,
                             RunStatus, SearchIntent)
 from app.core.errors import (ErrorCode, InvalidVertical, LLMNotConfigured,
                              ResearchProviderError, SeoLeadError)
-from app.models import (Approval, ContentBrief, ContentDraft, KeywordMetricRow,
-                        ProviderUsage, QAReview, ResearchEvidence, ResearchPackage,
-                        ResearchRun, ResearchSource, SeedKeyword, SeoOpportunity,
+from app.models import (Approval, ContentBrief, ContentDraft, EvidencePassage,
+                        KeywordMetricRow, ProviderUsage, QAReview,
+                        ResearchEvidence, ResearchPackage, ResearchRun,
+                        ResearchSource, SeedKeyword, SeoOpportunity,
                         SerpQuestionRow, SerpResultRow, SerpSnapshotRow, Vertical)
 from app.providers.capabilities import plan_providers
 from app.providers.llm.base import LLMProvider
@@ -34,8 +36,8 @@ from app.providers.research.base import ResearchProvider
 from app.providers.search.base import SearchIntelligenceProvider
 from app.providers.search.location import get_search_context
 from app.schemas.serp import KeywordMetric, SerpSnapshot
-from app.services import (brief_service, claim_risk, draft_service, factual_qa,
-                          opportunity_score, package_builder_v2, qa_service,
+from app.services import (brief_service, draft_service, factual_qa_v2,
+                          opportunity_score, package_builder_v3, qa_service,
                           serp_analysis)
 from app.services.intent import classify_intent, normalize_query
 from app.services.provider_usage import JobBudget, UsageRecorder
@@ -459,7 +461,7 @@ async def run_pipeline_v2(
     await session.commit()
 
     # ── Stage 5: package V2 ──────────────────────────────────────────────────
-    payload = package_builder_v2.build_package_v2(
+    payload = package_builder_v3.build_package_v3(
         query=query, market=market, language=language, intent=intent,
         profile=profile, serp=snapshot, serp_analysis=analysis,
         keyword_metrics=metrics, research_results=research_results,
@@ -492,7 +494,7 @@ async def run_pipeline_v2(
         keyword_id=keyword.id,
         research_run_id=result.research_run_ids[0],
         version=1,
-        package_version=package_builder_v2.PACKAGE_VERSION,
+        package_version=package_builder_v3.PACKAGE_VERSION,
         serp_snapshot_id=serp_row.id if serp_row else None,
         seo_opportunity_id=opportunity.id,
         query=payload["query"], market=payload["market"],
@@ -557,9 +559,14 @@ async def run_pipeline_v2(
         await _persist_usage(session, usage, correlation_id)
         return result
 
+    # The writer sees supported claims, unresolved facts and forbidden topics —
+    # never a rejected source and never a raw page excerpt.
+    writer_view = package_builder_v3.writer_payload(payload, allow_partial=False)
+
     try:
         draft_payload, llm_response = await draft_service.generate_draft(
-            brief_payload, payload, llm=llm, correlation_id=correlation_id)
+            brief_payload, {**payload, "writer_view": writer_view},
+            llm=llm, correlation_id=correlation_id)
     except (LLMNotConfigured, SeoLeadError) as exc:
         result.stopped_at = "draft"
         result.error_code = exc.code or ErrorCode.CONTENT_GENERATION_FAILED
@@ -593,20 +600,21 @@ async def run_pipeline_v2(
             select(ContentDraft.title).where(ContentDraft.id != draft.id))
     ).scalars().all()
 
-    factual = factual_qa.run_factual_qa(draft_payload, payload, profile)
+    factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
     factual_row = QAReview(content_draft_id=draft.id,
                            qa_type=QAType.DETERMINISTIC.value,
                            status=factual["status"], score=factual["score"],
                            findings=factual["findings"] + [
-                               {"code": "CLAIM_LEDGER", "message": "per-claim status",
+                               {"code": "CLAIM_LEDGER",
+                                "message": "atomic claim ledger",
                                 "blocking": False, "detail": "",
-                                "claims": factual["claims"]}],
+                                "ledger": factual["claim_ledger"]}],
                            blocking_issues=factual["blocking_issues"])
     session.add(factual_row)
     await session.flush()
     result.qa_review_ids.append(factual_row.id)
     result.factual_qa = {"status": factual["status"], "score": factual["score"],
-                         "claims_checked": len(factual["claims"]),
+                         "claim_ledger": factual["claim_ledger"],
                          "blocking": len(factual["blocking_issues"])}
 
     seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload, profile,
@@ -659,7 +667,12 @@ async def run_pipeline_v2(
 
 
 async def _persist_evidence(session, run_ids, payload, profile) -> None:
-    """Attach claim risk and support status to the persisted evidence rows."""
+    """Persist atomic claims and the passages supporting them.
+
+    One `research_evidence` row per claim; one `evidence_passage` row per
+    (claim, source) pair. A claim with three corroborating sources leaves three
+    passage rows, which is what makes corroboration auditable after the fact.
+    """
     if not run_ids:
         return
     sources = (
@@ -668,19 +681,57 @@ async def _persist_evidence(session, run_ids, payload, profile) -> None:
     ).scalars().all()
     by_ref = {s.candidate_id: s for s in sources if s.candidate_id}
 
-    for fact in payload["facts"]:
-        source = by_ref.get(fact.get("source_ref"))
-        if source is None:
+    for claim in payload.get("claims", []):
+        origin = by_ref.get(claim.get("source_ref"))
+        if origin is None:
             continue
-        session.add(ResearchEvidence(
-            research_source_id=source.id, fact=fact["fact"],
-            evidence_type=fact["evidence_type"], confidence=fact.get("confidence"),
-            observability=fact["observability"], claim_risk=fact["claim_risk"],
-            support_status=(claim_risk.SupportStatus.SUPPORTED.value
-                            if fact["supported"]
-                            else claim_risk.SupportStatus.UNSUPPORTED.value),
-            evidence_sufficient=fact["evidence_sufficient"],
-        ))
+        evidence = ResearchEvidence(
+            research_source_id=origin.id,
+            fact=claim["claim"],
+            passage=claim.get("passage"),
+            evidence_type="atomic_claim",
+            observability=_observation_for(claim),
+            claim_risk=claim.get("claim_risk"),
+            claim_category=claim.get("category"),
+            evidence_status=claim.get("evidence_status"),
+            authority_requirement=claim.get("authority_requirement"),
+            freshness_requirement=claim.get("freshness_requirement"),
+            corroborating_sources=claim.get("corroborating_sources"),
+            extraction_method=claim.get("extraction_method"),
+            evaluation_reason=claim.get("reason"),
+            support_status=claim.get("evidence_status"),
+            evidence_sufficient=(claim.get("evidence_status")
+                                 == EvidenceStatus.SUPPORTED.value),
+        )
+        session.add(evidence)
+        await session.flush()
+
+        for ref in claim.get("evidence", []):
+            source_row = by_ref.get(ref.get("source_ref"))
+            if source_row is None:
+                continue
+            session.add(EvidencePassage(
+                research_evidence_id=evidence.id,
+                research_source_id=source_row.id,
+                passage=ref.get("passage", "")[:4000],
+                supports=bool(ref.get("supports")),
+                agrees_numerically=ref.get("agrees_numerically"),
+                observation_status=ref.get("observation_status"),
+                source_quality=ref.get("source_quality"),
+                note=ref.get("note"),
+            ))
+
+
+def _observation_for(claim: dict) -> str:
+    """Observation status of the claim's best supporting evidence.
+
+    Recorded alongside — never instead of — the evidence status. They answer
+    different questions.
+    """
+    for ref in claim.get("evidence", []):
+        if ref.get("supports") and ref.get("observation_status"):
+            return str(ref["observation_status"])
+    return ObservationStatus.ESTIMATED.value
 
 
 async def _persist_usage(session, usage: UsageRecorder, correlation_id: str) -> None:

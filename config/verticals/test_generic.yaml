@@ -42,3 +42,10 @@ local_terms: [paris, lyon]
 community_research_enabled: true
 keyword_metrics_enabled: false
 authoritative_domains: []
+
+claim_categories:
+  REGULATION: [statutory requirement]
+authority_policy: {}
+official_source_policy:
+  enabled: false
+  domains: []
