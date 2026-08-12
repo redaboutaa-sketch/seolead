@@ -109,6 +109,27 @@ DATAFORSEO_BASE_URL=https://api.dataforseo.com
 `httpx` builds the Basic header from `auth=(login, password)`, so the credential is
 never assembled into a string this code logs and never appears in a URL.
 
+## Live validation, 2026-08-12
+
+```
+POST /v3/serp/google/organic/live/advanced  →  HTTP 403
+{"status_code": 40104,
+ "status_message": "Please verify your account before using the API. ..."}
+```
+
+**Credentials are valid.** Bad credentials return 401; DataForSEO authenticated the
+request and returned a business state. The account requires verification in the
+provider panel. Cost incurred: $0.00 (`cost: 0` in the response).
+
+The run exposed a defect since fixed: the handler reported only
+`"DataForSEO returned 403"`, discarding `status_code 40104` and the message naming
+the exact remedy. An HTTP status alone is not actionable. `_error_detail()` now
+surfaces the provider's own code and message on every error branch, bounded to 300
+characters and reading only those two named fields.
+
+Still unverified against the real API: organic results, PAA, related searches,
+keyword metrics, and the Belgium/French context beyond request acceptance.
+
 ## Caching
 
 SERP snapshots are cached for `SEOLEAD_SERP_TTL_HOURS` (default 24) keyed on

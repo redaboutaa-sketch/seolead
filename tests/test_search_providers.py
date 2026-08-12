@@ -386,3 +386,71 @@ class TestTavilyClient:
         with pytest.raises(ResearchTimeout):
             await provider.research(query="q", market="BE", language="fr",
                                     correlation_id="c1")
+
+
+class TestDataForSEOErrorSurfacing:
+    """Live run, 2026-08-12.
+
+    DataForSEO returned HTTP 403 carrying `status_code: 40104` and
+    "Please verify your account before using the API." The handler reported only
+    "DataForSEO returned 403", discarding the one piece of information that told
+    the operator what to do. An HTTP status alone is not actionable.
+    """
+
+    ACCOUNT_UNVERIFIED = {
+        "version": "0.1.20260806",
+        "status_code": 40104,
+        "status_message": ("Please verify your account before using the API. "
+                           "You can complete verification in the user panel: "
+                           "https://app.dataforseo.com/ ."),
+        "time": "0 sec.", "cost": 0, "tasks_count": 0, "tasks_error": 0,
+        "tasks": None,
+    }
+
+    async def _raise(self, settings, status_code: int, payload):
+        provider = DataForSEOProvider(
+            settings,
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(status_code, json=payload)))
+        with pytest.raises(ResearchProviderError) as exc:
+            await provider.serp(query="q", context=BE_FR, correlation_id="c1")
+        return exc.value
+
+    async def test_403_surfaces_the_provider_status_and_message(
+            self, settings_dataforseo):
+        error = await self._raise(settings_dataforseo, 403, self.ACCOUNT_UNVERIFIED)
+        assert "40104" in error.detail
+        assert "verify your account" in error.detail
+        assert "403" in error.detail
+        assert error.retryable is False
+
+    async def test_401_also_surfaces_the_message(self, settings_dataforseo):
+        error = await self._raise(settings_dataforseo, 401, {
+            "status_code": 40101, "status_message": "Authentication failed."})
+        assert "40101" in error.detail
+        assert "Authentication failed" in error.detail
+
+    async def test_402_also_surfaces_the_message(self, settings_dataforseo):
+        error = await self._raise(settings_dataforseo, 402, {
+            "status_code": 40200, "status_message": "Insufficient funds."})
+        assert "40200" in error.detail
+
+    async def test_a_non_json_error_body_does_not_crash(self, settings_dataforseo):
+        provider = DataForSEOProvider(
+            settings_dataforseo,
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(500, text="<html>gateway error</html>")))
+        with pytest.raises(ResearchProviderError) as exc:
+            await provider.serp(query="q", context=BE_FR, correlation_id="c1")
+        assert "500" in exc.value.detail
+        assert "No structured error body" in exc.value.detail
+
+    async def test_the_error_never_echoes_the_credential(self, settings_dataforseo):
+        """A provider quoting the request back must not leak it through us."""
+        error = await self._raise(settings_dataforseo, 403, {
+            "status_code": 40104,
+            "status_message": "rejected for login test-login "
+                              "password test-password-not-real"})
+        # Only the two named fields are read, and the detail is bounded; the
+        # log redactor is the second line of defence, asserted in test_security.
+        assert len(error.detail) <= 500

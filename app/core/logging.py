@@ -57,7 +57,10 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler(sys.stdout)
+    # stderr, not stdout. The CLI emits its result as JSON on stdout, and
+    # interleaving log lines there makes `seolead … | jq` fail — which defeats the
+    # point of a machine-readable CLI. Docker captures both streams either way.
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers.clear()

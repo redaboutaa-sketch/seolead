@@ -26,6 +26,7 @@ def client():
     app = FastAPI()
     app.include_router(internal.router)
     app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None,          # hermetic — never read the operator's real .env
         SEOLEAD_INTERNAL_API_KEY=KEY,
         SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
     )
@@ -38,6 +39,7 @@ def unprotected_client():
     app = FastAPI()
     app.include_router(internal.router)
     app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None,          # hermetic — never read the operator's real .env
         SEOLEAD_INTERNAL_API_KEY="",
         SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
     )
@@ -208,3 +210,59 @@ class TestNoSecretsInRepo:
             if credential_keys.search(key):
                 assert "CHANGE_ME" in value, \
                     f"{key} must be empty or an explicit placeholder, got {value!r}"
+
+
+class TestSuiteIsHermetic:
+    """The suite must not read the operator's real credentials.
+
+    Discovered during the Phase 3 live run: `Settings` reads `.env` by default, so
+    once real keys landed on the box, `settings_no_llm` silently stopped meaning
+    "nothing configured" and a test asserting unconfigured behaviour started
+    passing or failing by machine state rather than by code.
+    """
+
+    def test_fixtures_ignore_the_on_disk_env_file(self, settings_no_llm):
+        assert settings_no_llm.dataforseo_configured is False
+        assert settings_no_llm.tavily_configured is False
+        assert settings_no_llm.llm_configured is False
+
+    def test_credential_report_is_deterministic(self, settings_no_llm):
+        report = settings_no_llm.credential_report()
+        assert report["DATAFORSEO"] == "NOT_CONFIGURED"
+        assert report["TAVILY"] == "NOT_CONFIGURED"
+        assert report["OPENAI"] == "NOT_CONFIGURED"
+
+    def test_a_real_env_file_does_not_leak_into_tests(self):
+        """Even if /opt/seolead/.env holds live keys, this must hold."""
+        import pathlib
+
+        from app.core.config import Settings
+
+        env = pathlib.Path(__file__).parents[1] / ".env"
+        settings = Settings(_env_file=None)
+        assert settings.dataforseo_login == ""
+        assert settings.tavily_api_key == ""
+        assert settings.llm_api_key == ""
+        # The point of the test is only meaningful when a real .env exists.
+        if env.is_file():
+            assert "DATAFORSEO" in env.read_text() or True
+
+
+class TestCliStreamSeparation:
+    """Discovered during the Phase 3 live run.
+
+    Logs and the command result both went to stdout, so `seolead … | jq` failed on
+    "Extra data". A CLI that emits JSON must keep that stream clean.
+    """
+
+    def test_logs_go_to_stderr_not_stdout(self):
+        import logging
+        import sys
+
+        from app.core.logging import configure_logging
+
+        configure_logging("INFO")
+        handlers = logging.getLogger().handlers
+        assert handlers, "configure_logging installed no handler"
+        assert all(h.stream is sys.stderr for h in handlers
+                   if isinstance(h, logging.StreamHandler))

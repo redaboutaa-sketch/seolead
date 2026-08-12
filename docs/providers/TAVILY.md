@@ -92,6 +92,44 @@ TAVILY_MAX_RESULTS=10
 TAVILY_SEARCH_DEPTH=advanced
 ```
 
+## Live validation, 2026-08-12
+
+Query `prix panneaux solaires Belgique`, market BE, language fr:
+
+```
+10 sources, 3 344 ms, status SUCCEEDED
+fields: title · url · content · score · id · raw_content
+published_date present on 0 of 10
+extra top-level fields seen: follow_up_questions, images  (ignored by the adapter)
+country: belgium boost works — .be domains dominate
+```
+
+The adapter matches the contract exactly. Two findings came out of it.
+
+### `content` is a page excerpt, not a claim
+
+Each `content` field was ~2 000 characters of page text, including navigation
+(`"Aller au contenu"`), cookie banners and AI-tool menus
+(`"ChatGPTClaudePerplexityGoogle AI Mode"`).
+
+The system currently treats one excerpt as one claim, and that has two consequences
+measured in the run: claim-risk classification degenerates into scanning a document
+for a risky word (9 of 10 excerpts came out HIGH risk), and relevance becomes
+trivially easy to satisfy (a page titled `"| Blog Webflow"` scored 1.00 on its body
+alone).
+
+**Sentence-level extraction with boilerplate stripping is the fix.** Not yet built.
+
+### No web evidence can be `supported`
+
+`supported` requires `OBSERVED`, and `OBSERVED` requires a date. Tavily's general
+search returns none, so **every web fact is `ESTIMATED` and none can ever be
+supported** — for any query, not just this one. The live run produced 10 relevant
+sources, 10 facts and 0 supported facts.
+
+This is an evidence-model decision awaiting an owner call; see
+`PHASE3_IMPLEMENTATION_REPORT.md` §20b and §28.
+
 ## Caching
 
 `SEOLEAD_WEB_RESEARCH_TTL_HOURS`, default 168 (7 days). Explanatory pages change

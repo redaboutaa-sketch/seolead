@@ -80,16 +80,25 @@ class DataForSEOProvider:
 
         if response.status_code == 401:
             # Not retryable, and the message must not echo the credential.
-            raise ResearchProviderError("DataForSEO rejected the credentials (401)",
-                                        retryable=False)
+            raise ResearchProviderError(
+                f"DataForSEO rejected the credentials (401). "
+                f"{_error_detail(response)}", retryable=False)
         if response.status_code == 402:
             raise ResearchProviderError(
-                "DataForSEO reports insufficient funds (402)", retryable=False)
+                f"DataForSEO reports insufficient funds (402). "
+                f"{_error_detail(response)}", retryable=False)
         if response.status_code == 429:
-            raise ResearchUnavailable("DataForSEO rate limit (429)")
+            raise ResearchUnavailable(
+                f"DataForSEO rate limit (429). {_error_detail(response)}")
         if response.status_code >= 400:
+            # An HTTP status alone is not actionable. DataForSEO carries its own
+            # status code and a message saying what to do — the live run returned
+            # 403 with 40104 "Please verify your account before using the API",
+            # and reporting only "returned 403" threw away the one piece of
+            # information the operator needed.
             raise ResearchProviderError(
-                f"DataForSEO returned {response.status_code}", retryable=False)
+                f"DataForSEO returned HTTP {response.status_code}. "
+                f"{_error_detail(response)}", retryable=False)
 
         try:
             payload = response.json()
@@ -163,6 +172,38 @@ class DataForSEOProvider:
     async def health(self) -> dict:
         return {"configured": self.configured, "provider": self.code,
                 "base_url": self._base_url}
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """Extract DataForSEO's own status code and message from an error body.
+
+    DataForSEO returns a structured error alongside the HTTP status, and the
+    message is usually the only actionable part. The live run of 2026-08-12
+    returned HTTP 403 carrying:
+
+        {"status_code": 40104,
+         "status_message": "Please verify your account before using the API..."}
+
+    which is a business state an operator can fix in a minute — and which the
+    previous handler discarded, reporting only "returned 403".
+
+    Bounded, and never echoes a credential: only the two named fields are read,
+    and the request is never quoted back.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return "No structured error body."
+    if not isinstance(body, dict):
+        return "No structured error body."
+
+    code = body.get("status_code")
+    message = str(body.get("status_message") or "").strip()
+    if code is None and not message:
+        return "No structured error body."
+    if not message:
+        return f"DataForSEO status_code {code}."
+    return f"DataForSEO status_code {code}: {message[:300]}"
 
 
 def _safe_float(value) -> float | None:

@@ -67,6 +67,11 @@ def generic_profile():
 @pytest.fixture
 def settings_no_llm() -> Settings:
     return Settings(
+        # Hermetic: never read the operator's real .env. Without this the suite
+        # silently picks up live credentials, so `settings_no_llm` stops meaning
+        # "nothing configured" the moment a key lands on the box — and a test
+        # asserting unconfigured behaviour passes or fails by machine state.
+        _env_file=None,
         SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
         SEOLEAD_LLM_API_KEY="",
         SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
@@ -76,6 +81,11 @@ def settings_no_llm() -> Settings:
 @pytest.fixture
 def settings_with_llm() -> Settings:
     return Settings(
+        # Hermetic: never read the operator's real .env. Without this the suite
+        # silently picks up live credentials, so `settings_no_llm` stops meaning
+        # "nothing configured" the moment a key lands on the box — and a test
+        # asserting unconfigured behaviour passes or fails by machine state.
+        _env_file=None,
         SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
         SEOLEAD_LLM_API_KEY="test-llm-key-not-a-real-secret",
         SEOLEAD_LLM_BASE_URL="https://llm.invalid/v1",
@@ -87,6 +97,11 @@ def settings_with_llm() -> Settings:
 @pytest.fixture
 def settings_dataforseo() -> Settings:
     return Settings(
+        # Hermetic: never read the operator's real .env. Without this the suite
+        # silently picks up live credentials, so `settings_no_llm` stops meaning
+        # "nothing configured" the moment a key lands on the box — and a test
+        # asserting unconfigured behaviour passes or fails by machine state.
+        _env_file=None,
         SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
         DATAFORSEO_LOGIN="test-login",
         DATAFORSEO_PASSWORD="test-password-not-real",
@@ -98,6 +113,11 @@ def settings_dataforseo() -> Settings:
 @pytest.fixture
 def settings_tavily() -> Settings:
     return Settings(
+        # Hermetic: never read the operator's real .env. Without this the suite
+        # silently picks up live credentials, so `settings_no_llm` stops meaning
+        # "nothing configured" the moment a key lands on the box — and a test
+        # asserting unconfigured behaviour passes or fails by machine state.
+        _env_file=None,
         SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
         TAVILY_API_KEY="test-tavily-key-not-real",
         TAVILY_BASE_URL="https://tavily.invalid",
@@ -109,6 +129,11 @@ def settings_tavily() -> Settings:
 def settings_all_providers() -> Settings:
     """Every provider configured. Still no network — transports are mocked."""
     return Settings(
+        # Hermetic: never read the operator's real .env. Without this the suite
+        # silently picks up live credentials, so `settings_no_llm` stops meaning
+        # "nothing configured" the moment a key lands on the box — and a test
+        # asserting unconfigured behaviour passes or fails by machine state.
+        _env_file=None,
         SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
         DATAFORSEO_LOGIN="test-login",
         DATAFORSEO_PASSWORD="test-password-not-real",
