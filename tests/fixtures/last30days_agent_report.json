@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.2",
+  "query": "prix panneaux solaires Belgique",
+  "generated_at": "2026-08-12T09:00:00Z",
+  "window_days": 30,
+  "source_status": {
+    "web": "ok",
+    "reddit": "partial",
+    "youtube": "no-results",
+    "hackernews": "rate-limited",
+    "x": "auth-failed",
+    "github": "unreachable",
+    "techmeme": "timeout",
+    "arxiv": "schema-drift",
+    "polymarket": "skipped-unconfigured",
+    "stocktwits": "error"
+  },
+  "freshness_verdicts": [
+    {"candidate_id": "l30d-001", "verdict": "current", "detail": {"checked_against": "web"}},
+    {"candidate_id": "l30d-002", "verdict": "current", "detail": {"checked_against": "web"}},
+    {"candidate_id": "l30d-003", "verdict": "stale", "detail": {"checked_against": "web"}},
+    {"candidate_id": "l30d-004", "verdict": "contradicted", "detail": {"checked_against": "web"}},
+    {"candidate_id": "l30d-005", "verdict": "unsupported", "detail": {"checked_against": "web"}}
+  ],
+  "clusters": [
+    {
+      "index": 0,
+      "title": "Combien coûte une installation photovoltaïque résidentielle",
+      "summary": "Plusieurs sources discutent des fourchettes de prix pour une installation résidentielle.",
+      "sources": ["l30d-001", "l30d-002"],
+      "engagement_total": 840
+    },
+    {
+      "index": 1,
+      "title": "Quelle puissance installer selon la consommation",
+      "summary": "Discussions sur le dimensionnement en fonction de la consommation annuelle.",
+      "sources": ["l30d-003"],
+      "engagement_total": 210
+    }
+  ],
+  "results": [
+    {
+      "candidate_id": "l30d-001",
+      "title": "Guide des prix du photovoltaïque résidentiel en Belgique",
+      "source": "web",
+      "url": "https://example-energy-guide.be/prix-photovoltaique",
+      "published_at": "2026-08-05T10:00:00Z",
+      "summary": "Le guide décrit les postes de coût d'une installation résidentielle et explique que le prix dépend de la puissance installée, du type de toiture et de la complexité de la pose.",
+      "engagement": {"score": 420},
+      "relevance_score": 0.94,
+      "cluster": 0
+    },
+    {
+      "candidate_id": "l30d-002",
+      "title": "Ce qui fait varier le devis d'une installation solaire",
+      "source": "web",
+      "url": "https://example-installer.be/devis-solaire",
+      "published_at": "2026-08-01T08:30:00Z",
+      "summary": "Un installateur détaille pourquoi deux devis pour une même maison peuvent différer: onduleur, structure de fixation, distance au tableau électrique et travaux de raccordement.",
+      "engagement": {"score": 260},
+      "relevance_score": 0.88,
+      "cluster": 0
+    },
+    {
+      "candidate_id": "l30d-003",
+      "title": "Retour d'expérience sur le dimensionnement",
+      "source": "reddit",
+      "url": "https://example-forum.invalid/r/solar/comments/abc",
+      "published_at": "2026-05-02T19:00:00Z",
+      "summary": "Un particulier explique comment il a estimé la puissance nécessaire à partir de sa consommation annuelle et de la surface de toiture disponible.",
+      "engagement": {"score": 130},
+      "relevance_score": 0.71,
+      "cluster": 1
+    },
+    {
+      "candidate_id": "l30d-004",
+      "title": "Affirmation sur une prime régionale",
+      "source": "reddit",
+      "url": "https://example-forum.invalid/r/solar/comments/def",
+      "published_at": "2026-07-20T12:00:00Z",
+      "summary": "Un commentaire affirme qu'une prime régionale couvre une part importante du coût d'installation, sans référence officielle.",
+      "engagement": {"score": 30},
+      "relevance_score": 0.44,
+      "cluster": 0
+    },
+    {
+      "candidate_id": "l30d-005",
+      "title": "Note technique sans date de publication",
+      "source": "web",
+      "url": "https://example-technical.invalid/note-pv",
+      "summary": "Une note technique décrit les facteurs d'orientation et d'inclinaison qui influencent la production annuelle d'une installation.",
+      "engagement": {"score": 15},
+      "relevance_score": 0.52,
+      "cluster": 1
+    }
+  ]
+}

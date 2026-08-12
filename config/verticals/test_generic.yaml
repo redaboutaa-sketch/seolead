@@ -1,0 +1,38 @@
+# A second, deliberately non-solar profile.
+#
+# It exists so the test suite can prove the pipeline carries no solar-specific
+# behaviour: the same code path must produce a coherent brief for a vertical that
+# shares none of Solar Belgium's vocabulary, market, language or restricted claims.
+# It is never seeded into the database.
+
+code: TEST_GENERIC
+name: Generic Test Vertical
+market: FR
+languages: [en]
+default_language: en
+
+target_audience: Generic buyers evaluating a generic service.
+business_objective: Prove that the pipeline contains no vertical-specific branching.
+
+conversion_goals:
+  - consultation
+
+cta_options:
+  - code: consultation
+    label: Book a consultation
+    intents: [COMMERCIAL, TRANSACTIONAL]
+
+preferred_content_types:
+  - ARTICLE
+  - COMPARISON
+
+restricted_claims:
+  - warranty
+  - guaranteed return
+
+forbidden_phrases:
+  - guaranteed results
+
+commercial_terms: [price, cost, quote, budget, how much]
+comparison_terms: [comparison, versus, vs, best, which]
+local_terms: [paris, lyon]

@@ -11,3 +11,5 @@ dist/
 build/
 .DS_Store
 data/
+*.egg-info/
+.pytest_cache/

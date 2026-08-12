@@ -1,0 +1,89 @@
+# Solar Belgium — pilot vertical profile.
+#
+# This file is configuration, not code. Nothing here computes a yield, a saving or
+# a subsidy: Phase 2 explicitly does not model Belgian solar economics, and
+# `restricted_claims` exists to stop a draft from asserting one anyway.
+#
+# Bound to the EXISTING Prospect 360 tenant `solar-belgium`
+# (64edc9e3-0b91-442a-9d02-7964f2001a55, verified in Phase 1 discovery). No lead is
+# written anywhere in Phase 2 — the binding is recorded for Phase 6.
+
+code: SOLAR_BE
+name: Solar Belgium
+market: BE
+languages: [fr, nl]
+default_language: fr
+
+target_audience: >-
+  Propriétaires belges de maison individuelle envisageant une installation
+  photovoltaïque, ainsi que petites entreprises évaluant l'autoconsommation.
+
+business_objective: >-
+  Générer des demandes de devis et de rendez-vous qualifiées pour des
+  installateurs photovoltaïques en Belgique, sans jamais promettre un rendement
+  ou une aide financière non vérifiés.
+
+conversion_goals:
+  - quote_request
+  - callback_request
+  - personalised_assessment
+
+cta_options:
+  - code: quote_request
+    label: Demander un devis personnalisé
+    intents: [COMMERCIAL, TRANSACTIONAL]
+  - code: callback_request
+    label: Être rappelé par un conseiller
+    intents: [COMMERCIAL, TRANSACTIONAL, LOCAL]
+  - code: guide_download
+    label: Recevoir le guide complet
+    intents: [INFORMATIONAL]
+
+# Only Phase 2 types are selectable; the loader filters the rest.
+preferred_content_types:
+  - GUIDE
+  - COMPARISON
+  - LANDING_PAGE
+  - ARTICLE
+
+# Topics that may never be asserted as fact without dated, sourced evidence.
+# The QA layer treats a numeric claim near any of these as blocking unless the
+# ResearchPackage supports it.
+restricted_claims:
+  - prime
+  - primes
+  - subside
+  - subsides
+  - certificat vert
+  - certificats verts
+  - tarif prosumer
+  - prosumer
+  - tva
+  - rendement garanti
+  - retour sur investissement
+  - amortissement
+  - économie garantie
+  - subsidie
+  - premie
+  - groenestroomcertificaat
+
+# Phrases that are always a blocking issue, regardless of evidence.
+forbidden_phrases:
+  - rendement garanti
+  - économies garanties
+  - gratuit à 100%
+  - sans aucun risque
+  - offre limitée
+  - dernière chance
+  - gegarandeerd rendement
+
+commercial_terms: [prix, coût, tarif, devis, budget, combien, prijs, kosten, offerte]
+comparison_terms: [comparatif, comparaison, versus, vs, meilleur, quel, vergelijking, beste]
+
+# Sub-market localities. Regions matter here: Wallonia, Flanders and Brussels have
+# genuinely different rules, so a query naming one wants local content.
+local_terms: [wallonie, flandre, bruxelles, liège, namur, charleroi, gand, anvers, vlaanderen, brussel]
+
+# The country's own names. Not local terms — "prix panneaux solaires Belgique" is
+# a national commercial query, not a request for city-level content.
+market_terms: [belgique, belgie, belgië, belgium]

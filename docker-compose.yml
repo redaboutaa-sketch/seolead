@@ -1,0 +1,142 @@
+# SEO Lead Factory — Phase 2 stack.
+#
+# Two services, one private network, nothing public.
+#
+# NOT exposed through Traefik, and deliberately so: this API's routes approve
+# content and trigger spend. It has no business being reachable from the internet
+# in Phase 2. `traefik.enable` is absent, which is sufficient because the running
+# Traefik uses `--providers.docker.exposedbydefault=false` (verified in Phase 1).
+#
+# `seolead_api` also joins `techformanord_backend` — the network `platform_postgres`
+# lives on — because Owner Decision 3 puts the seolead database inside that
+# existing engine and it binds only to 127.0.0.1 on the host. Joining a network is
+# additive: it modifies no other container and no network definition.
+#
+# Resource limits are not decoration. The host runs ~39 containers on 4 CPUs with
+# swap near exhaustion, so both services declare hard ceilings.
+
+services:
+
+  seolead_last30days:
+    build:
+      context: .
+      dockerfile: infra/last30days/Dockerfile
+      args:
+        LAST30DAYS_REF: ${LAST30DAYS_REF:-52f53312ff2f272e16bbc1785e1c04f9d9c19b31}
+    image: seolead/last30days-runner:${LAST30DAYS_REF:-52f53312ff2f272e16bbc1785e1c04f9d9c19b31}
+    container_name: seolead_last30days
+    restart: unless-stopped
+
+    # No `ports:`. The most important line in this file — the runner fetches
+    # hostile content by construction and must never be reachable from outside.
+
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+
+    volumes:
+      # Its own volume. Never shared with the ChainPilot runner: shared mutable
+      # state between two engines would make either one's memory unexplainable.
+      - seolead_last30days_memory:/data/last30days
+
+    environment:
+      L30D_MEMORY_DIR: /data/last30days
+      L30D_TIMEOUT_SECONDS: ${SEOLEAD_LAST30DAYS_TIMEOUT_SECONDS:-600}
+      L30D_MAX_CONCURRENT_RUNS: ${SEOLEAD_LAST30DAYS_MAX_CONCURRENT_RUNS:-1}
+      LOG_LEVEL: ${SEOLEAD_LOG_LEVEL:-INFO}
+      # Absent keys are a valid state: the source reports `skipped-unconfigured`,
+      # which is information the pipeline records — never "0 results".
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID:-}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET:-}
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+
+    networks:
+      - seolead_backend
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768m
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  seolead_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: seolead/api:0.2.0
+    container_name: seolead_api
+    restart: unless-stopped
+
+    # Loopback only, for operator testing. 8100+ was free at Phase 1 discovery.
+    ports:
+      - "127.0.0.1:8100:8000"
+
+    user: "10002:10002"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+
+    env_file:
+      - .env
+
+    environment:
+      SEOLEAD_LAST30DAYS_URL: http://seolead_last30days:8080
+
+    networks:
+      - seolead_backend
+      # Reaches platform_postgres. Joining is additive — nothing on that network
+      # is modified, and this service holds a least-privilege role scoped to its
+      # own database (verified by scripts/verify_db_privileges.sh).
+      - techformanord_backend
+
+    depends_on:
+      seolead_last30days:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512m
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  seolead_last30days_memory:
+    driver: local
+
+networks:
+  seolead_backend:
+    name: seolead_backend
+    driver: bridge
+  techformanord_backend:
+    external: true

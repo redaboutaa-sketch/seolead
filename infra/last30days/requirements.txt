@@ -1,0 +1,9 @@
+# Dépendances du runner uniquement. Le moteur Last30Days n'en a aucune
+# (`pyproject.toml` : `dependencies = []`, stdlib seule), donc rien ici ne le
+# concerne — et une mise à jour de ce fichier ne change pas le moteur.
+#
+# Versions épinglées à l'identique de `backend/requirements.txt` pour que les
+# deux images partagent la même surface FastAPI/Pydantic.
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1

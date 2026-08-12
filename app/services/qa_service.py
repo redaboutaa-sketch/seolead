@@ -1,0 +1,340 @@
+"""SEO and factual QA.
+
+Two layers, and only one of them is trusted.
+
+The deterministic layer produces *blocking* issues. It is mechanical, auditable and
+cannot be talked out of a finding.
+
+The LLM layer produces *advisory* findings only. A model asked "is this factually
+accurate?" will answer confidently either way, and treating that answer as proof
+would be the exact failure this pipeline exists to prevent. Its output is recorded
+as a separate QAReview row with `qa_type=LLM_ASSISTED` and never blocks on its own.
+
+The numeric check deserves a note. It extracts numbers from the body and asks
+whether each appears in the evidence. A page about solar prices that states "6 000 €"
+when no retrieved source said so is the single most damaging output this system
+could produce, so an unsupported number is blocking rather than advisory. Years,
+small counts and figures inside the primary query are excluded — they generate
+noise without carrying risk.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Iterable
+
+from app.core.enums import QAStatus
+from app.core.errors import SeoLeadError
+from app.providers.llm.base import LLMCapability, LLMProvider, LLMRequest
+from app.services.intent import normalize_query
+from app.verticals.profile import VerticalProfile
+
+logger = logging.getLogger(__name__)
+
+_PLACEHOLDER_PATTERNS = (
+    re.compile(r"lorem ipsum", re.I),
+    re.compile(r"\bTODO\b"),
+    re.compile(r"\bTBD\b"),
+    re.compile(r"\[INSERT[^\]]*\]", re.I),
+    re.compile(r"\{\{[^}]+\}\}"),
+    re.compile(r"\bXX+\b"),
+    re.compile(r"\bplaceholder\b", re.I),
+)
+
+# Numbers worth checking: anything with a decimal, a thousands separator, a
+# percent sign, a currency symbol, or four-plus digits.
+_NUMBER_PATTERN = re.compile(
+    r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{4,})\s*(?:%|€|\$|£)?"
+)
+_STANDALONE_PERCENT = re.compile(r"(?<![\w/])(\d{1,3}(?:[.,]\d+)?)\s*%")
+
+_META_TITLE_MAX = 60
+_META_DESCRIPTION_MAX = 155
+_KEYWORD_DENSITY_MAX = 0.025          # 2.5% of body words
+_MIN_BODY_WORDS = 150
+
+
+def _finding(code: str, message: str, *, blocking: bool, detail: str = "") -> dict:
+    return {"code": code, "message": message, "blocking": blocking,
+            "detail": detail[:300]}
+
+
+def _digits(text: str) -> str:
+    """Canonical numeric form: digits only.
+
+    "6 000", "6.000" and "6,000" are the same quantity written three ways across
+    fr-BE, nl-BE and en. Comparing digit strings avoids failing a page for a
+    locale's thousands separator.
+    """
+    return re.sub(r"\D", "", text)
+
+
+def _evidence_numbers(package: dict) -> set[str]:
+    corpus = " ".join(
+        [str(f.get("fact", "")) for f in package.get("facts") or []]
+        + [str(s.get("title") or "") for s in package.get("sources") or []]
+    )
+    found = {_digits(m.group(1)) for m in _NUMBER_PATTERN.finditer(corpus)}
+    found |= {_digits(m.group(1)) for m in _STANDALONE_PERCENT.finditer(corpus)}
+    return {n for n in found if n}
+
+
+def run_deterministic_qa(
+    draft: dict, brief: dict, package: dict, profile: VerticalProfile,
+    *, existing_titles: Iterable[str] = (),
+) -> dict:
+    """Return {status, score, findings, blocking_issues}. Pure and testable."""
+    findings: list[dict] = []
+
+    title = (draft.get("title") or "").strip()
+    body = (draft.get("body") or "").strip()
+    meta_title = (draft.get("meta_title") or "").strip()
+    meta_description = (draft.get("meta_description") or "").strip()
+
+    # ── Presence ─────────────────────────────────────────────────────────────
+    if not title:
+        findings.append(_finding("MISSING_TITLE", "Draft has no title", blocking=True))
+    if not body:
+        findings.append(_finding("MISSING_BODY", "Draft has no body", blocking=True))
+    if not meta_title:
+        findings.append(_finding("MISSING_META_TITLE", "No meta title", blocking=True))
+    elif len(meta_title) > _META_TITLE_MAX:
+        findings.append(_finding(
+            "META_TITLE_TOO_LONG",
+            f"Meta title is {len(meta_title)} chars (max {_META_TITLE_MAX})",
+            blocking=False))
+    if not meta_description:
+        findings.append(_finding("MISSING_META_DESCRIPTION", "No meta description",
+                                 blocking=True))
+    elif len(meta_description) > _META_DESCRIPTION_MAX:
+        findings.append(_finding(
+            "META_DESCRIPTION_TOO_LONG",
+            f"Meta description is {len(meta_description)} chars "
+            f"(max {_META_DESCRIPTION_MAX})", blocking=False))
+
+    if not body:
+        return _verdict(findings)
+
+    words = body.split()
+    if len(words) < _MIN_BODY_WORDS:
+        findings.append(_finding(
+            "BODY_TOO_SHORT",
+            f"Body has {len(words)} words (minimum {_MIN_BODY_WORDS})", blocking=True))
+
+    # ── Heading structure ────────────────────────────────────────────────────
+    h1s = re.findall(r"^#\s+.+$", body, re.M)
+    h2s = re.findall(r"^##\s+.+$", body, re.M)
+    if len(h1s) == 0:
+        findings.append(_finding("NO_H1", "Body has no H1 heading", blocking=True))
+    elif len(h1s) > 1:
+        findings.append(_finding("MULTIPLE_H1",
+                                 f"Body has {len(h1s)} H1 headings, expected 1",
+                                 blocking=True))
+    if len(h2s) < 2:
+        findings.append(_finding("WEAK_STRUCTURE",
+                                 f"Body has {len(h2s)} H2 sections, expected at least 2",
+                                 blocking=False))
+
+    # ── Placeholder leakage ──────────────────────────────────────────────────
+    for pattern in _PLACEHOLDER_PATTERNS:
+        match = pattern.search(body)
+        if match:
+            findings.append(_finding("PLACEHOLDER_LEAKED",
+                                     "Body contains unfilled placeholder text",
+                                     blocking=True, detail=match.group(0)))
+            break
+
+    # ── Forbidden phrases (vertical policy) ──────────────────────────────────
+    normalized_body = normalize_query(body)
+    for phrase in profile.forbidden_phrases:
+        if normalize_query(phrase) in normalized_body:
+            findings.append(_finding("FORBIDDEN_PHRASE",
+                                     f"Body contains a forbidden phrase: {phrase!r}",
+                                     blocking=True))
+
+    # ── Unsupported numeric claims ───────────────────────────────────────────
+    known_numbers = _evidence_numbers(package)
+    query_numbers = {_digits(m.group(1))
+                     for m in _NUMBER_PATTERN.finditer(brief.get("primary_query", ""))}
+    unsupported: list[str] = []
+    for match in _NUMBER_PATTERN.finditer(body):
+        raw = match.group(1)
+        canonical = _digits(raw)
+        if not canonical or canonical in known_numbers or canonical in query_numbers:
+            continue
+        # Four-digit values in a plausible year range are almost always years.
+        if len(canonical) == 4 and 1900 <= int(canonical) <= 2100:
+            continue
+        unsupported.append(raw.strip())
+    for match in _STANDALONE_PERCENT.finditer(body):
+        canonical = _digits(match.group(1))
+        if canonical and canonical not in known_numbers:
+            unsupported.append(match.group(0).strip())
+
+    if unsupported:
+        unique = sorted(set(unsupported))[:10]
+        findings.append(_finding(
+            "UNSUPPORTED_NUMERIC_CLAIM",
+            f"{len(set(unsupported))} numeric value(s) appear in the body but in no "
+            f"retrieved source", blocking=True, detail=", ".join(unique)))
+
+    # ── Restricted topics asserted without evidence ──────────────────────────
+    for claim in brief.get("cautionary_claims", []):
+        if claim.get("has_supported_evidence"):
+            continue
+        topic = normalize_query(str(claim.get("topic", "")))
+        if not topic or topic not in normalized_body:
+            continue
+        # Mentioning a restricted topic is allowed; attaching a number to it is not.
+        window_pattern = re.compile(
+            re.escape(topic) + r".{0,120}?\d|\d.{0,120}?" + re.escape(topic),
+            re.S,
+        )
+        if window_pattern.search(normalized_body):
+            findings.append(_finding(
+                "RESTRICTED_CLAIM_QUANTIFIED",
+                f"Restricted topic {claim['topic']!r} appears with a figure but no "
+                f"dated source supports it", blocking=True))
+
+    # ── Required facts actually used ─────────────────────────────────────────
+    required = brief.get("required_facts") or []
+    if required:
+        used = sum(1 for f in required
+                   if _fact_echoed(str(f.get("fact", "")), normalized_body))
+        if used == 0:
+            findings.append(_finding(
+                "REQUIRED_FACTS_UNUSED",
+                f"None of the {len(required)} supported facts appear in the body",
+                blocking=True))
+        elif used < max(1, len(required) // 3):
+            findings.append(_finding(
+                "REQUIRED_FACTS_UNDERUSED",
+                f"Only {used} of {len(required)} supported facts appear in the body",
+                blocking=False))
+    else:
+        # No supported facts at all: the draft cannot be evidence-based.
+        findings.append(_finding(
+            "NO_SUPPORTED_EVIDENCE",
+            "The research package contained no supported facts, so this draft "
+            "cannot be evidence-based", blocking=True))
+
+    # ── Source traceability ──────────────────────────────────────────────────
+    if not (brief.get("required_sources") or []):
+        findings.append(_finding(
+            "NO_TRACEABLE_SOURCES",
+            "Brief carries no source URLs, so no claim in the draft is traceable",
+            blocking=True))
+
+    # ── Keyword stuffing ─────────────────────────────────────────────────────
+    primary = normalize_query(brief.get("primary_query", ""))
+    if primary and words:
+        occurrences = normalized_body.count(primary)
+        density = (occurrences * len(primary.split())) / len(words)
+        if density > _KEYWORD_DENSITY_MAX:
+            findings.append(_finding(
+                "KEYWORD_STUFFING",
+                f"Primary query appears {occurrences} times "
+                f"({density:.1%} of body words, max {_KEYWORD_DENSITY_MAX:.1%})",
+                blocking=True))
+
+    # ── Duplicate title ──────────────────────────────────────────────────────
+    normalized_title = normalize_query(title)
+    for existing in existing_titles:
+        if normalize_query(existing) == normalized_title:
+            findings.append(_finding("DUPLICATE_TITLE",
+                                     "A draft with this title already exists",
+                                     blocking=True))
+            break
+
+    # ── CTA present ──────────────────────────────────────────────────────────
+    cta = brief.get("cta_strategy") or {}
+    if not cta.get("code"):
+        findings.append(_finding(
+            "NO_CTA",
+            "No conversion strategy is defined; a page that only ranks is not "
+            "publishable", blocking=True))
+
+    return _verdict(findings)
+
+
+def _fact_echoed(fact: str, normalized_body: str) -> bool:
+    """Whether a fact's substance shows up in the body.
+
+    Exact-substring matching would fail on any rewording, which is most of them.
+    Instead: does a majority of the fact's distinctive words appear?
+    """
+    tokens = [t for t in normalize_query(fact).split() if len(t) > 4]
+    if not tokens:
+        return False
+    hits = sum(1 for t in tokens if t in normalized_body)
+    return hits >= max(2, len(tokens) // 2)
+
+
+def _verdict(findings: list[dict]) -> dict:
+    blocking = [f for f in findings if f["blocking"]]
+    advisory = [f for f in findings if not f["blocking"]]
+    # Score is a coarse signal for operators, not a gate. The gate is `blocking`.
+    score = max(0, 100 - 25 * len(blocking) - 5 * len(advisory))
+    return {
+        "status": (QAStatus.FAILED if blocking else QAStatus.PASSED).value,
+        "score": score,
+        "findings": findings,
+        "blocking_issues": blocking,
+    }
+
+
+_QA_SYSTEM = (
+    "You review a draft web page against its brief. You are an advisor, not a "
+    "gate: report concerns, do not approve. Judge only: search-intent alignment, "
+    "usefulness to the reader, repetition, keyword stuffing, unsupported claims, "
+    "and whether the call to action fits. Reply with JSON only: "
+    "{\"findings\": [{\"code\": str, \"message\": str, \"severity\": "
+    "\"low\"|\"medium\"|\"high\"}]}"
+)
+
+
+async def run_llm_qa(
+    draft: dict, brief: dict, *, llm: LLMProvider, correlation_id: str,
+) -> dict:
+    """Advisory only. Its findings are never blocking, by construction."""
+    if not llm.configured:
+        return {"status": QAStatus.SKIPPED.value, "score": None,
+                "findings": [], "blocking_issues": []}
+
+    prompt = json.dumps({
+        "primary_query": brief["primary_query"],
+        "search_intent": brief["search_intent"],
+        "content_type": brief["content_type"],
+        "target_audience": brief["target_audience"],
+        "call_to_action": brief["cta_strategy"],
+        "title": draft.get("title"),
+        "meta_description": draft.get("meta_description"),
+        "body": (draft.get("body") or "")[:12000],
+    }, ensure_ascii=False)
+
+    try:
+        response = await llm.generate(LLMRequest(
+            capability=LLMCapability.SEO_QA, system=_QA_SYSTEM, prompt=prompt,
+            response_format="json", temperature=0.1, max_tokens=1500,
+            correlation_id=correlation_id,
+        ))
+        parsed = json.loads(response.content)
+        raw_findings = parsed.get("findings") or []
+    except (SeoLeadError, json.JSONDecodeError, TypeError, AttributeError) as exc:
+        logger.warning("LLM QA skipped: %s", type(exc).__name__,
+                       extra={"correlation_id": correlation_id})
+        return {"status": QAStatus.SKIPPED.value, "score": None,
+                "findings": [], "blocking_issues": []}
+
+    findings = [
+        {"code": str(f.get("code", "LLM_FINDING"))[:64],
+         "message": str(f.get("message", ""))[:500],
+         "severity": str(f.get("severity", "low"))[:16],
+         # Always false. An LLM does not get to block, and does not get to pass.
+         "blocking": False}
+        for f in raw_findings if isinstance(f, dict)
+    ][:25]
+
+    return {"status": QAStatus.PASSED.value, "score": None,
+            "findings": findings, "blocking_issues": []}
