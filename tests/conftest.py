@@ -84,6 +84,44 @@ def settings_with_llm() -> Settings:
     )
 
 
+@pytest.fixture
+def settings_dataforseo() -> Settings:
+    return Settings(
+        SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
+        DATAFORSEO_LOGIN="test-login",
+        DATAFORSEO_PASSWORD="test-password-not-real",
+        DATAFORSEO_BASE_URL="https://dataforseo.invalid",
+        SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
+    )
+
+
+@pytest.fixture
+def settings_tavily() -> Settings:
+    return Settings(
+        SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
+        TAVILY_API_KEY="test-tavily-key-not-real",
+        TAVILY_BASE_URL="https://tavily.invalid",
+        SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
+    )
+
+
+@pytest.fixture
+def settings_all_providers() -> Settings:
+    """Every provider configured. Still no network — transports are mocked."""
+    return Settings(
+        SEOLEAD_INTERNAL_API_KEY="test-key-not-a-real-secret",
+        DATAFORSEO_LOGIN="test-login",
+        DATAFORSEO_PASSWORD="test-password-not-real",
+        DATAFORSEO_BASE_URL="https://dataforseo.invalid",
+        TAVILY_API_KEY="test-tavily-key-not-real",
+        TAVILY_BASE_URL="https://tavily.invalid",
+        SEOLEAD_LLM_API_KEY="test-llm-key-not-a-real-secret",
+        SEOLEAD_LLM_BASE_URL="https://llm.invalid/v1",
+        SEOLEAD_LLM_MODEL="test-model",
+        SEOLEAD_DATABASE_URL="sqlite+aiosqlite:///:memory:",
+    )
+
+
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

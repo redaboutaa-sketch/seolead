@@ -13,16 +13,22 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_llm, get_research_provider, require_internal_key
+from app.api.deps import (get_community_provider, get_llm, get_research_provider,
+                          get_search_provider, get_web_provider,
+                          require_internal_key)
 from app.core.enums import ApprovalState
 from app.core.errors import InvalidVertical, SeoLeadError
 from app.db.session import get_session
-from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
-                        ResearchPackage, ResearchRun)
+from app.core.config import Settings, get_settings
+from app.models import (Approval, ContentBrief, ContentDraft, ProviderUsage,
+                        QAReview, ResearchPackage, ResearchRun, SeoOpportunity,
+                        SerpQuestionRow, SerpResultRow, SerpSnapshotRow)
 from app.providers.llm.base import LLMProvider
 from app.providers.research.base import ResearchProvider
 from app.services import approval_service
 from app.services.pipeline import run_pipeline
+from app.services.pipeline_v2 import run_pipeline_v2
+from app.services.research_cache import freshness_policy
 from app.verticals.profile import available_profiles
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"],
@@ -36,6 +42,14 @@ class ResearchJobRequest(BaseModel):
     language: str | None = Field(None, max_length=8)
     correlation_id: str | None = Field(None, max_length=64)
     stop_after: str | None = Field(None, pattern="^(package|brief)$")
+    device: str = Field("desktop", pattern="^(desktop|mobile)$")
+    # Bypass the freshness cache and pay for fresh research.
+    force_refresh: bool = False
+    # Override the vertical's community-research policy for this job only.
+    force_community: bool | None = None
+    # v2 is the Phase 3 pipeline (SERP + relevance gate). v1 is the Phase 2 path,
+    # kept so a vertical with no SERP budget can still produce a brief.
+    engine: str = Field("v2", pattern="^(v1|v2)$")
 
     @field_validator("vertical")
     @classmethod
@@ -65,26 +79,39 @@ async def list_verticals() -> dict:
 async def create_research_job(
     payload: ResearchJobRequest,
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
     research: ResearchProvider = Depends(get_research_provider),
+    search: object = Depends(get_search_provider),
+    web: ResearchProvider = Depends(get_web_provider),
+    community: ResearchProvider = Depends(get_community_provider),
     llm: LLMProvider = Depends(get_llm),
 ) -> dict:
     """Run the bounded pipeline synchronously and return every artefact id.
 
-    Synchronous on purpose: Phase 2 has no queue, and an operator who triggered a
-    job wants the ids, not a polling loop.
+    Synchronous on purpose: an operator who triggered a job wants the ids, not a
+    polling loop.
     """
     try:
-        result = await run_pipeline(
-            session,
-            vertical_code=payload.vertical,
-            query=payload.query,
-            market=payload.market,
-            language=payload.language,
-            research_provider=research,
-            llm=llm,
-            correlation_id=payload.correlation_id,
-            stop_after=payload.stop_after,
-        )
+        if payload.engine == "v1":
+            result = await run_pipeline(
+                session, vertical_code=payload.vertical, query=payload.query,
+                market=payload.market, language=payload.language,
+                research_provider=research, llm=llm,
+                correlation_id=payload.correlation_id,
+                stop_after=payload.stop_after,
+            )
+        else:
+            result = await run_pipeline_v2(
+                session, settings=settings, vertical_code=payload.vertical,
+                query=payload.query, market=payload.market,
+                language=payload.language, device=payload.device,
+                search_provider=search, web_provider=web,
+                community_provider=community, llm=llm,
+                correlation_id=payload.correlation_id,
+                force_refresh=payload.force_refresh,
+                force_community=payload.force_community,
+                stop_after=payload.stop_after,
+            )
     except InvalidVertical as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"code": exc.code, "message": exc.detail}) from exc
@@ -93,6 +120,119 @@ async def create_research_job(
                             detail={"code": exc.code, "message": exc.detail}) from exc
 
     return result.as_dict()
+
+
+@router.get("/credentials")
+async def credential_status(settings: Settings = Depends(get_settings)) -> dict:
+    """CONFIGURED / NOT_CONFIGURED per provider.
+
+    Statuses only — no value, no prefix, no length. A report that leaks four
+    characters of a key is still a leak.
+    """
+    return {"credentials": settings.credential_report(),
+            "freshness_policy": freshness_policy(settings)}
+
+
+@router.get("/research-packages/{package_id}/rejected")
+async def get_rejected_evidence(
+    package_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Every source the relevance gate threw away, and why.
+
+    This endpoint exists because Phase 2 could not answer "why was this source
+    dropped", which is the first question asked whenever the gate misbehaves.
+    """
+    package = await session.get(ResearchPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return {
+        "package_id": str(package.id),
+        "query": package.query,
+        "eligible_count": len(package.eligible_evidence or []),
+        "rejected_count": len(package.rejected_evidence or []),
+        "rejected": [
+            {
+                "ref": r.get("ref"), "provider": r.get("provider"),
+                "url": r.get("url"), "title": r.get("title"),
+                "status": r.get("rejection_status"),
+                "reason": r.get("rejection_reason"),
+                "relevance": r.get("relevance"),
+                "source_quality": r.get("source_quality"),
+            }
+            for r in (package.rejected_evidence or [])
+        ],
+    }
+
+
+@router.get("/serp-snapshots/{snapshot_id}")
+async def get_serp_snapshot(
+    snapshot_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> dict:
+    snapshot = await session.get(SerpSnapshotRow, snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="not found")
+    results = (await session.execute(
+        select(SerpResultRow).where(SerpResultRow.serp_snapshot_id == snapshot.id)
+        .order_by(SerpResultRow.rank_absolute))).scalars().all()
+    questions = (await session.execute(
+        select(SerpQuestionRow).where(
+            SerpQuestionRow.serp_snapshot_id == snapshot.id))).scalars().all()
+    return {
+        "id": str(snapshot.id), "provider": snapshot.provider,
+        "query": snapshot.query, "location": snapshot.location_name,
+        "language": snapshot.language_code, "device": snapshot.device,
+        "retrieved_at": snapshot.retrieved_at.isoformat(),
+        "organic_count": snapshot.organic_count,
+        "provider_cost_usd": snapshot.provider_cost_usd,
+        "analysis": snapshot.analysis,
+        "organic": [
+            {"rank": r.rank_group or r.rank_absolute, "domain": r.domain,
+             "url": r.url, "title": r.title, "shape": r.shape}
+            for r in results
+        ],
+        "questions": [{"kind": q.kind, "text": q.text} for q in questions],
+    }
+
+
+@router.get("/opportunities/{opportunity_id}")
+async def get_opportunity(
+    opportunity_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> dict:
+    opportunity = await session.get(SeoOpportunity, opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return {
+        "id": str(opportunity.id), "overall_score": opportunity.overall_score,
+        "confidence": opportunity.confidence,
+        "version": opportunity.score_version,
+        "components": opportunity.components,
+        "missing_inputs": opportunity.missing_inputs,
+        "interpretation": ("Prioritisation heuristic, not a prediction. Confidence "
+                           "is the share of scoring weight actually measured."),
+    }
+
+
+@router.get("/usage/{correlation_id}")
+async def get_usage(
+    correlation_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    rows = (await session.execute(
+        select(ProviderUsage).where(
+            ProviderUsage.correlation_id == correlation_id[:64]))).scalars().all()
+    known = [r.cost_usd for r in rows if r.cost_usd is not None]
+    return {
+        "correlation_id": correlation_id,
+        "events": [
+            {"provider": r.provider, "operation": r.operation,
+             "requests": r.requests, "units": r.units, "cost_usd": r.cost_usd,
+             "cost_is_actual": r.cost_is_actual, "duration_ms": r.duration_ms}
+            for r in rows
+        ],
+        # None, not 0.0: a job whose providers report no cost has an unknown
+        # spend, not a free one.
+        "total_cost_usd": round(sum(known), 6) if known else None,
+        "unpriced_events": sum(1 for r in rows if r.cost_usd is None),
+    }
 
 
 @router.get("/research-packages/{package_id}")

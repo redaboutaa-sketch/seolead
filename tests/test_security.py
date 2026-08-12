@@ -173,18 +173,38 @@ class TestSecretRedaction:
 
 class TestNoSecretsInRepo:
     def test_env_example_has_no_real_looking_values(self):
+        """No value in the template may look like a credential.
+
+        Asserted against the SHAPE of a secret rather than an allowlist of every
+        legal configuration value — an allowlist grows with each new setting and
+        fails for the wrong reason, which trains people to edit the test instead
+        of reading it.
+        """
         import pathlib
+        import re
+
+        secret_shaped = re.compile(
+            r"^(sk-|ghp_|gho_|tvly-|xox[baprs]-|AKIA|eyJ)"      # known prefixes
+            r"|^[A-Za-z0-9+/]{32,}={0,2}$"                       # base64-ish blob
+            r"|^[0-9a-f]{32,}$"                                  # long hex
+        )
+        # Credential-bearing settings must be EMPTY or an obvious placeholder.
+        credential_keys = re.compile(
+            r"(API_KEY|PASSWORD|SECRET|TOKEN|LOGIN|CREDENTIAL)$", re.I)
 
         text = (pathlib.Path(__file__).parents[1] / ".env.example").read_text()
         for line in text.splitlines():
-            if "=" not in line or line.strip().startswith("#"):
+            stripped = line.strip()
+            if "=" not in stripped or stripped.startswith("#"):
                 continue
-            _, _, value = line.partition("=")
-            value = value.strip()
-            assert not value.startswith("sk-"), line
-            assert not value.startswith("ghp_"), line
-            # Placeholders and empties only.
-            if value and "CHANGE_ME" not in value:
-                assert value.startswith(("http://", "https://", "postgresql")) or \
-                    value.isdigit() or value in {
-                        "dev", "INFO", "openai_compatible", "gpt-4o-mini"}, line
+            key, _, value = stripped.partition("=")
+            key, value = key.strip(), value.strip()
+            if not value:
+                continue
+
+            assert not secret_shaped.match(value), \
+                f"{key} carries a credential-shaped value"
+
+            if credential_keys.search(key):
+                assert "CHANGE_ME" in value, \
+                    f"{key} must be empty or an explicit placeholder, got {value!r}"

@@ -36,3 +36,9 @@ forbidden_phrases:
 commercial_terms: [price, cost, quote, budget, how much]
 comparison_terms: [comparison, versus, vs, best, which]
 local_terms: [paris, lyon]
+
+# The second vertical deliberately enables community research, so the routing
+# tests can prove the policy is read from configuration rather than hard-coded.
+community_research_enabled: true
+keyword_metrics_enabled: false
+authoritative_domains: []

@@ -56,6 +56,19 @@ class VerticalProfile(BaseModel):
     # route every page to the wrong content type and the wrong CTA.
     market_terms: list[str] = Field(default_factory=list)
 
+    # ── Provider policy (Phase 3) ────────────────────────────────────────────
+    # Whether community/discussion research is worth paying for in this vertical.
+    # Phase 2 measured that Last30Days indexes technical communities: valuable
+    # when the audience IS that community, actively harmful for consumer
+    # commercial queries, where it supplied a racing-game post as the only
+    # "evidence". Off by default.
+    community_research_enabled: bool = False
+    # Keyword metrics cost money per call and are not needed on every job.
+    keyword_metrics_enabled: bool = True
+    # Domains whose claims this vertical treats as authoritative regardless of the
+    # generic classifier — regulators and grid operators for the market.
+    authoritative_domains: list[str] = Field(default_factory=list)
+
     def selectable_content_types(self) -> list[ContentType]:
         """Only Phase 2 types are selectable, whatever the profile lists.
 

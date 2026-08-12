@@ -10,6 +10,48 @@ That is not architectural taste — Phase 2 immediately needed it. The first rea
 research run proved Last30Days cannot serve the Solar pilot, and replacing it means
 adding one adapter, not rewriting the factory.
 
+## Phase 3 as built
+
+```
+  operator ─▶ CLI `seolead research run`  /  POST /internal/v1/research-jobs
+                              │
+┌─────────────────────────────▼──────────────────────────────────────────────┐
+│ PROVIDER POLICY (deterministic)   plan_providers(query, intent, profile)    │
+│   SERP: always · WEB: always · COMMUNITY: per-vertical, off for SOLAR_BE    │
+└─────────────┬──────────────────────────┬───────────────────────────────────┘
+              │                          │
+   ┌──────────▼─────────┐    ┌───────────▼──────────┐   ┌───────────────────┐
+   │ DataForSEO         │    │ Tavily               │   │ Last30Days        │
+   │ SERP·KEYWORD_METRIC│    │ WEB_RESEARCH·EXTRACT │   │ RECENT_DISCUSSION │
+   │ cost: reported     │    │ cost: unknown        │   │ (policy-gated)    │
+   └──────────┬─────────┘    └───────────┬──────────┘   └─────────┬─────────┘
+              │                          │                        │
+              │              ┌───────────▼────────────────────────▼───────┐
+              │              │ RELEVANCE GATE                             │
+              │              │  A: topic vs modifier vs market tokens     │
+              │              │     zero topic match ⇒ IRRELEVANT (hard)   │
+              │              │  B: semantic, LOW_RELEVANCE only, never    │
+              │              │     overturns a hard rejection             │
+              │              │  rejected sources KEPT with their reason   │
+              │              └───────────┬────────────────────────────────┘
+              │                          │
+    ┌─────────▼──────────┐   ┌───────────▼───────────────────────────────┐
+    │ SERP ANALYSIS      │   │ SOURCE QUALITY  ×  CLAIM RISK             │
+    │ shapes · gap · PAA │   │ OFFICIAL…COMMUNITY   LOW/MEDIUM/HIGH      │
+    │ no competitor copy │   │ HIGH-risk needs INSTITUTIONAL or better   │
+    └─────────┬──────────┘   └───────────┬───────────────────────────────┘
+              └──────────┬───────────────┘
+                         ▼
+              ResearchPackage V2   eligible + rejected + provenance
+                         ▼
+              Opportunity Score v1  unknown ≠ zero; confidence = measured weight
+                         ▼
+              ContentBrief  →  OpenAI draft  →  Factual QA V2  →  SEO QA V2
+                                                (HIGH+UNSUPPORTED blocks)
+                         ▼
+                  HUMAN APPROVAL (PENDING)
+```
+
 ## Phase 2 as built
 
 ```
@@ -161,3 +203,59 @@ whole evidence model depends on.
 3. **Advisory QA is unproven against a real model.** Exercised only with a stub.
 4. **One provider per port.** The registries are simple `if` statements; they
    become tables when a second implementation lands.
+
+
+---
+
+# Phase 3 additions
+
+## Capability routing
+
+Downstream code asks for a *capability*, never a provider by name.
+
+```
+DataForSEO  SERP · KEYWORD_METRICS
+Tavily      WEB_RESEARCH · CONTENT_EXTRACTION
+Last30Days  RECENT_DISCUSSION · COMMUNITY_SIGNAL
+```
+
+`plan_providers()` decides which run for a given job, deterministically. An LLM
+does not get to switch on a paid provider. Community research is off by default and
+enabled per vertical, because Phase 2 measured that it indexes technical
+communities — valuable when the audience *is* that community, actively harmful for
+consumer commercial queries.
+
+## The relevance gate
+
+See `docs/RELEVANCE_GATE.md`. The load-bearing idea is that a query's words are not
+equally about its subject: `prix` is a commercial frame, `belgique` is the market's
+name, and only `panneaux solaires` says what the query is about. Zero topic overlap
+is a hard rejection, which is what stops "Grand Prix Circuit" scoring on `prix`.
+
+## Three independent axes
+
+Relevance, quality and risk are separate and must not be conflated:
+
+- a forum thread can be perfectly relevant and a poor authority for a tax rate
+- a government page can be authoritative and off-topic
+- **ranking is not authority** — nothing in quality classification reads a SERP
+  position, structurally guaranteed by `classify_domain` never being given one
+
+## Where determinism still holds
+
+Phase 2's rule is unchanged and now covers more ground: relevance Stage A, package
+assembly, source quality, claim risk, factual QA and SEO QA are all deterministic.
+The model contributes synthesis (title, outline, draft), one narrow classification
+(LOW_RELEVANCE only), and advisory review that can never block.
+
+## New known gaps
+
+1. **Relevance matching is lexical.** A source saying `photovoltaïque` where the
+   query says `panneaux solaires` scores lower than it deserves. Embeddings over
+   `pgvector` are the proper fix and remain unused.
+2. **Thresholds are unvalidated.** Chosen so the Phase 2 failure is rejected and
+   obvious good cases pass. Not measured against a labelled corpus.
+3. **Opportunity weights are guesses.** Phase 7 replaces them with weights learned
+   from conversion data.
+4. **The live path is unproven.** Every provider is exercised against mock
+   transports only; no external call has been made.

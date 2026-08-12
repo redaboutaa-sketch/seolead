@@ -87,3 +87,25 @@ local_terms: [wallonie, flandre, bruxelles, liège, namur, charleroi, gand, anve
 # The country's own names. Not local terms — "prix panneaux solaires Belgique" is
 # a national commercial query, not a request for city-level content.
 market_terms: [belgique, belgie, belgië, belgium]
+
+# ── Provider policy (Phase 3) ────────────────────────────────────────────────
+# Phase 2 measured that community research returns tech-community discussion,
+# which supplied a racing-game post as the only "evidence" for a solar pricing
+# query. A Belgian homeowner researching installation costs is not on Hacker News.
+community_research_enabled: false
+keyword_metrics_enabled: true
+
+# Belgian energy regulators, grid operators and public authorities. High-risk
+# claims (subsidies, tariffs, obligations) need a source of this calibre.
+authoritative_domains:
+  - energie.wallonie.be
+  - energiesparen.be
+  - leefmilieu.brussels
+  - environnement.brussels
+  - cwape.be
+  - vreg.be
+  - brugel.brussels
+  - creg.be
+  - fluvius.be
+  - ores.be
+  - economie.fgov.be

@@ -31,12 +31,18 @@ from app.core.enums import ApprovalState
 from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
-from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
-                        ResearchPackage, Site, Vertical)
+from app.models import (Approval, ContentBrief, ContentDraft, ProviderUsage,
+                        QAReview, ResearchPackage, SeoOpportunity, Site,
+                        SerpQuestionRow, SerpResultRow, SerpSnapshotRow, Vertical)
 from app.providers.llm.registry import get_llm_provider
 from app.providers.research.last30days import Last30DaysProvider
+from app.providers.research.tavily import TavilyResearchProvider
+from app.providers.search.dataforseo import DataForSEOProvider
+from app.providers.search.location import supported_contexts
 from app.services import approval_service
 from app.services.pipeline import run_pipeline
+from app.services.pipeline_v2 import run_pipeline_v2
+from app.services.research_cache import freshness_policy
 from app.verticals.profile import available_profiles, load_profile
 
 EXIT_OK = 0
@@ -94,16 +100,27 @@ async def cmd_research_run(args: argparse.Namespace) -> int:
     settings = get_settings()
     async with get_sessionmaker()() as session:
         try:
-            result = await run_pipeline(
-                session,
-                vertical_code=args.vertical.upper(),
-                query=args.query,
-                market=args.market,
-                language=args.language,
-                research_provider=Last30DaysProvider(settings),
-                llm=get_llm_provider(settings),
-                stop_after=args.stop_after,
-            )
+            if args.engine == "v1":
+                result = await run_pipeline(
+                    session, vertical_code=args.vertical.upper(), query=args.query,
+                    market=args.market, language=args.language,
+                    research_provider=Last30DaysProvider(settings),
+                    llm=get_llm_provider(settings), stop_after=args.stop_after,
+                )
+            else:
+                result = await run_pipeline_v2(
+                    session, settings=settings,
+                    vertical_code=args.vertical.upper(), query=args.query,
+                    market=args.market, language=args.language,
+                    device=args.device,
+                    search_provider=DataForSEOProvider(settings),
+                    web_provider=TavilyResearchProvider(settings),
+                    community_provider=Last30DaysProvider(settings),
+                    llm=get_llm_provider(settings),
+                    force_refresh=args.force_refresh,
+                    force_community=args.force_community,
+                    stop_after=args.stop_after,
+                )
         except SeoLeadError as exc:
             _emit({"error_code": exc.code, "detail": exc.detail})
             return EXIT_ERROR
@@ -111,6 +128,107 @@ async def cmd_research_run(args: argparse.Namespace) -> int:
     _emit(result.as_dict())
     if result.error_code:
         return EXIT_BLOCKED
+    return EXIT_OK
+
+
+async def cmd_credentials(args: argparse.Namespace) -> int:
+    """Report CONFIGURED / NOT_CONFIGURED. Never a value, never a prefix."""
+    settings = get_settings()
+    report = settings.credential_report()
+    _emit({
+        "credentials": report,
+        "ready_for_live_test": all(
+            report[k] == "CONFIGURED" for k in ("DATAFORSEO", "TAVILY", "OPENAI")
+        ),
+        "search_contexts": supported_contexts(),
+        "freshness_policy": freshness_policy(settings),
+    })
+    return EXIT_OK
+
+
+async def cmd_package_rejected(args: argparse.Namespace) -> int:
+    """Show what the relevance gate threw away, and why."""
+    async with get_sessionmaker()() as session:
+        package = await session.get(ResearchPackage, uuid.UUID(args.id))
+        if package is None:
+            _emit({"error": "not found"})
+            return EXIT_ERROR
+        _emit({
+            "package_id": str(package.id), "query": package.query,
+            "eligible_count": len(package.eligible_evidence or []),
+            "rejected_count": len(package.rejected_evidence or []),
+            "rejected": [
+                {"ref": r.get("ref"), "provider": r.get("provider"),
+                 "title": r.get("title"), "url": r.get("url"),
+                 "status": r.get("rejection_status"),
+                 "reason": r.get("rejection_reason")}
+                for r in (package.rejected_evidence or [])
+            ],
+        })
+    return EXIT_OK
+
+
+async def cmd_serp_show(args: argparse.Namespace) -> int:
+    async with get_sessionmaker()() as session:
+        snapshot = await session.get(SerpSnapshotRow, uuid.UUID(args.id))
+        if snapshot is None:
+            _emit({"error": "not found"})
+            return EXIT_ERROR
+        results = (await session.execute(
+            select(SerpResultRow)
+            .where(SerpResultRow.serp_snapshot_id == snapshot.id)
+            .order_by(SerpResultRow.rank_absolute))).scalars().all()
+        questions = (await session.execute(
+            select(SerpQuestionRow).where(
+                SerpQuestionRow.serp_snapshot_id == snapshot.id))).scalars().all()
+        _emit({
+            "id": str(snapshot.id), "query": snapshot.query,
+            "location": snapshot.location_name, "language": snapshot.language_code,
+            "device": snapshot.device,
+            "retrieved_at": snapshot.retrieved_at.isoformat(),
+            "organic_count": snapshot.organic_count,
+            "provider_cost_usd": snapshot.provider_cost_usd,
+            "analysis": snapshot.analysis,
+            "organic": [{"rank": r.rank_group or r.rank_absolute,
+                         "domain": r.domain, "title": r.title, "url": r.url}
+                        for r in results],
+            "questions": [{"kind": q.kind, "text": q.text} for q in questions],
+        })
+    return EXIT_OK
+
+
+async def cmd_opportunity_show(args: argparse.Namespace) -> int:
+    async with get_sessionmaker()() as session:
+        opportunity = await session.get(SeoOpportunity, uuid.UUID(args.id))
+        if opportunity is None:
+            _emit({"error": "not found"})
+            return EXIT_ERROR
+        _emit({
+            "id": str(opportunity.id), "overall_score": opportunity.overall_score,
+            "confidence": opportunity.confidence,
+            "version": opportunity.score_version,
+            "components": opportunity.components,
+            "missing_inputs": opportunity.missing_inputs,
+        })
+    return EXIT_OK
+
+
+async def cmd_usage_show(args: argparse.Namespace) -> int:
+    async with get_sessionmaker()() as session:
+        rows = (await session.execute(
+            select(ProviderUsage).where(
+                ProviderUsage.correlation_id == args.correlation_id[:64])
+        )).scalars().all()
+    known = [r.cost_usd for r in rows if r.cost_usd is not None]
+    _emit({
+        "correlation_id": args.correlation_id,
+        "events": [{"provider": r.provider, "operation": r.operation,
+                    "requests": r.requests, "units": r.units,
+                    "cost_usd": r.cost_usd, "cost_is_actual": r.cost_is_actual,
+                    "duration_ms": r.duration_ms} for r in rows],
+        "total_cost_usd": round(sum(known), 6) if known else None,
+        "unpriced_events": sum(1 for r in rows if r.cost_usd is None),
+    })
     return EXIT_OK
 
 
@@ -292,6 +410,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stop-after", dest="stop_after",
                      choices=["package", "brief"],
                      help="stop early (useful without an LLM credential)")
+    run.add_argument("--engine", choices=["v1", "v2"], default="v2",
+                     help="v2 = SERP + relevance gate (default); v1 = Phase 2 path")
+    run.add_argument("--device", choices=["desktop", "mobile"], default="desktop")
+    run.add_argument("--force-refresh", dest="force_refresh", action="store_true",
+                     help="bypass the freshness cache and pay for fresh research")
+    community = run.add_mutually_exclusive_group()
+    community.add_argument("--community", dest="force_community",
+                           action="store_true", default=None,
+                           help="force community research on for this job")
+    community.add_argument("--no-community", dest="force_community",
+                           action="store_false",
+                           help="force community research off for this job")
     run.set_defaults(func=cmd_research_run)
 
     package = sub.add_parser("package", help="research package commands")
@@ -299,6 +429,30 @@ def build_parser() -> argparse.ArgumentParser:
     package_show = package_sub.add_parser("show")
     package_show.add_argument("id")
     package_show.set_defaults(func=cmd_package_show)
+    package_rejected = package_sub.add_parser(
+        "rejected", help="sources the relevance gate excluded, and why")
+    package_rejected.add_argument("id")
+    package_rejected.set_defaults(func=cmd_package_rejected)
+
+    serp = sub.add_parser("serp", help="SERP snapshots")
+    serp_sub = serp.add_subparsers(dest="action", required=True)
+    serp_show = serp_sub.add_parser("show")
+    serp_show.add_argument("id")
+    serp_show.set_defaults(func=cmd_serp_show)
+
+    opportunity = sub.add_parser("opportunity", help="SEO opportunity scores")
+    opportunity_sub = opportunity.add_subparsers(dest="action", required=True)
+    opportunity_show = opportunity_sub.add_parser("show")
+    opportunity_show.add_argument("id")
+    opportunity_show.set_defaults(func=cmd_opportunity_show)
+
+    usage = sub.add_parser("usage", help="provider usage and cost for a job")
+    usage.add_argument("correlation_id")
+    usage.set_defaults(func=cmd_usage_show)
+
+    credentials = sub.add_parser(
+        "credentials", help="report CONFIGURED / NOT_CONFIGURED per provider")
+    credentials.set_defaults(func=cmd_credentials)
 
     brief = sub.add_parser("brief", help="content brief commands")
     brief_sub = brief.add_subparsers(dest="action", required=True)

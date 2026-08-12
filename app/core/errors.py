@@ -12,6 +12,9 @@ class ErrorCode:
     LAST30DAYS_TIMEOUT = "LAST30DAYS_TIMEOUT"
     LAST30DAYS_CONTRACT_ERROR = "LAST30DAYS_CONTRACT_ERROR"
     RESEARCH_PARTIAL = "RESEARCH_PARTIAL"
+    # Distinct from RESEARCH_FAILED: nothing went wrong, a key is simply absent.
+    # It is the most actionable failure an operator can get, so it says so.
+    PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED"
     RESEARCH_FAILED = "RESEARCH_FAILED"
     LLM_NOT_CONFIGURED = "LLM_NOT_CONFIGURED"
     LLM_TIMEOUT = "LLM_TIMEOUT"
@@ -59,6 +62,16 @@ class ResearchContractError(ResearchProviderError):
     """The payload does not honour the agreed contract. Retrying will not fix it."""
 
     code = ErrorCode.LAST30DAYS_CONTRACT_ERROR
+    retryable = False
+
+
+class ProviderNotConfigured(ResearchProviderError):
+    """A provider was asked to work without a credential.
+
+    Not retryable and not a fault: the fix is an operator action, not a retry.
+    """
+
+    code = ErrorCode.PROVIDER_NOT_CONFIGURED
     retryable = False
 
 

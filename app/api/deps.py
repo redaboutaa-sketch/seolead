@@ -44,3 +44,23 @@ def get_research_provider(
 
 def get_llm(settings: Settings = Depends(get_settings)) -> LLMProvider:
     return get_llm_provider(settings)
+
+
+def get_search_provider(settings: Settings = Depends(get_settings)):
+    """The SERP / keyword-metrics provider."""
+    from app.providers.search.dataforseo import DataForSEOProvider
+    return DataForSEOProvider(settings)
+
+
+def get_web_provider(settings: Settings = Depends(get_settings)) -> ResearchProvider:
+    """The web-research provider that supplies the factual evidence set."""
+    from app.providers.research.tavily import TavilyResearchProvider
+    return TavilyResearchProvider(settings)
+
+
+def get_community_provider(
+    settings: Settings = Depends(get_settings),
+) -> ResearchProvider:
+    """Community/discussion research. Whether it is CALLED is decided by the
+    vertical's provider policy, not by its availability here."""
+    return Last30DaysProvider(settings)

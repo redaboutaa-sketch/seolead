@@ -106,6 +106,7 @@ for at least 24 hours. Prospect 360 already has `webhook_replay_keys` and
 | `attribution.channel` | `source` | constant `seo_lead_factory` |
 | `attribution.site` / `locale` / `content_id` | `source_detail` | composite string, or `extra` |
 | the rest of `attribution` | `extra` (jsonb) | until columns exist |
+| `research_job_id`, `seo_opportunity_id`, `research_package_id`, `serp_snapshot_id` | `extra` (jsonb) | Phase 3 additions — see below |
 | `consent.*` | `consent_records` | must flow through the platform's consent path, not set as bare booleans |
 | `payload` | `extra` | |
 
@@ -155,6 +156,26 @@ This is a security control, not a modelling preference. The public-facing system
 then has no PII database to breach, RGPD erasure has exactly one owner, and the
 factory stays out of scope for most of the consent machinery. Attribution needs
 the lead's *id* and its acquisition context, not the lead's identity.
+
+## Phase 3 additions to attribution
+
+Phase 3 produces four identifiers that were not available when this contract was
+first written, and each answers a question the closed loop needs:
+
+| Field | Answers |
+|---|---|
+| `research_job_id` | which research run produced the page this lead came from |
+| `seo_opportunity_id` | what the opportunity score predicted, so Phase 7 can compare prediction against revenue |
+| `research_package_id` | which evidence set the content was written from |
+| `serp_snapshot_id` | what the SERP looked like when the decision was made |
+
+The second is the one that matters strategically. Without it, the opportunity
+score can never be calibrated — there is no way to ask "did the keywords we scored
+highly actually produce profitable customers", which is the question Phase 7
+exists to answer.
+
+All four fit in `extra` today. They should become columns before Phase 7 tries to
+learn from them.
 
 ## Non-negotiables
 

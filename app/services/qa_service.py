@@ -338,3 +338,124 @@ async def run_llm_qa(
 
     return {"status": QAStatus.PASSED.value, "score": None,
             "findings": findings, "blocking_issues": []}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEO QA V2 (Phase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+# Layered on top of `run_deterministic_qa` rather than folded into it. The Phase 2
+# checks are load-bearing and well covered by tests; changing their behaviour to
+# add new ones would have meant editing those tests to match, which is how a
+# regression suite quietly stops being one.
+#
+# V2 adds the checks the mission asks for that need Phase 3 inputs: coverage of
+# the questions Google actually surfaces, intent alignment, and content-type fit.
+# Its additions are advisory unless they indicate the page answers a different
+# question than the one it targets.
+
+def run_seo_qa_v2(
+    draft: dict, brief: dict, package: dict, profile: VerticalProfile,
+    *, existing_titles: Iterable[str] = (),
+) -> dict:
+    """Phase 2 checks, plus SERP-aware coverage and fit. Actionable findings."""
+    base = run_deterministic_qa(draft, brief, package, profile,
+                                existing_titles=existing_titles)
+    findings = list(base["findings"])
+
+    body = (draft.get("body") or "").strip()
+    title = (draft.get("title") or "").strip()
+    if not body:
+        return base
+
+    normalized_body = normalize_query(body)
+    normalized_title = normalize_query(title)
+
+    # ── Coverage of the questions Google surfaces ────────────────────────────
+    # PAA is the clearest available statement of what searchers also want to
+    # know. Missing all of it means the page answers a narrower question than the
+    # SERP says is being asked.
+    questions = [q for q in (package.get("user_questions") or []) if q][:12]
+    if questions:
+        covered = [q for q in questions if _question_covered(q, normalized_body)]
+        ratio = len(covered) / len(questions)
+        if ratio == 0:
+            findings.append(_finding(
+                "PAA_COVERAGE_NONE",
+                f"The draft addresses none of the {len(questions)} questions Google "
+                f"surfaces for this query. Consider covering: "
+                f"{'; '.join(questions[:3])}",
+                blocking=False))
+        elif ratio < 0.34:
+            findings.append(_finding(
+                "PAA_COVERAGE_LOW",
+                f"The draft addresses {len(covered)} of {len(questions)} questions "
+                f"Google surfaces. Uncovered: "
+                f"{'; '.join(q for q in questions if q not in covered)[:200]}",
+                blocking=False))
+
+    # ── Intent alignment ─────────────────────────────────────────────────────
+    intent = str(brief.get("search_intent") or "")
+    if intent in ("COMMERCIAL", "TRANSACTIONAL"):
+        commercial_hit = any(
+            normalize_query(term) in normalized_body
+            for term in profile.commercial_terms
+        )
+        if not commercial_hit:
+            findings.append(_finding(
+                "INTENT_MISALIGNED",
+                f"Brief targets {intent} intent but the body never addresses cost, "
+                f"price or quotation. A searcher with buying intent will bounce.",
+                blocking=True))
+
+    # ── Title carries the topic ──────────────────────────────────────────────
+    primary = normalize_query(brief.get("primary_query", ""))
+    if primary and normalized_title:
+        topic_tokens = {t for t in primary.split() if len(t) > 3}
+        if topic_tokens and not (topic_tokens & set(normalized_title.split())):
+            findings.append(_finding(
+                "TITLE_OFF_TOPIC",
+                "The title shares no distinctive term with the target query.",
+                blocking=True))
+
+    # ── Content-type fit ─────────────────────────────────────────────────────
+    content_type = str(brief.get("content_type") or "")
+    if content_type == "COMPARISON" and body.count("|") < 4 and \
+            len(re.findall(r"^\s*[-*]\s+", body, re.M)) < 4:
+        findings.append(_finding(
+            "COMPARISON_UNSTRUCTURED",
+            "A COMPARISON page carries neither a table nor a comparative list.",
+            blocking=False))
+
+    # ── Repetition ───────────────────────────────────────────────────────────
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if len(s) > 40]
+    if sentences:
+        seen: dict[str, int] = {}
+        for sentence in sentences:
+            key = normalize_query(sentence)[:80]
+            seen[key] = seen.get(key, 0) + 1
+        repeats = sum(1 for n in seen.values() if n > 1)
+        if repeats:
+            findings.append(_finding(
+                "REPETITION",
+                f"{repeats} sentence opening(s) repeat almost verbatim.",
+                blocking=False))
+
+    # ── Content gap the SERP revealed ────────────────────────────────────────
+    for gap in (package.get("content_gap") or [])[:3]:
+        findings.append(_finding("SERP_CONTENT_GAP", f"Opportunity: {gap}",
+                                 blocking=False))
+
+    return _verdict(findings)
+
+
+def _question_covered(question: str, normalized_body: str) -> bool:
+    """Whether the body plausibly addresses a PAA question.
+
+    Matching on the question's distinctive words rather than its wording: a page
+    can answer "combien coûte une installation" without containing that phrase.
+    """
+    tokens = [t for t in normalize_query(question).split() if len(t) > 4]
+    if not tokens:
+        return False
+    hits = sum(1 for t in tokens if t in normalized_body)
+    return hits >= max(2, len(tokens) // 2)
