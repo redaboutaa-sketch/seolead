@@ -15,7 +15,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const config = await getSiteConfig();
   if (!config?.indexable || !config.seo.sitemap_enabled) return [];
 
-  const base = config.domain ? `https://${config.domain}` : "";
+  const base = (config.seo.canonical_origin ?? "").replace(/\/$/, "");
   const entries: MetadataRoute.Sitemap = [
     { url: `${base}${localizedPath(config, config.default_language, "/")}`,
       changeFrequency: "monthly", priority: 1 },

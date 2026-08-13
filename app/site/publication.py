@@ -291,6 +291,8 @@ def draft_preview_dto(draft: ContentDraft, brief: ContentBrief,
         "meta": {"title": draft.meta_title or draft.title,
                  "description": draft.meta_description,
                  "canonical_path": _canonical_path(config, locale, slug),
+                 "canonical_url": config.canonical_url(
+                     _canonical_path(config, locale, slug)),
                  # An unapproved draft is never indexable, on any site.
                  "noindex": True},
         "sections": parse_sections(draft.body or ""),
@@ -367,6 +369,11 @@ def to_dto(snapshot: PublishedContent, config: SiteConfig) -> dict:
             "title": snapshot.meta_title or snapshot.title,
             "description": snapshot.meta_description,
             "canonical_path": snapshot.canonical_path,
+            # Absolute, built from the configured production origin — never from
+            # the host that happens to be serving the request. A canonical is a
+            # statement about where a page really lives, and the staging host is
+            # not that place.
+            "canonical_url": config.canonical_url(snapshot.canonical_path or "/"),
             "noindex": snapshot.noindex or not config.is_indexable,
         },
         "sections": snapshot.sections or [],

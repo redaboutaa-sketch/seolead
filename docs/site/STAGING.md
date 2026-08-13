@@ -3,7 +3,25 @@
 ## What is deployed
 
 `seolead_web` — Next.js standalone, bound to **127.0.0.1:3100 only**. No Traefik
-label, no public hostname, no DNS record. Traefik configuration was not touched.
+label, no public hostname. Traefik configuration was not touched.
+
+## Domain state (2026-08-13)
+
+The production domain `monprojetsolaire.be` is **configured but not routed**.
+
+| Item | State |
+|---|---|
+| domain in `SiteConfig` | `monprojetsolaire.be` |
+| canonical origin | `https://monprojetsolaire.be` |
+| DNS | **not delegated** — no NS, no SOA, no A/AAAA |
+| Traefik routing | prepared in `infra/traefik/docker-compose.public.yml`, **not applied** |
+| TLS certificate | not requested |
+| indexable | **no** — `staging: true`, `allow_indexing: false` |
+
+The routing lives in a separate overlay so that a routine `docker compose up -d`
+cannot publish the site. Applying it is the deliberate act described in
+`docs/runbooks/MONPROJETSOLAIRE_DEPLOYMENT.md`, and it is blocked on DNS
+(`docs/runbooks/MONPROJETSOLAIRE_DNS.md`).
 
 ## Reaching it
 
@@ -34,19 +52,26 @@ the preview routes refuse to serve rather than falling back to open.
 Neither reaches the browser. `web/lib/api.ts` imports `server-only`, so a client
 component that tried to read them fails the build.
 
-## Making the site public — the gate
+## Two different gates, deliberately separate
 
-Publication requires **all** of:
+**Reachability** — can a browser load the site?
 
-1. `domain` set in `config/sites/solar_be.yaml`
-2. `staging: false`
-3. `seo.allow_indexing: true`
-4. a Traefik route (a deliberate, separately-approved change)
-5. per page: `seolead content publish <content-id>`
+1. DNS pointing at this host — *pending*
+2. the Traefik overlay applied — *prepared, not applied*
+3. a certificate issued — *not requested*
 
-Steps 1–3 are refused in combination by the config validator unless they are
-coherent; step 4 has not been made and must not be made without the owner's
-decision.
+**Indexability** — may a crawler keep it?
+
+1. `domain` set — ✅ done
+2. `staging: false` — *no*
+3. `seo.allow_indexing: true` — *no*
+4. `SEOLEAD_ALLOW_INDEXING=true` at build time, removing the fail-closed
+   `X-Robots-Tag` — *no*
+5. per page: `seolead content publish <content-id>` — *not called*
+
+Completing the first gate does **not** touch the second. The site can be publicly
+reachable for owner validation while remaining entirely non-indexable, which is
+exactly the current target state.
 
 ## What must NOT be done before that decision
 

@@ -5,22 +5,29 @@ import { Footer, Header, StagingBanner } from "@/components/Layout";
 import { getSiteConfig } from "@/lib/api";
 
 /**
- * `metadataBase` is intentionally absent while the site has no domain: Next would
- * otherwise resolve canonicals against localhost and emit URLs that are wrong the
- * moment the domain arrives.
+ * `metadataBase` comes from the site's configured canonical origin, never from the
+ * host serving the request. The staging host and the canonical host are different
+ * things, and resolving canonicals against whatever answered the request is how a
+ * page ends up telling a crawler it really lives on localhost.
+ *
+ * Still absent when no origin is configured — an incomplete canonical is honest;
+ * a wrong one is not.
  */
 export async function generateMetadata(): Promise<Metadata> {
   const config = await getSiteConfig();
   const title = config?.brand_name ?? "Site en préproduction";
+  const suffix = config?.seo.default_title_suffix ?? title;
   return {
-    title: { default: title, template: `%s — ${title}` },
+    title: { default: title, template: `%s — ${suffix}` },
     description: config?.seo.default_meta_description ?? undefined,
     // Three independent conditions must hold before anything is indexable, and
     // the API computes them. Anything short of all three is noindex, nofollow.
     robots: config?.indexable
       ? { index: true, follow: true }
       : { index: false, follow: false, nocache: true },
-    ...(config?.domain ? { metadataBase: new URL(`https://${config.domain}`) } : {}),
+    ...(config?.seo.canonical_origin
+      ? { metadataBase: new URL(config.seo.canonical_origin) }
+      : {}),
   };
 }
 

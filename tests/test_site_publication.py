@@ -356,12 +356,22 @@ class TestPricePageRendering:
             assert figure in text, f"lost quantified statement: {figure}"
 
     async def test_the_dto_carries_no_source_urls(self, session, solar_site):
-        """Sources are recorded; they are not shipped to the browser."""
+        """Sources are recorded; they are not shipped to the browser.
+
+        The only URL the DTO may contain is the page's own canonical. Every other
+        `http` in the payload would be an evidence source, and Phase 3.3 shipped a
+        competitor link the one time content carried its own references.
+        """
         snapshot = await self._stage(session, solar_site)
-        dto = to_dto(snapshot, load_site("solar_be"))
-        payload = str(dto)
-        assert "energy-village.be" not in payload
-        assert "http" not in payload.replace("https://schema.org", "")
+        config = load_site("solar_be")
+        dto = to_dto(snapshot, config)
+
+        assert "energy-village.be" not in str(dto)
+        canonical = dto["meta"]["canonical_url"]
+        assert canonical.startswith("https://monprojetsolaire.be/")
+        # Remove the one permitted URL, then assert nothing else looks like one.
+        remainder = str(dto).replace(canonical, "")
+        assert "http" not in remainder
 
     async def test_unknown_vat_is_carried_not_generalised(self, session,
                                                            solar_site):
@@ -446,11 +456,18 @@ class TestContentSanitization:
 # ─── Site configuration ──────────────────────────────────────────────────────
 
 class TestSiteConfiguration:
-    def test_solar_be_is_staging_and_not_indexable(self):
+    def test_solar_be_has_its_domain_and_is_still_not_indexable(self):
+        """The domain arriving must not, on its own, make the site indexable.
+
+        This is why indexability is three conditions. Owning an address and being
+        ready to be found at it are different decisions.
+        """
         config = load_site("solar_be")
+        assert config.domain == "monprojetsolaire.be"
+        assert config.seo.canonical_origin == "https://monprojetsolaire.be"
         assert config.staging is True
+        assert config.seo.allow_indexing is False
         assert config.is_indexable is False
-        assert config.domain is None
 
     def test_a_staging_site_may_not_enable_indexing(self):
         raw = load_site("solar_be").model_dump()
@@ -460,14 +477,16 @@ class TestSiteConfiguration:
 
     def test_a_site_with_no_domain_may_not_leave_staging(self):
         raw = load_site("solar_be").model_dump()
+        raw["domain"] = None
         raw["staging"] = False
+        raw["seo"] = {**raw["seo"], "canonical_origin": None}
         with pytest.raises(ValueError, match="nowhere for it to be published"):
             SiteConfig(**raw)
 
     def test_indexability_needs_all_three_conditions(self):
         base = load_site("solar_be").model_dump()
-        base.update(domain="example.be", staging=False)
-        base["seo"]["allow_indexing"] = True
+        base.update(staging=False)
+        base["seo"] = {**base["seo"], "allow_indexing": True}
         assert SiteConfig(**base).is_indexable is True
         # Each variant removes exactly one of the three conditions. `domain: None`
         # forces staging back on, because the validator refuses the alternative.
@@ -477,9 +496,11 @@ class TestSiteConfiguration:
             variant = {**base, **override}
             assert SiteConfig(**variant).is_indexable is False
 
-    def test_brand_and_contact_placeholders_are_marked_not_invented(self):
+    def test_unsupplied_contact_and_legal_stay_empty_not_invented(self):
+        """The brand is now real. Everything the owner has NOT supplied is not."""
         config = load_site("solar_be")
-        assert config.brand_name_is_placeholder is True
+        assert config.brand_name == "Mon Projet Solaire"
+        assert config.brand_name_is_placeholder is False
         assert config.contact.company_name is None
         assert config.contact.phone is None
         assert config.legal.reviewed is False, \

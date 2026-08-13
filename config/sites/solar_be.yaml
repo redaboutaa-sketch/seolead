@@ -1,20 +1,21 @@
-# Solar Belgium — site configuration.
-#
-# Every owner-supplied value is a marked placeholder. The site is buildable,
-# testable and previewable without any of them; OWNER_INPUTS_REQUIRED_FOR_LAUNCH.md
-# lists what must arrive before launch and what can wait.
+# Mon Projet Solaire — site configuration.
 #
 # `staging: true` and `seo.allow_indexing: false` are the publication gate. The
 # loader refuses a configuration where a domainless site claims to be live, and
 # refuses a staging site that permits indexing.
+#
+# The domain is now owned and configured, and the site is STILL not indexable —
+# that is deliberate and is the whole point of keeping indexability as three
+# independent conditions rather than one flag. Having an address is not the same
+# as being ready to be found at it.
 
 site_id: solar_be
 vertical: SOLAR_BE
 
-# PLACEHOLDER — owner input required before launch.
-brand_name: "Solar Belgium (nom provisoire)"
-brand_name_is_placeholder: true
-domain: null
+# Owner decision, 2026-08-13. No longer a placeholder.
+brand_name: "Mon Projet Solaire"
+brand_name_is_placeholder: false
+domain: monprojetsolaire.be
 
 market: BE
 default_language: fr
@@ -54,11 +55,15 @@ analytics:
   ga4_measurement_id: null
 
 seo:
-  default_title_suffix: null      # set once the brand name is final
+  # Canonicals resolve against the production origin from now on, even while the
+  # site is noindex. Getting this right before launch means no page ever carries a
+  # canonical pointing at localhost or a container hostname.
+  canonical_origin: "https://monprojetsolaire.be"
+  default_title_suffix: "Mon Projet Solaire"
   default_meta_description: null
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
-  allow_indexing: false           # the publication gate
+  allow_indexing: false           # THE PUBLICATION GATE — owner decision only
 
 conversion:
   primary_cta: ESTIMATE_REQUEST

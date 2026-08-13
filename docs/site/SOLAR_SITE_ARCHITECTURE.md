@@ -1,4 +1,4 @@
-# Solar Belgium site — architecture
+# Mon Projet Solaire — site architecture
 
 ## The boundary this design exists to enforce
 
@@ -48,9 +48,19 @@ not render.
 │   /robots.txt            Disallow: / while not indexable         │
 │   /sitemap.xml           PUBLISHED only, empty while staging     │
 └──────────────────────────┬───────────────────────────────────────┘
-                           │ 127.0.0.1:3100, no Traefik label
+                           │ 127.0.0.1:3100, no Traefik label today
                            ▼
                     operator's browser only
+
+  ── prepared, NOT applied (blocked on DNS) ───────────────────────
+     monprojetsolaire.be ─┐
+  www.monprojetsolaire.be ─┴─► traefik (existing, shared)
+                                 entrypoints web:80 → websecure:443
+                                 resolver: letsencrypt (TLS-ALPN-01)
+                                 network: traefik-public
+                               └─► seolead_web:3100
+     www → apex, 301 permanent
+     X-Robots-Tag: noindex at the edge as well as in the app
 ```
 
 ## Layers
@@ -58,7 +68,8 @@ not render.
 | Layer | Location | Knows about |
 |---|---|---|
 | Vertical profile | `config/verticals/*.yaml` | what may be claimed, evidence policy |
-| Site profile | `config/sites/*.yaml` | brand, domain, locales, funnel, legal |
+| Site profile | `config/sites/*.yaml` | brand, domain, canonical origin, locales, funnel, legal |
+| Public routing | `infra/traefik/docker-compose.public.yml` | hostnames, TLS, edge headers — a separate overlay, applied deliberately |
 | Publication | `app/site/publication.py` | the gate, snapshots, the DTO |
 | Sanitization | `app/site/content_sanitizer.py` | markdown → typed nodes, no HTML |
 | Lead capture | `app/site/lead_capture.py` | validation, attribution, destination |
@@ -78,6 +89,11 @@ different language, and it exists so that any Solar assumption leaking into the
 generic infrastructure fails a test rather than shipping.
 
 Adding `AI_TRAINING_FR` is: one vertical YAML, one site YAML, one `Site` row.
+
+The domain is configuration, not code. `monprojetsolaire.be` appears in
+`config/sites/solar_be.yaml` and in the routing overlay, and **nowhere in `app/` or
+`web/`** — a test asserts that, because a hostname compiled into a component is a
+hostname a second site cannot override.
 
 ## Why Next.js, server-rendered
 

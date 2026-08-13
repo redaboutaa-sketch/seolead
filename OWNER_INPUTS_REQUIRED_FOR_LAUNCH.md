@@ -1,4 +1,4 @@
-# Owner inputs required before the Solar Belgium site can launch
+# Owner inputs required before Mon Projet Solaire can launch
 
 The site is built, deployed to staging and tested. Nothing below blocked
 implementation — every missing value is a marked placeholder and the code paths
@@ -11,25 +11,30 @@ plainly; inventing any of them is the one thing this system will not do.
 
 ---
 
+## RESOLVED
+
+### ✅ 1. Domain — `monprojetsolaire.be`
+
+Owner decision, 2026-08-13. Configured as `domain` and as
+`seo.canonical_origin: https://monprojetsolaire.be`. Canonicals are already
+absolute and correct.
+
+**Still outstanding on the owner's side:** the domain has no DNS delegation yet —
+no NS, no SOA, no A/AAAA records. Routing is prepared but cannot be applied.
+The exact records to create are in `docs/runbooks/MONPROJETSOLAIRE_DNS.md`.
+
+### ✅ 2. Brand / site name — `Mon Projet Solaire`
+
+Owner decision, 2026-08-13. `brand_name_is_placeholder` is now `false`. Header,
+footer, page titles and the title-suffix template all use it.
+
+---
+
 ## REQUIRED_FOR_LAUNCH
 
 Nothing can go public until these exist.
 
-### 1. Domain
-
-The exact hostname the site will serve. Sets `domain` in
-`config/sites/solar_be.yaml`, unblocks canonical URLs, hreflang and the sitemap,
-and is the prerequisite for a Traefik route.
-
-*Currently: `null`. The config validator refuses to leave staging without it.*
-
-### 2. Brand / site name
-
-The commercial name shown in the header, footer, page titles and meta.
-
-*Currently: `"Solar Belgium (nom provisoire)"`, flagged `brand_name_is_placeholder`.*
-
-### 3. Commercial contact destination
+### 1. Commercial contact destination
 
 Where a captured lead should actually go — an inbox, a person, or a decision to
 wait for the Prospect 360 adapter. Leads are accumulating in `PENDING_EXPORT` and
@@ -37,7 +42,7 @@ wait for the Prospect 360 adapter. Leads are accumulating in `PENDING_EXPORT` an
 
 *Currently: `contact.lead_destination_email: null`, destination `local`.*
 
-### 4. Company / legal identity
+### 2. Company / legal identity
 
 Legal entity name, company number (BCE/KBO), registered address, and the data
 controller for the privacy notice.
@@ -45,7 +50,7 @@ controller for the privacy notice.
 *Currently: all `null`. The footer says coordinates are to be confirmed rather
 than showing an invented address.*
 
-### 5. Privacy and terms wording
+### 3. Privacy and terms wording
 
 Either your own text, or explicit approval of text you have had reviewed. **No
 legal text has been generated.** The pages render an explicit placeholder saying
@@ -58,7 +63,7 @@ IP hashed ephemerally for rate limiting and never stored.
 
 *Then set `legal.reviewed: true` and `legal.consent_version` to the real version.*
 
-### 6. Lead destination policy
+### 4. Lead destination policy
 
 Answers needed before the Prospect 360 adapter is written (full contract in
 `docs/integrations/PROSPECT360_INGEST_CONTRACT.md`):
@@ -68,22 +73,29 @@ Answers needed before the Prospect 360 adapter is written (full contract in
 - does marketing consent map to an existing Prospect 360 field?
 - how long a lead stays in this database after export.
 
-### 7. Which pages may go live
+### 5. Which pages may go live
 
-Currently one page is validated and awaiting your review:
+One page is approved and staged, and is **not published**:
 
 ```
-draft:  8526a70d-1803-409d-b13c-d607e288693b
-title:  Prix des Panneaux Solaires en Belgique
-state:  approval PENDING — factual QA PASS, SEO QA PASS, no outbound links
-review: seolead site preview-draft 8526a70d-1803-409d-b13c-d607e288693b
-        http://localhost:3100/preview/draft/8526a70d-1803-409d-b13c-d607e288693b
+draft:   8526a70d-1803-409d-b13c-d607e288693b
+content: 34e61730-10bd-41fc-a026-f48ec3a494e5  (version 1)
+title:   Prix des Panneaux Solaires en Belgique
+state:   APPROVED + STAGED, published_at = NULL
+review:  http://localhost:3100/preview/fr/prix-panneaux-solaires-belgique
 ```
 
-Approving it is a deliberate act (`seolead content approve`), and approval still
-does not publish it.
+Which pages may go live remains your decision. Staging is not publication, and
+`seolead content publish` refuses while the site is not indexable.
 
-### 8. Explicit permission to make the site public
+### 6. DNS delegation for monprojetsolaire.be
+
+The zone is not published: no nameservers answer for it. Assign nameservers at the
+registrar, then create the four records in
+`docs/runbooks/MONPROJETSOLAIRE_DNS.md`. Until then the hostname cannot be routed
+and no certificate can be issued.
+
+### 7. Explicit permission to make the site public
 
 Publication requires a Traefik route, DNS, and `allow_indexing: true`. **None of
 those has been touched**, and none will be without your instruction.
@@ -96,7 +108,7 @@ Improves the site materially; launch is possible without them.
 
 | Input | Effect |
 |---|---|
-| Logo (SVG or high-res PNG) | Replaces the text wordmark in the header |
+| Logo (SVG or high-res PNG) | Replaces the "Mon Projet Solaire" text wordmark |
 | Brand colours | The palette is a neutral practical green; two hex values retune it |
 | Real differentiators | The "why us" story is currently absent rather than invented |
 | Certifications (RESCERT, etc.) | Only if genuinely held — enables a trust block |
@@ -119,7 +131,7 @@ Improves the site materially; launch is possible without them.
 
 ---
 
-## One thing worth your attention before you approve the price page
+## One thing worth your attention before you publish the price page
 
 Every one of the five price figures on that page traces to a **single commercial
 domain**. Each is correctly qualified and none is presented as a Belgian average,

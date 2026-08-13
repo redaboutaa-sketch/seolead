@@ -59,14 +59,23 @@ class TestSiteApiAuthentication:
 
 class TestSiteConfigEndpoint:
     def test_the_config_reports_the_site_as_not_indexable(self, client):
+        """The domain is set and the site is still not indexable.
+
+        This is the assertion that matters after the domain arrived: the API is
+        what the frontend trusts for `robots`, `sitemap` and every page's meta,
+        so if `indexable` ever flipped here the whole gate would open at once.
+        """
         response = client.get("/site/v1/sites/solar_be",
                               headers={"X-Internal-Key": KEY})
         assert response.status_code == 200
         body = response.json()
+        assert body["domain"] == "monprojetsolaire.be"
+        assert body["seo"]["canonical_origin"] == "https://monprojetsolaire.be"
         assert body["staging"] is True
+        assert body["seo"]["allow_indexing"] is False
         assert body["indexable"] is False
-        assert body["domain"] is None
-        assert body["brand_name_is_placeholder"] is True
+        assert body["brand_name"] == "Mon Projet Solaire"
+        assert body["brand_name_is_placeholder"] is False
 
     def test_no_secret_appears_in_the_site_config(self, client):
         body = client.get("/site/v1/sites/solar_be",

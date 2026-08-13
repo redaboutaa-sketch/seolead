@@ -71,6 +71,11 @@ class ConversionConfig(BaseModel):
 
 
 class SeoConfig(BaseModel):
+    # The scheme+host every canonical URL is built against. Explicit rather than
+    # derived from `domain`, because the two can legitimately differ (a staging
+    # host serving content whose canonical is the production origin) and because
+    # a canonical that silently falls back to localhost is worse than no canonical.
+    canonical_origin: str | None = None
     default_title_suffix: str | None = None
     default_meta_description: str | None = None
     organization_schema: bool = False
@@ -109,6 +114,30 @@ class SiteConfig(BaseModel):
     routes: list[dict] = Field(default_factory=list)
 
     @model_validator(mode="after")
+    def _check_canonical_origin(self) -> "SiteConfig":
+        origin = (self.seo.canonical_origin or "").strip()
+        if not origin:
+            return self
+        if not origin.startswith("https://"):
+            raise ValueError("canonical_origin must be an https:// origin")
+        if origin.endswith("/"):
+            raise ValueError("canonical_origin must not end with a slash")
+        # An internal hostname in a canonical URL tells a crawler that the real
+        # address of the page is somewhere it can never reach.
+        lowered = origin.lower()
+        for forbidden in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
+                          "seolead_web", "seolead_api", ".internal", ".local"):
+            if forbidden in lowered:
+                raise ValueError(
+                    f"canonical_origin must not contain {forbidden!r}: a canonical "
+                    f"pointing at an internal host is worse than none")
+        if self.domain and self.domain.lower() not in lowered:
+            raise ValueError(
+                f"canonical_origin {origin!r} does not match domain "
+                f"{self.domain!r}")
+        return self
+
+    @model_validator(mode="after")
     def _check_publication_safety(self) -> "SiteConfig":
         if not self.domain and not self.staging:
             raise ValueError(
@@ -131,6 +160,16 @@ class SiteConfig(BaseModel):
         accidental commit away from indexing an unfinished site.
         """
         return bool(self.domain) and not self.staging and self.seo.allow_indexing
+
+    def canonical_url(self, path: str) -> str:
+        """Absolute canonical for a path, or the path itself when no origin is set.
+
+        Returning a relative path is the honest fallback before a domain exists:
+        it is incomplete, and it is not a lie about where the page lives.
+        """
+        origin = (self.seo.canonical_origin or "").rstrip("/")
+        normalized = path if path.startswith("/") else f"/{path}"
+        return f"{origin}{normalized}" if origin else normalized
 
     def locale_prefix(self, locale: str) -> str:
         """URL prefix for a locale. `/` for the default when unprefixed."""

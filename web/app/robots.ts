@@ -19,6 +19,8 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
   }
   return {
     rules: [{ userAgent: "*", allow: "/", disallow: ["/preview/", "/api/"] }],
-    sitemap: config.domain ? `https://${config.domain}/sitemap.xml` : undefined,
+    sitemap: config.seo.canonical_origin
+      ? `${config.seo.canonical_origin}/sitemap.xml`
+      : undefined,
   };
 }

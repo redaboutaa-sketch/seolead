@@ -23,6 +23,19 @@ const csp = [
   "object-src 'none'",
 ].join("; ");
 
+/**
+ * Indexing is refused at the HTTP layer unless explicitly enabled at build time.
+ *
+ * Fail-closed on purpose. `SiteConfig.allow_indexing` already gates robots.txt and
+ * the per-page meta tag, but those are rendered by the app; this header is emitted
+ * for every response including static assets and error pages, and it is the one
+ * that a misconfigured route cannot bypass.
+ *
+ * Turning it off requires BOTH this env var and the SiteConfig flag — two
+ * independent switches, matching the three-condition design of `is_indexable`.
+ */
+const allowIndexing = process.env.SEOLEAD_ALLOW_INDEXING === "true";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -40,6 +53,14 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
           },
+          ...(allowIndexing
+            ? []
+            : [
+                {
+                  key: "X-Robots-Tag",
+                  value: "noindex, nofollow, noarchive, nosnippet",
+                },
+              ]),
         ],
       },
     ];

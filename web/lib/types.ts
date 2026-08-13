@@ -79,6 +79,8 @@ export interface PublishedContentDTO {
     title: string;
     description: string | null;
     canonical_path: string | null;
+    /** Absolute, built from the site's configured production origin. */
+    canonical_url: string | null;
     noindex: boolean;
   };
   sections: Section[];
@@ -161,6 +163,7 @@ export interface SiteConfigDTO {
     marketing_consent_optional: boolean;
   };
   seo: {
+    canonical_origin: string | null;
     default_title_suffix: string | null;
     default_meta_description: string | null;
     organization_schema: boolean;

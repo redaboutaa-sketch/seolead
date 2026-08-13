@@ -1,0 +1,90 @@
+# Public routing for monprojetsolaire.be — PREPARED, NOT APPLIED.
+#
+# This overlay is deliberately a separate file. Putting these labels in
+# docker-compose.yml would mean that any routine `docker compose up -d` publishes
+# the site, and publishing must be a deliberate act with DNS verified first.
+#
+# Apply only after DNS resolves to this VPS (see
+# docs/runbooks/MONPROJETSOLAIRE_DNS.md):
+#
+#   docker compose -f docker-compose.yml -f infra/traefik/docker-compose.public.yml up -d seolead_web
+#
+# Conventions below were read from the RUNNING Traefik (project `traefik`,
+# /opt/traefik/docker-compose.yml), not from documentation:
+#
+#   providers.docker.exposedbydefault=false   → traefik.enable=true is required
+#   providers.docker.network=traefik-public   → the container must join it
+#   entrypoints: web(:80) → global redirect to websecure(:443)
+#   certificatesresolvers.letsencrypt.acme.tlschallenge=true  (TLS-ALPN-01)
+#
+# TLS-ALPN-01 matters here: the challenge is answered on :443 for the requested
+# hostname, so a certificate request with wrong DNS fails and counts against
+# Let's Encrypt rate limits. That is why this file is not applied by default.
+#
+# No other application's routing is touched. Traefik itself is not modified — it
+# discovers this router from container labels.
+
+services:
+  seolead_web:
+    networks:
+      - seolead_backend
+      - traefik-public
+
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik-public
+
+      # ── Apex, the canonical host ─────────────────────────────────────────
+      traefik.http.routers.monprojetsolaire.rule: "Host(`monprojetsolaire.be`)"
+      traefik.http.routers.monprojetsolaire.entrypoints: websecure
+      traefik.http.routers.monprojetsolaire.tls: "true"
+      traefik.http.routers.monprojetsolaire.tls.certresolver: letsencrypt
+      traefik.http.routers.monprojetsolaire.service: monprojetsolaire
+      traefik.http.routers.monprojetsolaire.middlewares: >-
+        monprojetsolaire-security-headers,monprojetsolaire-compress
+
+      # ── www → apex, permanent ────────────────────────────────────────────
+      # A separate router rather than a rule alternation, because the two need
+      # different middleware: www only ever redirects and never serves content.
+      traefik.http.routers.monprojetsolaire-www.rule: "Host(`www.monprojetsolaire.be`)"
+      traefik.http.routers.monprojetsolaire-www.entrypoints: websecure
+      traefik.http.routers.monprojetsolaire-www.tls: "true"
+      traefik.http.routers.monprojetsolaire-www.tls.certresolver: letsencrypt
+      traefik.http.routers.monprojetsolaire-www.service: monprojetsolaire
+      traefik.http.routers.monprojetsolaire-www.middlewares: monprojetsolaire-www-to-apex
+      traefik.http.middlewares.monprojetsolaire-www-to-apex.redirectregex.regex: >-
+        ^https?://www\.monprojetsolaire\.be/(.*)
+      traefik.http.middlewares.monprojetsolaire-www-to-apex.redirectregex.replacement: >-
+        https://monprojetsolaire.be/$${1}
+      traefik.http.middlewares.monprojetsolaire-www-to-apex.redirectregex.permanent: "true"
+
+      # ── Security headers ─────────────────────────────────────────────────
+      # Following the tfn-academy convention already running on this Traefik.
+      # HSTS is included but `stsPreload` is NOT: preloading is effectively
+      # irreversible, and this site has not served a single production request.
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.contentTypeNosniff: "true"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.browserXssFilter: "true"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.frameDeny: "true"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.referrerPolicy: strict-origin-when-cross-origin
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.forceSTSHeader: "true"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.stsSeconds: "31536000"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.stsIncludeSubdomains: "true"
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.X-Powered-By: ""
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.Server: ""
+      # Belt and braces with the application's own header. The app is fail-closed
+      # already; this makes the refusal true even for a response the app did not
+      # generate, such as a Traefik-level error page.
+      traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.X-Robots-Tag: "noindex, nofollow, noarchive, nosnippet"
+
+      traefik.http.middlewares.monprojetsolaire-compress.compress: "true"
+
+      # ── Service ──────────────────────────────────────────────────────────
+      traefik.http.services.monprojetsolaire.loadbalancer.server.port: "3100"
+      traefik.http.services.monprojetsolaire.loadbalancer.healthcheck.path: /robots.txt
+      traefik.http.services.monprojetsolaire.loadbalancer.healthcheck.interval: 30s
+      traefik.http.services.monprojetsolaire.loadbalancer.healthcheck.timeout: 5s
+
+networks:
+  # Traefik's own network. External: this file joins it, and never defines it.
+  traefik-public:
+    external: true

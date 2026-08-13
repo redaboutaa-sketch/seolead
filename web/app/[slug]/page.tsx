@@ -25,8 +25,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return {
     title: content.meta.title,
     description: content.meta.description ?? undefined,
-    alternates: content.meta.canonical_path
-      ? { canonical: content.meta.canonical_path }
+    // Absolute when the site has a configured origin, relative otherwise. Never
+    // resolved against the request host.
+    alternates: content.meta.canonical_url ?? content.meta.canonical_path
+      ? { canonical: content.meta.canonical_url ?? content.meta.canonical_path }
       : undefined,
     robots: indexable
       ? { index: true, follow: true }
