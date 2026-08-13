@@ -13,3 +13,10 @@ build/
 data/
 *.egg-info/
 .pytest_cache/
+
+# Frontend build artefacts and dependencies.
+web/node_modules/
+web/.next/
+web/out/
+web/.env*.local
+web/*.tsbuildinfo

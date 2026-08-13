@@ -202,3 +202,77 @@ not a default.
 The platform-side work (service-account authentication + an ingest endpoint +
 outbound callbacks) must be scheduled with whoever owns the TechFormaNord
 repository. It cannot be delivered by this project.
+
+---
+
+# Phase 4 addendum — the boundary as implemented
+
+**Nothing above changed. The contract is still PROPOSED and still unimplemented.**
+This section records what Phase 4 actually built on this side of the boundary, so
+whoever implements the adapter knows exactly what will call them.
+
+## What exists now
+
+`app/site/lead_capture.py` defines a `LeadDestination` port and exactly one
+implementation:
+
+```python
+class LocalLeadDestination:
+    code = "local"
+    async def deliver(self, lead: CapturedLead) -> LeadState:
+        return LeadState.PENDING_EXPORT      # stores, and stops
+```
+
+It returns `PENDING_EXPORT`, not `EXPORTED`, because that is the truth: the lead is
+captured and nothing downstream has seen it. A destination that reported success
+while nothing received the lead would be the worst failure mode in this file — the
+lead would be marked handled and never followed up.
+
+Enforced by tests in `tests/test_lead_capture.py::TestProspect360Boundary`:
+
+- the default destination writes nowhere and never returns `EXPORTED`,
+- no symbol containing "prospect" exists in the module,
+- the module source contains no `acquisition_platform`, no `prospect360`, no
+  `postgresql://`, no `INSERT INTO`.
+
+Verified at runtime during the Phase 4 staging E2E: the `seolead_app` role connects
+to database `seolead` and sees **zero** Prospect 360 tables.
+
+## What the adapter will receive
+
+The Phase 4 schema, which is a superset of the `attribution` block proposed above:
+
+```
+CapturedLead      id, created_at, conversion_type, language, postcode,
+                  first_name, last_name, email, phone, qualification{},
+                  consent_marketing, consent_version, consent_timestamp,
+                  consent_source, state, export_destination, export_attempts
+
+LeadAttribution   vertical_code, site_id, published_content_id,
+                  landing_path, page_path, search_intent, keyword_cluster,
+                  channel, source, referrer,
+                  utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+                  cta, conversion_type, session_id, correlation_id
+```
+
+Note for the platform side: `ProspectCreate` still accepts no UTM fields (finding 3
+above). Every one of those columns exists here and would be discarded on arrival.
+
+## State machine this side implements
+
+```
+NEW ──► PENDING_EXPORT ──► EXPORTING ──► EXPORTED
+                              │
+                              └────────► EXPORT_FAILED ──► PENDING_EXPORT
+```
+
+`EXPORTING` exists so a retry cannot double-export. The adapter must be idempotent
+on `lead.id` regardless.
+
+## Additional owner decisions surfaced by Phase 4
+
+1. Deduplication: is a known email an update or a new prospect?
+2. Does marketing consent map to an existing Prospect 360 field? It travels with
+   the lead, and a destination that markets to someone who declined would make
+   this system the cause of that.
+3. How long a lead stays in this database after a successful export.

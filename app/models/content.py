@@ -15,8 +15,8 @@ from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer,
                         String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import (ApprovalState, ContentStatus, ContentType, QAStatus,
-                            QAType, SearchIntent)
+from app.core.enums import (ApprovalState, ContentStatus, ContentType, QALayer,
+                            QAStatus, QAType, SearchIntent)
 from app.db.base import (Base, JSONType, TZDateTime, UUIDType, created_column,
                          pk_column)
 
@@ -25,6 +25,7 @@ _INTENTS = ", ".join(f"'{i.value}'" for i in SearchIntent)
 _APPROVAL_STATES = ", ".join(f"'{s.value}'" for s in ApprovalState)
 _QA_STATUSES = ", ".join(f"'{s.value}'" for s in QAStatus)
 _QA_TYPES = ", ".join(f"'{t.value}'" for t in QAType)
+_QA_LAYERS = ", ".join(f"'{layer.value}'" for layer in QALayer)
 
 
 class ContentBrief(Base):
@@ -120,6 +121,8 @@ class QAReview(Base):
     __table_args__ = (
         CheckConstraint(f"status IN ({_QA_STATUSES})", name="ck_qa_status"),
         CheckConstraint(f"qa_type IN ({_QA_TYPES})", name="ck_qa_type"),
+        CheckConstraint(f"layer IS NULL OR layer IN ({_QA_LAYERS})",
+                        name="ck_qa_layer"),
         Index("ix_qa_review_draft", "content_draft_id"),
     )
 
@@ -128,6 +131,9 @@ class QAReview(Base):
         UUIDType, ForeignKey("content_draft.id", ondelete="CASCADE"), nullable=False
     )
     qa_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Nullable: rows written before Phase 4 have no layer, and the gate falls
+    # back to inspecting their finding codes rather than refusing to read them.
+    layer: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     findings: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)

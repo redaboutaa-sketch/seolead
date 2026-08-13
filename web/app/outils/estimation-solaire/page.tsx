@@ -1,0 +1,66 @@
+import type { Metadata } from "next";
+
+import { LeadForm } from "@/components/LeadForm";
+import { getSiteConfig } from "@/lib/api";
+
+export const metadata: Metadata = {
+  title: "Cadrer votre projet solaire",
+  description:
+    "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
+  robots: { index: false, follow: false },
+};
+
+export const dynamic = "force-dynamic";
+
+/**
+ * A qualification tool, deliberately not a simulator.
+ *
+ * A savings figure needs irradiation data, roof geometry, a consumption profile
+ * and current tariffs. None of those is implemented, so this page qualifies the
+ * project and says what it cannot yet tell you. Showing an invented payback period
+ * would be exactly the failure the evidence pipeline exists to prevent, moved from
+ * the content layer into a calculator.
+ */
+export default async function EstimationTool() {
+  const config = await getSiteConfig();
+  if (!config) {
+    return (
+      <div className="container page">
+        <h1>Outil indisponible</h1>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container page">
+      <h1>Cadrer votre projet solaire</h1>
+      <p>
+        Cet outil décrit votre projet et prépare une estimation faite par un
+        interlocuteur. Il ne calcule pas d&apos;économies ni de temps de retour.
+      </p>
+
+      <div className="notice">
+        <p>
+          <strong>Pourquoi aucun chiffre d&apos;économies ici&nbsp;?</strong> Une
+          estimation de rentabilité dépend de l&apos;ensoleillement de votre
+          adresse, de l&apos;orientation et de l&apos;inclinaison du toit, de votre
+          profil de consommation et des tarifs en vigueur. Tant que ces données ne
+          sont pas intégrées de façon vérifiable, afficher un montant serait une
+          invention.
+        </p>
+      </div>
+
+      <LeadForm
+        config={config}
+        locale={config.default_language}
+        conversionType="TOOL_COMPLETION"
+        attribution={{
+          landing_path: "/outils/estimation-solaire",
+          page_path: "/outils/estimation-solaire",
+          channel: "direct",
+          cta: "TOOL_COMPLETION",
+        }}
+      />
+    </div>
+  );
+}

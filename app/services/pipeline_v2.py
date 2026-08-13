@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.enums import (ApprovalState, ContentStatus, EvidenceStatus,
-                            KeywordStatus, ObservationStatus, QAType,
+                            KeywordStatus, ObservationStatus, QALayer, QAType,
                             RunStatus, SearchIntent)
 from app.core.errors import (ErrorCode, InvalidVertical, LLMNotConfigured,
                              ResearchProviderError, SeoLeadError)
@@ -675,6 +675,7 @@ async def run_pipeline_v2(
     factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
     factual_row = QAReview(content_draft_id=draft.id,
                            qa_type=QAType.DETERMINISTIC.value,
+                           layer=QALayer.FACTUAL.value,
                            status=factual["status"], score=factual["score"],
                            findings=factual["findings"] + [
                                {"code": "CLAIM_LEDGER",
@@ -692,7 +693,7 @@ async def run_pipeline_v2(
     seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload, profile,
                                    existing_titles=existing_titles)
     seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
-                       status=seo["status"], score=seo["score"],
+                       layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
                        findings=seo["findings"],
                        blocking_issues=seo["blocking_issues"])
     session.add(seo_row)
@@ -705,7 +706,8 @@ async def run_pipeline_v2(
     advisory = await qa_service.run_llm_qa(draft_payload, brief_payload, llm=llm,
                                            correlation_id=correlation_id)
     advisory_row = QAReview(content_draft_id=draft.id,
-                            qa_type=QAType.LLM_ASSISTED.value, **advisory)
+                            qa_type=QAType.LLM_ASSISTED.value,
+                            layer=QALayer.ADVISORY.value, **advisory)
     session.add(advisory_row)
     await session.flush()
     result.qa_review_ids.append(advisory_row.id)

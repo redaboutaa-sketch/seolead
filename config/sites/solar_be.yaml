@@ -1,0 +1,205 @@
+# Solar Belgium — site configuration.
+#
+# Every owner-supplied value is a marked placeholder. The site is buildable,
+# testable and previewable without any of them; OWNER_INPUTS_REQUIRED_FOR_LAUNCH.md
+# lists what must arrive before launch and what can wait.
+#
+# `staging: true` and `seo.allow_indexing: false` are the publication gate. The
+# loader refuses a configuration where a domainless site claims to be live, and
+# refuses a staging site that permits indexing.
+
+site_id: solar_be
+vertical: SOLAR_BE
+
+# PLACEHOLDER — owner input required before launch.
+brand_name: "Solar Belgium (nom provisoire)"
+brand_name_is_placeholder: true
+domain: null
+
+market: BE
+default_language: fr
+supported_languages: [fr, nl]
+
+staging: true
+
+# The default language is unprefixed so the primary market's URLs stay short;
+# Dutch is prefixed. Deliberately explicit rather than derived, because the
+# convention differs per site and guessing it changes every canonical URL.
+locale_paths:
+  fr: ""
+  nl: "/nl"
+
+contact:
+  # PLACEHOLDER — all owner input.
+  email: null
+  phone: null
+  address: null
+  company_name: null
+  company_number: null
+  lead_destination_email: null
+
+legal:
+  # No legal text is generated. Until `reviewed: true`, the site renders an
+  # explicit "awaiting owner/legal wording" placeholder rather than plausible
+  # invented policy — which would be worse than an obvious gap.
+  privacy_policy_path: /confidentialite
+  terms_path: /conditions
+  cookie_policy_path: null
+  consent_version: "placeholder-v0"
+  data_controller: null
+  reviewed: false
+
+analytics:
+  first_party_events: true
+  ga4_measurement_id: null
+
+seo:
+  default_title_suffix: null      # set once the brand name is final
+  default_meta_description: null
+  organization_schema: false      # no real organisation data supplied yet
+  sitemap_enabled: true
+  allow_indexing: false           # the publication gate
+
+conversion:
+  primary_cta: ESTIMATE_REQUEST
+  primary_cta_label: "Obtenir mon estimation personnalisée"
+  secondary_cta: CALLBACK_REQUEST
+  secondary_cta_label: "Être rappelé"
+  form_id: solar_qualification_v1
+  consent_required: true
+  marketing_consent_optional: true
+
+  # Progressive disclosure: the project questions come first and carry visible
+  # value, and contact details are requested last. A form that opens by demanding
+  # a phone number converts worse and is a worse experience.
+  form_steps:
+    - key: project
+      title: "Votre projet"
+      description: "Quelques questions sur votre logement."
+      fields: [owner_status, postcode, property_type]
+    - key: roof
+      title: "Votre toiture"
+      description: "Pour situer la taille d'installation possible."
+      fields: [roof_type, roof_orientation]
+    - key: consumption
+      title: "Votre consommation"
+      description: "Facultatif — utile pour affiner l'estimation."
+      fields: [annual_consumption_kwh, monthly_bill_eur, battery_interest]
+    - key: timing
+      title: "Votre échéance"
+      fields: [project_timeframe]
+    - key: contact
+      title: "Vos coordonnées"
+      description: "Pour vous transmettre l'estimation."
+      fields: [first_name, last_name, email, phone, consent_processing,
+               consent_marketing]
+
+  fields:
+    - key: owner_status
+      type: choice
+      label: "Êtes-vous propriétaire du logement ?"
+      required: true
+      options:
+        - {value: OWNER, label: "Propriétaire"}
+        - {value: OWNER_TO_BE, label: "En cours d'achat"}
+        - {value: TENANT, label: "Locataire"}
+    - key: postcode
+      type: postcode
+      label: "Code postal"
+      required: true
+      pattern: "^[1-9][0-9]{3}$"
+      help: "4 chiffres, ex. 1000"
+    - key: property_type
+      type: choice
+      label: "Type de logement"
+      required: true
+      options:
+        - {value: HOUSE, label: "Maison"}
+        - {value: APARTMENT, label: "Appartement"}
+        - {value: BUSINESS, label: "Bâtiment professionnel"}
+    - key: roof_type
+      type: choice
+      label: "Type de toiture"
+      required: false
+      options:
+        - {value: PITCHED, label: "Toiture inclinée"}
+        - {value: FLAT, label: "Toiture plate"}
+        - {value: MIXED, label: "Les deux"}
+        - {value: UNKNOWN, label: "Je ne sais pas"}
+    - key: roof_orientation
+      type: choice
+      label: "Orientation principale"
+      required: false
+      options:
+        - {value: SOUTH, label: "Sud"}
+        - {value: EAST_WEST, label: "Est / Ouest"}
+        - {value: NORTH, label: "Nord"}
+        - {value: UNKNOWN, label: "Je ne sais pas"}
+    - key: annual_consumption_kwh
+      type: number
+      label: "Consommation annuelle (kWh)"
+      required: false
+      min: 0
+      max: 100000
+    - key: monthly_bill_eur
+      type: number
+      label: "Facture mensuelle moyenne (€)"
+      required: false
+      min: 0
+      max: 10000
+    - key: battery_interest
+      type: choice
+      label: "Une batterie domestique vous intéresse-t-elle ?"
+      required: false
+      options:
+        - {value: YES, label: "Oui"}
+        - {value: MAYBE, label: "Peut-être"}
+        - {value: NO, label: "Non"}
+    - key: project_timeframe
+      type: choice
+      label: "Quand souhaitez-vous réaliser le projet ?"
+      required: true
+      options:
+        - {value: ASAP, label: "Dès que possible"}
+        - {value: LT_6M, label: "Dans les 6 mois"}
+        - {value: LT_12M, label: "Dans l'année"}
+        - {value: EXPLORING, label: "Je me renseigne"}
+    - key: first_name
+      type: text
+      label: "Prénom"
+      required: false
+      max_length: 120
+    - key: last_name
+      type: text
+      label: "Nom"
+      required: false
+      max_length: 120
+    - key: email
+      type: email
+      label: "Adresse e-mail"
+      required: true
+    - key: phone
+      type: phone
+      label: "Téléphone"
+      required: false
+      help: "Uniquement si vous souhaitez être rappelé."
+    # Two separate consents. Bundling them would make the necessary processing
+    # conditional on accepting marketing, which is not a real choice.
+    - key: consent_processing
+      type: consent
+      label: "J'accepte que mes données soient utilisées pour traiter ma demande."
+      required: true
+    - key: consent_marketing
+      type: consent
+      label: "J'accepte de recevoir des informations sur les offres et conseils."
+      required: false
+
+# Routes the site knows about. Internal links may only target a path listed here,
+# so a link cannot ship pointing at a page that does not exist.
+routes:
+  - {path: /, type: HOME, locales: [fr, nl]}
+  - {path: /prix-panneaux-solaires, type: LANDING_PAGE, locales: [fr]}
+  - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
+  - {path: /demande-etude, type: CONVERSION, locales: [fr]}
+  - {path: /confidentialite, type: LEGAL, locales: [fr]}
+  - {path: /conditions, type: LEGAL, locales: [fr]}

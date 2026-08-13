@@ -1,0 +1,58 @@
+# A second site over a different vertical, sharing nothing with Solar Belgium.
+#
+# Its only job is to be the isolation control: if any Solar assumption leaks into
+# the generic site infrastructure — a French label, a solar field, a Belgian
+# locale — rendering this site fails. It is referenced by the multi-vertical
+# tests and is not intended for deployment.
+
+site_id: demo_generic
+vertical: TEST_GENERIC
+
+brand_name: "Demo Generic (placeholder)"
+brand_name_is_placeholder: true
+domain: null
+
+market: FR
+default_language: en
+supported_languages: [en]
+
+staging: true
+
+locale_paths:
+  en: ""
+
+contact: {}
+
+legal:
+  consent_version: "placeholder-v0"
+  reviewed: false
+
+analytics:
+  first_party_events: true
+
+seo:
+  sitemap_enabled: true
+  allow_indexing: false
+
+conversion:
+  primary_cta: CONTACT
+  primary_cta_label: "Request information"
+  form_id: generic_contact_v1
+  consent_required: true
+  marketing_consent_optional: true
+  form_steps:
+    - key: contact
+      title: "Your details"
+      fields: [email, consent_processing]
+  fields:
+    - key: email
+      type: email
+      label: "Email address"
+      required: true
+    - key: consent_processing
+      type: consent
+      label: "I agree to my data being used to handle this request."
+      required: true
+
+routes:
+  - {path: /, type: HOME, locales: [en]}

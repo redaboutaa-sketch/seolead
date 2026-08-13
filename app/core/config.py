@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     env: str = Field("dev", alias="SEOLEAD_ENV")
     log_level: str = Field("INFO", alias="SEOLEAD_LOG_LEVEL")
     internal_api_key: str = Field("", alias="SEOLEAD_INTERNAL_API_KEY")
+    # A second, independent secret for the staging preview route. Separate from
+    # the internal key because preview is the only path that serves unpublished
+    # content, and it is shared more widely (with whoever reviews a page) than the
+    # key that can trigger paid research jobs.
+    site_preview_token: str = Field("", alias="SEOLEAD_SITE_PREVIEW_TOKEN")
+    # Which site the frontend serves. One value, so a second site is a second
+    # deployment rather than a runtime switch nobody audited.
+    default_site_id: str = Field("solar_be", alias="SEOLEAD_SITE_ID")
 
     # ── Database ─────────────────────────────────────────────────────────────
     database_url: str = Field(
@@ -107,6 +115,8 @@ class Settings(BaseSettings):
             "TAVILY": "CONFIGURED" if self.tavily_configured else "NOT_CONFIGURED",
             "OPENAI": "CONFIGURED" if self.llm_configured else "NOT_CONFIGURED",
             "INTERNAL_API": "CONFIGURED" if self.internal_api_protected else "NOT_CONFIGURED",
+            "SITE_PREVIEW": ("CONFIGURED" if self.site_preview_token.strip()
+                             else "NOT_CONFIGURED"),
         }
 
     def relevance_thresholds(self):

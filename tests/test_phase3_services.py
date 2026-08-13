@@ -604,7 +604,10 @@ class TestCredentialReport:
     def test_reports_status_only(self, settings_all_providers):
         report = settings_all_providers.credential_report()
         assert report == {"DATAFORSEO": "CONFIGURED", "TAVILY": "CONFIGURED",
-                          "OPENAI": "CONFIGURED", "INTERNAL_API": "CONFIGURED"}
+                          "OPENAI": "CONFIGURED", "INTERNAL_API": "CONFIGURED",
+                          # Phase 4: the staging preview token is the only secret
+                          # that gates access to unpublished content.
+                          "SITE_PREVIEW": "NOT_CONFIGURED"}
         # No value, no prefix, no length may appear.
         joined = str(report)
         assert "test-tavily-key-not-real" not in joined

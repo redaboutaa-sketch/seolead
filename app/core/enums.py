@@ -227,6 +227,21 @@ class QAType(StrEnum):
     LLM_ASSISTED = "LLM_ASSISTED"
 
 
+class QALayer(StrEnum):
+    """WHAT a review examined, as opposed to HOW it was made.
+
+    `QAType` answers "deterministic or model-assisted"; this answers "facts or
+    presentation". Phase 4 needed both: the publication gate must know that a
+    draft has a passing factual review AND a passing SEO review, and inferring
+    that from finding codes broke the moment a review came back clean with no
+    codes at all.
+    """
+
+    FACTUAL = "FACTUAL"
+    SEO = "SEO"
+    ADVISORY = "ADVISORY"
+
+
 class KeywordStatus(StrEnum):
     NEW = "NEW"
     RESEARCHING = "RESEARCHING"
@@ -238,3 +253,68 @@ class SiteStatus(StrEnum):
     PLANNED = "PLANNED"
     ACTIVE = "ACTIVE"
     RETIRED = "RETIRED"
+
+
+class PublicationState(StrEnum):
+    """Where a piece of content sits between generation and a live page.
+
+    `APPROVED` and `PUBLISHED` are deliberately different states. A human has
+    approved the *content*; whether it is live also depends on the site having a
+    domain, a launch decision and a publication action. Collapsing the two would
+    make "a person said this is fit to publish" and "this is on the internet" the
+    same fact, and only one of them is reversible by the owner.
+    """
+
+    DRAFT = "DRAFT"
+    QA_FAILED = "QA_FAILED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    APPROVED = "APPROVED"
+    STAGED = "STAGED"
+    PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
+
+
+# The only states whose content may be served on a public route. Staging is not
+# here: a staged page is reachable through the preview path alone.
+PUBLIC_PUBLICATION_STATES: frozenset[PublicationState] = frozenset({
+    PublicationState.PUBLISHED,
+})
+
+
+class LeadState(StrEnum):
+    """A captured lead's journey out of this system.
+
+    Phase 4 stops at PENDING_EXPORT: the Prospect 360 ingestion boundary is not
+    open, and a lead that claims to be exported when nothing received it is worse
+    than one that honestly waits.
+    """
+
+    NEW = "NEW"
+    PENDING_EXPORT = "PENDING_EXPORT"
+    EXPORTING = "EXPORTING"
+    EXPORTED = "EXPORTED"
+    EXPORT_FAILED = "EXPORT_FAILED"
+    REJECTED_SPAM = "REJECTED_SPAM"
+    ARCHIVED = "ARCHIVED"
+
+
+class SiteEventType(StrEnum):
+    """First-party analytics. Deliberately coarse.
+
+    Every event here answers a question about the funnel. None of them tracks a
+    person across sites, and none stores behaviour that the funnel does not need.
+    """
+
+    PAGE_VIEW = "PAGE_VIEW"
+    CTA_CLICK = "CTA_CLICK"
+    FORM_STARTED = "FORM_STARTED"
+    FORM_STEP_COMPLETED = "FORM_STEP_COMPLETED"
+    FORM_SUBMITTED = "FORM_SUBMITTED"
+    LEAD_CREATED = "LEAD_CREATED"
+
+
+class ConversionType(StrEnum):
+    ESTIMATE_REQUEST = "ESTIMATE_REQUEST"
+    CALLBACK_REQUEST = "CALLBACK_REQUEST"
+    CONTACT = "CONTACT"
+    TOOL_COMPLETION = "TOOL_COMPLETION"

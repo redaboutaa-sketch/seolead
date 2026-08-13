@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import (ApprovalState, ContentStatus, KeywordStatus, QAType,
-                            RunStatus, SearchIntent)
+from app.core.enums import (ApprovalState, ContentStatus, KeywordStatus, QALayer,
+                            QAType, RunStatus, SearchIntent)
 from app.core.errors import (ErrorCode, InvalidVertical, LLMNotConfigured,
                              ResearchProviderError, SeoLeadError)
 from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
@@ -409,7 +409,8 @@ async def run_pipeline(
         draft_payload, brief_payload, llm=llm, correlation_id=correlation_id
     )
     llm_review = QAReview(
-        content_draft_id=draft.id, qa_type=QAType.LLM_ASSISTED.value, **advisory
+        content_draft_id=draft.id, qa_type=QAType.LLM_ASSISTED.value,
+        layer=QALayer.ADVISORY.value, **advisory
     )
     session.add(llm_review)
     await session.flush()

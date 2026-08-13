@@ -14,6 +14,14 @@ box where the API is not exposed at all — which is the intended deployment.
     seolead content reject <draft-id> --by "name"
     seolead content request-revision <draft-id> --by "name"
     seolead health
+
+    seolead site seed [--site solar_be]
+    seolead site list
+    seolead site preview <slug> [--site solar_be] [--locale fr]
+    seolead content list --status APPROVED
+    seolead content stage <draft-id> [--site solar_be] [--locale fr] [--slug ...]
+    seolead content publish <published-content-id>
+    seolead leads list [--status PENDING_EXPORT]
 """
 from __future__ import annotations
 
@@ -31,7 +39,8 @@ from app.core.enums import ApprovalState
 from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
-from app.models import (Approval, ContentBrief, ContentDraft, ProviderUsage,
+from app.models import (Approval, CapturedLead, ContentBrief, ContentDraft,
+                        LeadAttribution, ProviderUsage, PublishedContent,
                         QAReview, ResearchPackage, SeedKeyword, SeoOpportunity,
                         Site, SerpQuestionRow, SerpResultRow, SerpSnapshotRow,
                         Vertical)
@@ -416,6 +425,248 @@ async def cmd_request_revision(args: argparse.Namespace) -> int:
     return await _decide(args.id, ApprovalState.NEEDS_REVISION, args.by, args.note)
 
 
+# ─── Site and publication ────────────────────────────────────────────────────
+
+async def _resolve_site(session, config):
+    """The `site` row backing a site config, or None.
+
+    Named after the site_id rather than the brand, because the brand is a
+    placeholder that will change and the site_id is the stable key.
+    """
+    vertical = (await session.execute(
+        select(Vertical).where(Vertical.code == config.vertical)
+    )).scalar_one_or_none()
+    if vertical is None:
+        return None
+    return (await session.execute(
+        select(Site).where(Site.vertical_id == vertical.id,
+                           Site.name == config.site_id)
+    )).scalar_one_or_none()
+
+
+async def cmd_site_seed(args: argparse.Namespace) -> int:
+    """Create the `site` row for a site config. Idempotent."""
+    from app.site.config import load_site
+
+    config = load_site(args.site)
+    async with get_sessionmaker()() as session:
+        vertical = (await session.execute(
+            select(Vertical).where(Vertical.code == config.vertical)
+        )).scalar_one_or_none()
+        if vertical is None:
+            _emit({"error": f"vertical {config.vertical} is not seeded; "
+                            f"run `seolead seed --vertical {config.vertical}`"})
+            return EXIT_ERROR
+
+        site = await _resolve_site(session, config)
+        created = site is None
+        if created:
+            site = Site(vertical_id=vertical.id, name=config.site_id,
+                        domain=config.domain, market=config.market,
+                        default_language=config.default_language,
+                        status="PLANNED" if config.staging else "ACTIVE")
+            session.add(site)
+            await session.commit()
+    _emit({"site_id": config.site_id, "row_id": str(site.id), "created": created,
+           "staging": config.staging, "indexable": config.is_indexable})
+    return EXIT_OK
+
+
+async def cmd_site_list(args: argparse.Namespace) -> int:
+    from app.site.config import available_sites, load_site
+
+    sites = []
+    for site_id in available_sites():
+        config = load_site(site_id)
+        sites.append({"site_id": config.site_id, "vertical": config.vertical,
+                      "brand_name": config.brand_name,
+                      "brand_is_placeholder": config.brand_name_is_placeholder,
+                      "domain": config.domain, "staging": config.staging,
+                      "indexable": config.is_indexable,
+                      "languages": config.supported_languages})
+    _emit({"sites": sites})
+    return EXIT_OK
+
+
+async def cmd_site_preview(args: argparse.Namespace) -> int:
+    """Render the DTO the staging site would receive for one slug."""
+    from app.site.config import load_site
+    from app.site.publication import to_dto
+
+    config = load_site(args.site)
+    locale = args.locale or config.default_language
+    async with get_sessionmaker()() as session:
+        site = await _resolve_site(session, config)
+        if site is None:
+            _emit({"error": f"site {config.site_id} is not seeded"})
+            return EXIT_ERROR
+        row = (await session.execute(
+            select(PublishedContent).where(
+                PublishedContent.site_id == site.id,
+                PublishedContent.locale == locale,
+                PublishedContent.slug == args.slug)
+            .order_by(PublishedContent.version.desc())
+        )).scalars().first()
+    if row is None:
+        _emit({"error": f"no content at {locale}/{args.slug}"})
+        return EXIT_ERROR
+    _emit(to_dto(row, config))
+    return EXIT_OK
+
+
+async def cmd_site_preview_draft(args: argparse.Namespace) -> int:
+    """Render an unapproved draft for review. Writes nothing."""
+    from app.site.config import load_site
+    from app.site.publication import draft_preview_dto, evaluate_gate
+
+    config = load_site(args.site)
+    async with get_sessionmaker()() as session:
+        draft = (await session.execute(
+            select(ContentDraft).where(ContentDraft.id == uuid.UUID(args.draft_id))
+        )).scalar_one_or_none()
+        if draft is None:
+            _emit({"error": "no such draft"})
+            return EXIT_ERROR
+        brief = (await session.execute(
+            select(ContentBrief).where(ContentBrief.id == draft.content_brief_id)
+        )).scalar_one()
+        gate = await evaluate_gate(session, draft)
+        payload = draft_preview_dto(draft, brief, config, gate)
+    _emit(payload)
+    return EXIT_OK
+
+
+async def cmd_content_list(args: argparse.Namespace) -> int:
+    """Drafts by approval state, with the publication gate evaluated."""
+    from app.site.publication import evaluate_gate
+
+    target = (args.status or "APPROVED").upper()
+    async with get_sessionmaker()() as session:
+        rows = (await session.execute(
+            select(ContentDraft, Approval)
+            .join(Approval, Approval.content_draft_id == ContentDraft.id)
+            .where(Approval.state == target)
+            .order_by(ContentDraft.created_at.desc()).limit(100)
+        )).all()
+        items = []
+        for draft, approval in rows:
+            gate = await evaluate_gate(session, draft)
+            items.append({"draft_id": str(draft.id), "title": draft.title,
+                          "approval_state": approval.state,
+                          "words": len((draft.body or "").split()),
+                          "gate": gate.as_dict()})
+    _emit({"status": target, "items": items})
+    return EXIT_OK
+
+
+async def cmd_content_stage(args: argparse.Namespace) -> int:
+    """Create a STAGED snapshot. Refuses unless every precondition holds."""
+    from app.site.config import load_site
+    from app.site.publication import PublicationRefused, stage_content
+
+    config = load_site(args.site)
+    async with get_sessionmaker()() as session:
+        draft = (await session.execute(
+            select(ContentDraft).where(ContentDraft.id == uuid.UUID(args.draft_id))
+        )).scalar_one_or_none()
+        if draft is None:
+            _emit({"error": "no such draft"})
+            return EXIT_ERROR
+        brief = (await session.execute(
+            select(ContentBrief).where(ContentBrief.id == draft.content_brief_id)
+        )).scalar_one_or_none()
+        site = await _resolve_site(session, config)
+        if site is None:
+            _emit({"error": f"site {config.site_id} is not seeded"})
+            return EXIT_ERROR
+        try:
+            snapshot = await stage_content(
+                session, draft=draft, brief=brief, site=site, config=config,
+                locale=args.locale, slug=args.slug)
+        except PublicationRefused as exc:
+            _emit({"staged": False, "refused": exc.detail})
+            return EXIT_ERROR
+        await session.commit()
+        payload = {"staged": True, "content_id": str(snapshot.id),
+                   "slug": snapshot.slug, "locale": snapshot.locale,
+                   "version": snapshot.version, "state": snapshot.state,
+                   "noindex": snapshot.noindex,
+                   "preview_path": f"/preview{snapshot.canonical_path}"}
+    _emit(payload)
+    return EXIT_OK
+
+
+async def cmd_content_publish(args: argparse.Namespace) -> int:
+    """Take a staged snapshot live. Refuses while the site is staging."""
+    from app.site.config import load_site
+    from app.site.publication import PublicationRefused, publish_content
+
+    config = load_site(args.site)
+    async with get_sessionmaker()() as session:
+        row = (await session.execute(
+            select(PublishedContent).where(
+                PublishedContent.id == uuid.UUID(args.content_id))
+        )).scalar_one_or_none()
+        if row is None:
+            _emit({"error": "no such published content"})
+            return EXIT_ERROR
+        try:
+            await publish_content(session, snapshot=row, config=config)
+        except PublicationRefused as exc:
+            _emit({"published": False, "refused": exc.detail})
+            return EXIT_ERROR
+        await session.commit()
+        payload = {"published": True, "content_id": str(row.id),
+                   "state": row.state}
+    _emit(payload)
+    return EXIT_OK
+
+
+async def cmd_leads_list(args: argparse.Namespace) -> int:
+    """Captured leads. Contact details are shown masked.
+
+    An operator listing leads wants counts, states and attribution; the full email
+    and phone are one `leads show` away and do not belong in a command that is run
+    casually and pasted into a terminal log.
+    """
+    target = (args.status or "").upper()
+    async with get_sessionmaker()() as session:
+        query = select(CapturedLead, LeadAttribution).outerjoin(
+            LeadAttribution,
+            LeadAttribution.captured_lead_id == CapturedLead.id)
+        if target:
+            query = query.where(CapturedLead.state == target)
+        rows = (await session.execute(
+            query.order_by(CapturedLead.created_at.desc()).limit(200))).all()
+        items = [{
+            "lead_id": str(lead.id), "state": lead.state,
+            "conversion_type": lead.conversion_type,
+            "email": _mask_email(lead.email),
+            "has_phone": bool(lead.phone), "postcode": lead.postcode,
+            "language": lead.language, "destination": lead.export_destination,
+            "consent_marketing": lead.consent_marketing,
+            "consent_version": lead.consent_version,
+            "created_at": lead.created_at,
+            "attribution": None if attribution is None else {
+                "landing_path": attribution.landing_path,
+                "page_path": attribution.page_path,
+                "channel": attribution.channel, "source": attribution.source,
+                "utm_source": attribution.utm_source,
+                "utm_medium": attribution.utm_medium,
+                "utm_campaign": attribution.utm_campaign,
+                "cta": attribution.cta,
+                "search_intent": attribution.search_intent,
+            }} for lead, attribution in rows]
+    _emit({"status": target or "ALL", "count": len(items), "leads": items})
+    return EXIT_OK
+
+
+def _mask_email(email: str) -> str:
+    local, _, domain = (email or "").partition("@")
+    head = local[:2] if len(local) > 2 else local[:1]
+    return f"{head}***@{domain}" if domain else "***"
+
+
 async def cmd_health(args: argparse.Namespace) -> int:
     settings = get_settings()
     runner = await Last30DaysProvider(settings).health()
@@ -541,6 +792,55 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--by", required=True, help="who is deciding (recorded)")
         cmd.add_argument("--note")
         cmd.set_defaults(func=func)
+
+    # ── Site and publication ────────────────────────────────────────────────
+    site_cmd = sub.add_parser("site", help="site configuration and preview")
+    site_sub = site_cmd.add_subparsers(dest="site_command", required=True)
+
+    site_seed = site_sub.add_parser("seed", help="create the site row")
+    site_seed.add_argument("--site", default="solar_be")
+    site_seed.set_defaults(func=cmd_site_seed)
+
+    site_list = site_sub.add_parser("list", help="configured sites")
+    site_list.set_defaults(func=cmd_site_list)
+
+    site_preview = site_sub.add_parser(
+        "preview", help="render the DTO the site would receive for one slug")
+    site_preview.add_argument("slug")
+    site_preview.add_argument("--site", default="solar_be")
+    site_preview.add_argument("--locale", default=None)
+    site_preview.set_defaults(func=cmd_site_preview)
+
+    draft_preview = site_sub.add_parser(
+        "preview-draft", help="review an unapproved draft without staging it")
+    draft_preview.add_argument("draft_id")
+    draft_preview.add_argument("--site", default="solar_be")
+    draft_preview.set_defaults(func=cmd_site_preview_draft)
+
+    content_list = content_sub.add_parser(
+        "list", help="drafts by approval state, with the publication gate")
+    content_list.add_argument("--status", default="APPROVED")
+    content_list.set_defaults(func=cmd_content_list)
+
+    content_stage = content_sub.add_parser(
+        "stage", help="create a staged snapshot from an approved draft")
+    content_stage.add_argument("draft_id")
+    content_stage.add_argument("--site", default="solar_be")
+    content_stage.add_argument("--locale", default=None)
+    content_stage.add_argument("--slug", default=None)
+    content_stage.set_defaults(func=cmd_content_stage)
+
+    content_publish = content_sub.add_parser(
+        "publish", help="take a staged snapshot live")
+    content_publish.add_argument("content_id")
+    content_publish.add_argument("--site", default="solar_be")
+    content_publish.set_defaults(func=cmd_content_publish)
+
+    leads = sub.add_parser("leads", help="captured leads")
+    leads_sub = leads.add_subparsers(dest="leads_command", required=True)
+    leads_list = leads_sub.add_parser("list")
+    leads_list.add_argument("--status", default="")
+    leads_list.set_defaults(func=cmd_leads_list)
 
     health_cmd = sub.add_parser("health", help="check dependencies")
     health_cmd.set_defaults(func=cmd_health)

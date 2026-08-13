@@ -130,6 +130,61 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  seolead_web:
+    build:
+      context: .
+      dockerfile: infra/web/Dockerfile
+    image: seolead/web:0.1.0
+    container_name: seolead_web
+    restart: unless-stopped
+
+    # Loopback only. The site is staging: it must be reachable by the operator and
+    # by nothing else. No Traefik label, no public hostname, no DNS — making it
+    # public is a deliberate later act, not a side effect of deploying it.
+    ports:
+      - "127.0.0.1:3100:3100"
+
+    user: "10003:10003"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      # Next writes its image and fetch caches here. Small on purpose: this site
+      # ships no remote images.
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.next/cache:rw,nosuid,size=128m
+
+    environment:
+      SEOLEAD_API_URL: http://seolead_api:8000
+      SEOLEAD_SITE_ID: ${SEOLEAD_SITE_ID:-solar_be}
+      # Server-side only. Next never inlines a variable without the NEXT_PUBLIC_
+      # prefix, and `lib/api.ts` imports `server-only` so a client component that
+      # tried to read these would fail the build rather than ship them.
+      SEOLEAD_INTERNAL_KEY: ${SEOLEAD_INTERNAL_API_KEY:-}
+      SEOLEAD_PREVIEW_TOKEN: ${SEOLEAD_SITE_PREVIEW_TOKEN:-}
+      SEOLEAD_CLIENT_KEY_SALT: ${SEOLEAD_CLIENT_KEY_SALT:-}
+      NODE_ENV: production
+
+    networks:
+      - seolead_backend
+
+    depends_on:
+      seolead_api:
+        condition: service_started
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384m
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
 volumes:
   seolead_last30days_memory:
     driver: local
