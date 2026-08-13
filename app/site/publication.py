@@ -4,7 +4,19 @@ One rule governs this module, and it is worth stating before the code: **QA pass
 is not permission to publish, and human approval is not publication.** Three
 independent conditions must hold before a draft may be staged — factual QA passed,
 SEO QA passed, and a human recorded an approval — and a fourth, an explicit publish
-action against a site that is allowed to be indexed, before it is live.
+action against a site allowed to serve published content, before it is live.
+
+There are three gates, not two, and they are deliberately separate:
+
+    reachable   the hostname resolves and Traefik routes it
+    publishable `is_publishable` — a domain plus an explicit owner decision;
+                content may be SERVED at its real URL
+    indexable   `is_indexable` — additionally out of staging with indexing
+                explicitly allowed; crawlers may KEEP it
+
+A soft launch lives between the second and the third: real URL, real visitors, no
+search engines. Collapsing publishable into indexable — as this module did before
+the site had a domain — makes that state unreachable.
 
 The snapshot is a copy, not a reference. `PublishedContent` stores the sanitized
 sections that were approved, so re-running the pipeline, editing the draft, or
@@ -27,6 +39,7 @@ from app.core.errors import SeoLeadError
 from app.models import (Approval, ContentBrief, ContentDraft, PublishedContent,
                         QAReview, Site)
 from app.site.config import SiteConfig
+from app.db.base import utcnow
 from app.site.content_sanitizer import (contains_external_link, parse_sections,
                                         section_text)
 
@@ -238,7 +251,7 @@ async def stage_content(
         qa_provenance=gate.as_dict(),
         canonical_path=_canonical_path(config, locale, slug),
         noindex=not config.is_indexable,
-        staged_at=func.now(),
+        staged_at=utcnow(),
     )
     session.add(snapshot)
     await session.flush()
@@ -327,11 +340,11 @@ async def publish_content(session: AsyncSession, *, snapshot: PublishedContent,
     current = PublicationState(snapshot.state)
     assert_transition(current, PublicationState.PUBLISHED)
 
-    if not config.is_indexable:
+    if not config.is_publishable:
         raise PublicationRefused(
-            f"site {config.site_id} is not publishable: "
+            f"site {config.site_id} may not serve published content: "
             f"domain={'set' if config.domain else 'missing'}, "
-            f"staging={config.staging}, allow_indexing={config.seo.allow_indexing}")
+            f"allow_publication={config.seo.allow_publication}")
 
     # Supersede whatever is currently live at this address, so the partial unique
     # index never sees two live rows.
@@ -346,8 +359,11 @@ async def publish_content(session: AsyncSession, *, snapshot: PublishedContent,
         row.state = PublicationState.ARCHIVED.value
 
     snapshot.state = PublicationState.PUBLISHED.value
-    snapshot.noindex = False
-    snapshot.published_at = func.now()
+    # Published is not the same as indexable. A page served on the public route
+    # while the site is still noindex keeps its noindex — that is a soft launch,
+    # not an oversight.
+    snapshot.noindex = not config.is_indexable
+    snapshot.published_at = utcnow()
     await session.flush()
     return snapshot
 

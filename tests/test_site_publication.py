@@ -230,11 +230,45 @@ class TestPublicationGate:
         snapshot = await stage_content(session, draft=draft, brief=brief,
                                        site=solar_site, config=load_site("solar_be"))
 
-        # The site has no domain and is staging, so publication is impossible.
-        with pytest.raises(PublicationRefused, match="not publishable"):
-            await publish_content(session, snapshot=snapshot,
-                                  config=load_site("solar_be"))
+        # Publication is refused when the site may not serve published content.
+        closed = load_site("solar_be").model_copy(deep=True)
+        closed.seo.allow_publication = False
+        with pytest.raises(PublicationRefused, match="may not serve"):
+            await publish_content(session, snapshot=snapshot, config=closed)
         assert snapshot.state == PublicationState.STAGED.value
+
+    async def test_a_published_page_stays_noindex_while_the_site_is_not(
+            self, session, solar_site):
+        """Soft launch: served at its real URL, still invisible to crawlers."""
+        draft, brief = await _make_draft(session, solar_site)
+        await _add_qa(session, draft)
+        await _approve(session, draft)
+        config = load_site("solar_be")
+        snapshot = await stage_content(session, draft=draft, brief=brief,
+                                       site=solar_site, config=config)
+
+        assert config.is_publishable and not config.is_indexable
+        await publish_content(session, snapshot=snapshot, config=config)
+
+        assert snapshot.state == PublicationState.PUBLISHED.value
+        assert snapshot.published_at is not None
+        assert snapshot.noindex is True, \
+            "a published page on a non-indexable site must still be noindex"
+        assert to_dto(snapshot, config)["meta"]["noindex"] is True
+
+    async def test_publishing_is_refused_when_the_site_may_not_serve_content(
+            self, session, solar_site):
+        draft, brief = await _make_draft(session, solar_site)
+        await _add_qa(session, draft)
+        await _approve(session, draft)
+        config = load_site("solar_be")
+        snapshot = await stage_content(session, draft=draft, brief=brief,
+                                       site=solar_site, config=config)
+
+        closed = config.model_copy(deep=True)
+        closed.seo.allow_publication = False
+        with pytest.raises(PublicationRefused, match="may not serve"):
+            await publish_content(session, snapshot=snapshot, config=closed)
 
     async def test_publishing_requires_an_explicit_action_on_a_live_site(
             self, session, solar_site):
@@ -245,7 +279,6 @@ class TestPublicationGate:
                                        site=solar_site, config=load_site("solar_be"))
 
         launched = load_site("solar_be").model_copy(deep=True)
-        launched.domain = "example.be"
         launched.staging = False
         launched.seo.allow_indexing = True
         assert launched.is_indexable
@@ -267,7 +300,7 @@ class TestPublicationGate:
         assert (first.version, second.version) == (1, 2)
 
         launched = config.model_copy(deep=True)
-        launched.domain, launched.staging = "example.be", False
+        launched.staging = False
         launched.seo.allow_indexing = True
         await publish_content(session, snapshot=first, config=launched)
         await publish_content(session, snapshot=second, config=launched)
@@ -479,7 +512,8 @@ class TestSiteConfiguration:
         raw = load_site("solar_be").model_dump()
         raw["domain"] = None
         raw["staging"] = False
-        raw["seo"] = {**raw["seo"], "canonical_origin": None}
+        raw["seo"] = {**raw["seo"], "canonical_origin": None,
+                      "allow_publication": False, "allow_indexing": False}
         with pytest.raises(ValueError, match="nowhere for it to be published"):
             SiteConfig(**raw)
 
@@ -491,7 +525,9 @@ class TestSiteConfiguration:
         # Each variant removes exactly one of the three conditions. `domain: None`
         # forces staging back on, because the validator refuses the alternative.
         for override in ({"domain": None, "staging": True,
-                          "seo": {**base["seo"], "allow_indexing": False}},
+                          "seo": {**base["seo"], "allow_indexing": False,
+                                  "allow_publication": False,
+                                  "canonical_origin": None}},
                          {"seo": {**base["seo"], "allow_indexing": False}}):
             variant = {**base, **override}
             assert SiteConfig(**variant).is_indexable is False

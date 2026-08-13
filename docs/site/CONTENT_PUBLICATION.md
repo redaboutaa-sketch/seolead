@@ -8,6 +8,23 @@ DRAFT ──► QA_FAILED ──► DRAFT
   └─► PENDING_APPROVAL ──► APPROVED ──► STAGED ──► PUBLISHED ──► ARCHIVED
 ```
 
+### Three gates, not two
+
+```
+reachable    the hostname resolves and Traefik routes it
+publishable  is_publishable — a domain + seo.allow_publication.
+             PUBLISHED content may be SERVED at its real URL.
+indexable    is_indexable — additionally staging: false and
+             seo.allow_indexing. Crawlers may KEEP it.
+```
+
+A soft launch lives between the second and the third: real URL, real visitors, no
+search engines. That state only exists because the two are separate questions —
+publication used to require indexability, which made it unreachable.
+
+A page published while the site is not indexable keeps `noindex`. That is the
+intended outcome, not a leftover.
+
 `APPROVED` and `PUBLISHED` are different facts and are stored as different states.
 A human has decided the content is fit; whether it is live also depends on the
 site having a domain, being out of staging, and someone running the publish
@@ -32,8 +49,8 @@ A draft may be staged only when **all four** hold:
 `evaluate_gate` reports **every** failed condition, not the first, so an operator
 sees the whole distance to publishable in one look.
 
-Publication additionally requires `SiteConfig.is_indexable`, which is itself three
-conditions: a domain is set, `staging` is false, and `seo.allow_indexing` is true.
+Publication additionally requires `SiteConfig.is_publishable` — a domain and an
+explicit `seo.allow_publication`. It does **not** require indexability.
 
 ## Snapshots, not views
 

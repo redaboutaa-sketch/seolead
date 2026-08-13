@@ -39,7 +39,8 @@ class TestCanonicalOrigin:
         """A canonical pointing at a host no crawler can reach is worse than none."""
         raw = load_site("solar_be").model_dump()
         raw["domain"] = None
-        raw["seo"] = {**raw["seo"], "canonical_origin": bad}
+        raw["seo"] = {**raw["seo"], "canonical_origin": bad,
+                      "allow_publication": False}
         with pytest.raises(ValueError):
             SiteConfig(**raw)
 
@@ -58,7 +59,8 @@ class TestCanonicalOrigin:
     def test_no_origin_falls_back_to_a_relative_path_not_a_guess(self):
         raw = load_site("solar_be").model_dump()
         raw["domain"] = None
-        raw["seo"] = {**raw["seo"], "canonical_origin": None}
+        raw["seo"] = {**raw["seo"], "canonical_origin": None,
+                      "allow_publication": False}
         config = SiteConfig(**raw)
         assert config.canonical_url("/prix") == "/prix"
 
@@ -94,6 +96,59 @@ class TestDomainDoesNotEnableIndexing:
         launched = {**base, "staging": False,
                     "seo": {**base["seo"], "allow_indexing": True}}
         assert SiteConfig(**launched).is_indexable is True
+
+
+class TestPublicationAndIndexingAreSeparateGates:
+    """The distinction this site now depends on.
+
+    A soft launch is: real URL, real visitors, no search engines. It only exists
+    if "may be served" and "may be indexed" are different questions.
+    """
+
+    def test_the_site_may_serve_published_content_but_not_be_indexed(self):
+        config = load_site("solar_be")
+        assert config.is_publishable is True
+        assert config.is_indexable is False
+
+    def test_publication_does_not_require_indexability(self):
+        base = load_site("solar_be").model_dump()
+        base["seo"] = {**base["seo"], "allow_publication": True,
+                       "allow_indexing": False}
+        config = SiteConfig(**base)
+        assert config.is_publishable and not config.is_indexable
+
+    def test_indexing_still_requires_leaving_staging(self):
+        """The stricter gate did not move."""
+        base = load_site("solar_be").model_dump()
+        base["seo"] = {**base["seo"], "allow_indexing": True}
+        with pytest.raises(ValueError, match="may not allow indexing"):
+            SiteConfig(**base)
+
+        launched = {**base, "staging": False}
+        assert SiteConfig(**launched).is_indexable is True
+
+    def test_indexing_cannot_be_enabled_without_publication(self):
+        """Indexing a page nobody can fetch is incoherent."""
+        base = load_site("solar_be").model_dump()
+        base["staging"] = False
+        base["seo"] = {**base["seo"], "allow_publication": False,
+                       "allow_indexing": True}
+        with pytest.raises(ValueError, match="requires allow_publication"):
+            SiteConfig(**base)
+
+    def test_publication_requires_a_domain_to_serve_on(self):
+        base = load_site("solar_be").model_dump()
+        base["domain"] = None
+        base["seo"] = {**base["seo"], "canonical_origin": None,
+                       "allow_publication": True}
+        with pytest.raises(ValueError, match="requires a domain"):
+            SiteConfig(**base)
+
+    def test_the_yaml_on_disk_publishes_without_indexing(self):
+        raw = yaml.safe_load(Path("config/sites/solar_be.yaml").read_text())
+        assert raw["seo"]["allow_publication"] is True
+        assert raw["seo"]["allow_indexing"] is False
+        assert raw["staging"] is True
 
 
 class TestTraefikRoutingIsPreparedNotApplied:

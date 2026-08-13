@@ -59,11 +59,18 @@ seo:
   # site is noindex. Getting this right before launch means no page ever carries a
   # canonical pointing at localhost or a container hostname.
   canonical_origin: "https://monprojetsolaire.be"
+  # Owner decision, 2026-08-13: PUBLISHED pages may be served at their real URLs.
+  # This is a soft launch — real address, real visitors, no search engines. It
+  # enables the public route for content that has been explicitly published; it
+  # publishes nothing by itself.
+  allow_publication: true
   default_title_suffix: "Mon Projet Solaire"
   default_meta_description: null
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
-  allow_indexing: false           # THE PUBLICATION GATE — owner decision only
+  # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
+  # requires `staging: false` as well. Owner decision only.
+  allow_indexing: false
 
 conversion:
   primary_cta: ESTIMATE_REQUEST

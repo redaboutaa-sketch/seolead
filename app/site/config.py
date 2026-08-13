@@ -76,6 +76,15 @@ class SeoConfig(BaseModel):
     # host serving content whose canonical is the production origin) and because
     # a canonical that silently falls back to localhost is worse than no canonical.
     canonical_origin: str | None = None
+    # Whether PUBLISHED content may be served on the public routes at all.
+    #
+    # Separate from `allow_indexing` on purpose. "A person can read this page at
+    # its real URL" and "a search engine may keep a copy of it" are different
+    # decisions, and a soft launch is exactly the state where the first is true
+    # and the second is not. Collapsing them — as this config did until the
+    # domain existed — makes publishing a page impossible without also opening
+    # the site to crawlers.
+    allow_publication: bool = False
     default_title_suffix: str | None = None
     default_meta_description: str | None = None
     organization_schema: bool = False
@@ -147,17 +156,36 @@ class SiteConfig(BaseModel):
             raise ValueError(
                 "a staging site may not allow indexing; an unfinished site in the "
                 "index is not something a later fix undoes")
+        if self.seo.allow_indexing and not self.seo.allow_publication:
+            raise ValueError(
+                "allow_indexing requires allow_publication: a page that is not "
+                "served publicly cannot meaningfully be indexed")
+        if self.seo.allow_publication and not self.domain:
+            raise ValueError(
+                "allow_publication requires a domain; there is no public route "
+                "to serve content on")
         if self.default_language not in (self.supported_languages or
                                          [self.default_language]):
             raise ValueError("default_language must be one of supported_languages")
         return self
 
     @property
+    def is_publishable(self) -> bool:
+        """Whether PUBLISHED content may be served on the public routes.
+
+        The weaker of the two gates. It needs a domain to serve on and an explicit
+        owner decision, and it says nothing about crawlers.
+        """
+        return bool(self.domain) and self.seo.allow_publication
+
+    @property
     def is_indexable(self) -> bool:
         """Whether any page of this site may be indexed at all.
 
-        Three independent conditions, all required. A single flag would be one
-        accidental commit away from indexing an unfinished site.
+        Unchanged, and deliberately stricter than `is_publishable`: three
+        independent conditions, all required. A single flag would be one
+        accidental commit away from indexing an unfinished site. A page can be
+        publicly readable for a long time before this becomes true.
         """
         return bool(self.domain) and not self.staging and self.seo.allow_indexing
 

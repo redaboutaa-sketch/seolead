@@ -19,7 +19,8 @@ non-indexable. Those are two different things, and keeping them apart is the poi
 | TLS | Let's Encrypt, both hostnames, valid to 2026-11-11 |
 | www | 308 permanent → apex |
 | indexable | **no** — `staging: true`, `allow_indexing: false` |
-| price page | `APPROVED` + `STAGED`, `published_at = NULL`, public route 404 |
+| publication | `allow_publication: true` — published pages are served |
+| price page | **PUBLISHED** 2026-08-13, `noindex` retained, public route 200 |
 
 The routing lives in a separate overlay so a routine `docker compose up -d` cannot
 publish the site. Re-applying it is the documented act in
@@ -72,6 +73,12 @@ component that tried to read them fails the build.
 2. the Traefik overlay applied — *prepared, not applied*
 3. a certificate issued — *not requested*
 
+**Publishability** — may a page be served at its real URL?
+
+1. `domain` set — ✅ done
+2. `seo.allow_publication: true` — ✅ done (owner decision, 2026-08-13)
+3. per page: `seolead content publish <content-id>` — ✅ done for the price page only
+
 **Indexability** — may a crawler keep it?
 
 1. `domain` set — ✅ done
@@ -79,11 +86,11 @@ component that tried to read them fails the build.
 3. `seo.allow_indexing: true` — *no*
 4. `SEOLEAD_ALLOW_INDEXING=true` at build time, removing the fail-closed
    `X-Robots-Tag` — *no*
-5. per page: `seolead content publish <content-id>` — *not called*
 
-Completing the first gate does **not** touch the second. The site can be publicly
-reachable for owner validation while remaining entirely non-indexable, which is
-exactly the current target state.
+The three gates are independent. The site currently serves one published page at
+its real URL while remaining entirely non-indexable — a soft launch. Opening the
+publication gate did not touch the indexing gate, and a page published under it
+keeps `noindex`.
 
 ## What must NOT be done before that decision
 
