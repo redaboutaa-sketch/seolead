@@ -429,3 +429,99 @@ record. Request handling is never blocked on it.
 Recorded for the later website/legal task: add reviewed, explicitly
 channel-specific wording — an optional email-marketing checkbox — before any
 marketing consent is exported.
+
+
+---
+
+# Phase 5A-P2 — platform database foundation
+
+**Verdict: PARTIAL.** Migration 091 is complete, replay-verified and CI-green.
+The authentication surface (verifier, capability, DTO, ingest route) is not
+written. Nothing deployed, no credential minted.
+
+```
+branch     phase-5a-lead-ingest
+start SHA  e6885ba6009c68ab14b7b57415cb554ba26c44d7
+final SHA  142146d
+```
+
+## Migration 091 — `lead_acquisition_attributions`
+
+22 columns. All provenance fields nullable: what the sender did not supply is not
+invented. Every free-text field length-bounded by a CHECK.
+
+| Object | Value |
+|---|---|
+| idempotency | `UNIQUE (tenant_id, source_system, external_correlation_id)` |
+| composite FK | `(tenant_id, prospect_id) → prospects (tenant_id, id) ON DELETE CASCADE` |
+| fingerprint | `payload_fingerprint` with `CHECK (~ '^[0-9a-f]{64}$')` |
+| RLS | ENABLE **and** FORCE, 4 policies (UPDATE and DELETE closed with `USING (false)`) |
+| privileges | `platform_app`: SELECT + INSERT only |
+| indexes | unique identity, `(tenant_id, id)`, `(tenant_id, prospect_id)`, `(tenant_id, created_at DESC)` |
+
+No index on `tenant_id` alone or `external_correlation_id` alone — both are
+already leading columns of the above, and a redundant index is a write cost with
+no read benefit.
+
+Contains a REVOKE, so the 031 trap applies: added to `PRIV_MIGRATIONS` in
+`scripts/restore.sh` (in sequence order — inserting it out of order failed the
+manifest test), `restauration = oui` in `MANIFEST.tsv`, and both pinned lists
+updated.
+
+## Proven on a throwaway PostgreSQL 16
+
+88 migrations applied; 091 landed with every object correct and its proof block
+passing. With **asymmetric data** — 3 rows for one tenant, 1 for another —
+`platform_app` under RLS with **no WHERE clause** saw 3 and 1 respectively, and 0
+of the other tenant's rows. Duplicate identity refused by
+`uq_lead_acq_attr_identite`. Cross-tenant attribution refused by
+`lead_acq_attr_prospect_fk`. Throwaway container removed.
+
+The 4 migrations that failed in that bare harness (002, 006b, 042, 044) are all
+numbered below 091 and fail on seed/bootstrap state the harness lacks.
+
+## A regression I introduced, and how it surfaced
+
+The full suite showed 69 failures on my branch. Counting alone would have said
+nothing — the branch point already had 68, from infrastructure suites needing
+`docker`, `cosign` and network. Running the identical harness against a worktree
+at 9931c5f and diffing the failure lists named exactly one new test:
+`test_la_migration_maximale_reste_090`.
+
+That test is a deliberate tripwire: a migration must not appear without someone
+deciding it should. The fix was to move the pin and record the decision in the
+docstring, as the five previous bumps did — not to work around it.
+
+My first attempt at this comparison was worthless: I stashed to get a baseline,
+but everything was already committed, so both runs measured the same tree.
+
+## CI — actual results
+
+Run `31746957673`, commit `142146d`, workflow **CI**:
+
+```
+test                       success     ← was failure before the pin fix
+db-tests                   success
+typecheck                  success
+lint                       success
+security                   success
+build                      success
+frontend                   success
+frontend-browser-tests     success
+actionlint                 success
+compose-validate           success
+linkedin-compliance        success
+frontend-legacy-browser-diagnostic   in_progress
+```
+
+## Still to build
+
+Service-account credential verifier, `prospect.ingest` capability, machine ingest
+DTO, ingest application service (fingerprint canonicalisation, idempotency
+execution, consent, attribution), the thin route, the §20 security matrix and the
+secret-leak sentinel test.
+
+The transaction model is already settled by the extraction: the ingest service
+opens one `tenant_transaction`, and inside it writes the idempotency/attribution
+row, calls `creer_prospect`, and records processing consent — one transaction,
+committing coherently or not at all. Qualification stays after COMMIT.
