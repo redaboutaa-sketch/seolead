@@ -3,8 +3,10 @@
 **Date:** 2026-08-13
 **SEO Lead Factory:** `/opt/seolead`, branch `main`, HEAD `3ad9cb0` (unchanged)
 **Prospect 360:** `github.com/redaboutaa-sketch/techformanord`, deployed revision `79666ba912cb`
-**Outcome:** **BLOCKED at the platform gate (§50).** Discovery complete; no code
-written in either repository.
+**Outcome (revised 2026-08-13, after the four owner decisions):** **PARTIAL.**
+The blockers are resolved and the refactor they gated is done, tested and pushed.
+Implementation stopped at a deliberate boundary before the authentication work.
+Nothing is deployed; nothing is enabled.
 
 ---
 
@@ -314,3 +316,116 @@ Once those are answered, the implementation itself is well-scoped: an additive
 migration (idempotency key, attribution table, `utm_term`), a service-account
 credential verifier, a thin `/api/v1/lead-ingest` route, the extracted prospect
 service, and the seolead adapter with its export state machine.
+
+
+---
+
+# Phase 5A resumption — after the four owner decisions
+
+## PR #67 gate
+
+`PR67_OVERLAP = NONE`. PR #67 ("fix(voice-lab): la réconciliation lit malgré le
+verrou") merged at 20:19Z touching 7 files, all voice-lab: `voice_lab_conversation`,
+`voice_lab_runtime`, `voice_lab_test_orchestrator`, `twilio_gate_e_operator` and
+three test files. Checked against every Phase 5A surface — prospect creation,
+`routes/prospects.py`, authentication, `tenant_service_accounts`, RBAC, consent,
+migrations, event vocabulary, prospect read model, UI: **clear on all ten**.
+
+## Platform feature branch
+
+```
+branch     phase-5a-lead-ingest
+start SHA  9931c5f383dcb8d4f293db844f5699450d82807d   (default branch tip after #67)
+final SHA  e6885ba6009c68ab14b7b57415cb554ba26c44d7
+pushed     yes (CI); NOT merged, NOT deployed
+```
+
+Work was done in the clean clone at `/opt/p360-phase5a`. `/opt/techformanord` was
+never touched.
+
+## Step 3–4 — canonical prospect creation service: DONE
+
+`backend/services/prospect_creation_service.py` now holds the single write path.
+`routes/prospects.py::create_prospect` calls it and no longer contains an INSERT.
+
+Behaviour preserved exactly: same INSERT, same `purge_at` of 730 days, same
+`consent_date` rule, same `prospect.created` emitted inside the transaction, same
+score persisted before commit, `trigger_qualification` still fired after COMMIT.
+
+Two design points that the later ingest depends on:
+
+- **The connection is a parameter and the service opens no transaction.** The
+  ingest route must write prospect + idempotency key + attribution atomically; a
+  service owning its own transaction would allow a prospect to exist without its
+  key, and the next retry would create a second one.
+- **`provenance` / `actor` / `correlation_id` are parameters.** A machine ingest
+  becomes distinguishable in the outbox without inventing event vocabulary. The
+  browser route keeps `provenance="user"`.
+
+### Non-regression result
+
+`tests/test_prospect_creation_service_extraction.py` — **16 passed**, structural
+(AST, not text) with canaries. Mutation-verified: reintroducing an INSERT into the
+route fails `test_la_route_ne_contient_plus_d_insert`.
+
+Neighbouring suite: **110 prospect-related tests pass**, 43 skipped. Two collection
+errors (`test_frontend_workspace_e2e`, `test_playwright_harness_canary`) are
+**pre-existing** — playwright is absent from the API image — reproduced with my
+changes stashed.
+
+Two bugs in my own tests were caught by the tests themselves: one read raw source
+where the docstring names the forbidden pattern, the other compared a lowercase
+needle against an uppercased haystack and therefore passed vacuously. Both are the
+exact failure family this repository documents.
+
+## Audit vocabulary — resolved without amendment
+
+`domain_events.CATALOGUE` is closed and raises `UnknownDomainEvent`, and
+`platform_audit_logs.event_type` is a closed CHECK. Neither needs extending:
+
+- ingest success → `prospect.created` (already catalogued), carrying tenant,
+  prospect id, `provenance`, `actor`, `correlation_id`, timestamp;
+- auth failure → `PLATFORM_AUTH_FAILURE` (already present, exact meaning);
+- cross-tenant attempt → `CROSS_TENANT_ACCESS_DENIED` (already present).
+
+`event_outbox` has no CHECK on provenance, so `service_account` is admissible.
+
+## Steps 5–20 — not implemented, and why
+
+Everything from here needs the credential verifier, which is **new authentication
+code in a live multi-tenant CRM**. That is the highest-risk change in this mission
+and the one least suited to being written at the tail of a long session. I stopped
+at a boundary where the tree is coherent, tested and deployed nowhere, rather than
+produce a security surface with degraded care.
+
+Remaining, in order, with the design already settled:
+
+1. Migration `091` (next free number; MANIFEST.tsv line 092) — additive,
+   idempotent, ending in the mandatory `DO $$ … RAISE EXCEPTION` proof block:
+   - `lead_acquisition_attributions` with the Decision-3 field set,
+     composite FK `(tenant_id, prospect_id) REFERENCES prospects (tenant_id, id)`
+     — the required `UNIQUE (tenant_id, id)` already exists as
+     `uq_prospects_tenant_id`;
+   - `UNIQUE (tenant_id, source_system, external_correlation_id)` — the
+     DB-enforced idempotency identity;
+   - a payload fingerprint column so the same key with a different payload is a
+     detectable 409 rather than a silent overwrite;
+   - RLS `ENABLE` **and** `FORCE`, one policy per command.
+2. Service-account credential verifier (hash comparison, `credential_version`,
+   `kill_switch_engaged`, `status`), resolving to exactly one tenant.
+3. `prospect.ingest` capability in the existing permission vocabulary.
+4. `POST /api/v1/lead-ingest` — thin, calling the extracted service.
+5. §20 test matrix, then migration replay.
+6. Only then the seolead adapter, export state machine and canary.
+
+## Marketing consent — behaviour fixed by Decision 2
+
+`consent_processing → consent_records.type = 'data_processing'`. Marketing consent
+is **not transmitted at all** from the current form: the wording names no channel,
+and `email_marketing` / `sms_marketing` / `phone_marketing` each assert one. The
+ingest contract will carry `consent_marketing: false` and write no marketing
+record. Request handling is never blocked on it.
+
+Recorded for the later website/legal task: add reviewed, explicitly
+channel-specific wording — an optional email-marketing checkbox — before any
+marketing consent is exported.
