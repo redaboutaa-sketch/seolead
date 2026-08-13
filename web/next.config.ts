@@ -8,20 +8,15 @@ import type { NextConfig } from "next";
  * because they must apply to every response, including 404s and static assets,
  * and middleware does not run for all of them.
  */
-const csp = [
-  "default-src 'self'",
-  // No inline or remote scripts. The site ships no third-party tag, and a CSP
-  // that permits 'unsafe-inline' would not be worth writing down.
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "object-src 'none'",
-].join("; ");
+/**
+ * Content-Security-Policy is NOT set here.
+ *
+ * It needs a per-request nonce for the App Router's inline RSC payload scripts,
+ * and a value in this file is baked in at build time. It lives in `middleware.ts`.
+ * Setting it in both places would emit two CSP headers, and a browser enforces
+ * the intersection — so the static, nonce-less one would silently win and
+ * reinstate the blank-page bug.
+ */
 
 /**
  * Indexing is refused at the HTTP layer unless explicitly enabled at build time.
@@ -45,7 +40,6 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: csp },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Frame-Options", value: "DENY" },

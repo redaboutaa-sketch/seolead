@@ -76,6 +76,30 @@ describe("indexing gate", () => {
   });
 });
 
+describe("content-security-policy", () => {
+  it("is emitted from middleware only, never from next.config", () => {
+    // Two CSP headers means the browser enforces the intersection, so a static
+    // nonce-less policy would silently win and blank the page again.
+    const config = readFileSync(new URL("../next.config.ts", import.meta.url), "utf-8");
+    expect(config).not.toMatch(/key:\s*"Content-Security-Policy"/);
+    expect(config).not.toMatch(/"script-src/);
+  });
+
+  it("carries a per-request nonce for the App Router's inline RSC scripts", () => {
+    const mw = readFileSync(new URL("../middleware.ts", import.meta.url), "utf-8");
+    expect(mw).toContain("randomUUID");
+    expect(mw).toMatch(/script-src 'self' 'nonce-\$\{nonce\}'/);
+    // Next reads the nonce off the REQUEST header; response-only would not work.
+    expect(mw).toMatch(/requestHeaders\.set\("content-security-policy"/);
+  });
+
+  it("does not fall back to unsafe-inline", () => {
+    const mw = readFileSync(new URL("../middleware.ts", import.meta.url), "utf-8");
+    const scriptSrc = mw.match(/script-src[^`\n]*/)?.[0] ?? "";
+    expect(scriptSrc).not.toContain("unsafe-inline");
+  });
+});
+
 describe("publication state still gates the public route", () => {
   it("the public content route reads published content only", () => {
     const api = readFileSync(new URL("../lib/api.ts", import.meta.url), "utf-8");
