@@ -42,6 +42,24 @@ TONE AND STRUCTURE
 - No manufactured urgency, no guaranteed outcomes, no pressure tactics.
 - Use markdown: a single H1, then H2 sections following the outline.
 
+LINKS
+- Do NOT output any markdown link or URL in the body. Never link to another
+  company, comparison site or installer: a published page that sends its reader
+  to a competitor has failed. Sources are recorded separately; they are not
+  citations in the copy.
+
+PRICE AND QUANTITY WORDING
+- A figure reported by one source is what THAT SOURCE reports. Say so.
+- A range observed across the supplied sources is an observed range. Never call
+  it an average, a market price, or "the" price in Belgium.
+- Never turn an observed sample into a national average.
+- Always carry a price's stated basis: per watt-peak, per kWc, per m² or for the
+  whole installation, with VAT status when it is given. A figure without its
+  basis is misleading, and figures on different bases must never be combined.
+- VAT status belongs to ONE figure, never to a list. If some supplied figures say
+  VAT included and others say nothing, you may not write that "these prices
+  include VAT" — say it only about the figures whose source said it.
+
 CONVERSION
 - Close with one clear, honest next step matching the stated CTA.
 - The call to action must not promise anything the evidence does not support.
@@ -63,6 +81,26 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
     ]
 
     system = _BASE_RULES
+
+    # The core question, when the evidence supports answering it.
+    core_evidence = brief.get("core_answer_evidence") or {}
+    if brief.get("must_answer_directly") and core_evidence.get("answers"):
+        system += (
+            f"\nCORE QUESTION — YOU MUST ANSWER IT DIRECTLY\n"
+            f"This page exists to answer: {brief.get('core_question')}\n"
+            f"Answer it explicitly in the opening section, before any context, "
+            f"using ONLY the supplied price evidence and carrying each figure's "
+            f"basis and VAT status. Do not defer the answer to a call to action, "
+            f"and do not tell the reader to ask a professional instead of giving "
+            f"the figures you have.\n")
+    elif brief.get("core_answer_status") == "CORE_QUESTION_UNRESOLVED":
+        system += (
+            f"\nCORE QUESTION — EVIDENCE INSUFFICIENT\n"
+            f"This page targets: {brief.get('core_question')}\n"
+            f"The research did not establish a defensible figure. Say so plainly "
+            f"and early, explain what determines the cost, and do NOT state or "
+            f"imply any number. Inventing one would be worse than the gap.\n")
+
     if forbidden:
         system += (
             "\nTOPICS YOU MAY NOT ASSERT (no dated source was found for any of "
@@ -85,6 +123,10 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
         "sources": brief["required_sources"],
         "limitations_you_must_respect": brief["missing_information"],
         "call_to_action": brief["cta_strategy"],
+        "core_question": brief.get("core_question"),
+        "core_answer_status": brief.get("core_answer_status"),
+        "price_evidence": core_evidence.get("answers") or [],
+        "observed_price_range": core_evidence.get("observed_range"),
     }, ensure_ascii=False)
 
     return system, user

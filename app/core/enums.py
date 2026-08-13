@@ -148,7 +148,12 @@ class ClaimCategory(StrEnum):
     # live authoritative run actually returned (CWaPE and ORES tariff pages).
     TARIFF = "TARIFF"                  # a regulated periodic tariff
     GRID_FEE = "GRID_FEE"              # a connection or network charge
-    MARKET_PRICE = "MARKET_PRICE"      # market-wide averages — needs corroboration
+    # Price claims split by WHAT THEY ASSERT, because the evidence each needs
+    # differs sharply. Phase 3.4 found 27 of 34 quantified price claims blocked by
+    # the market-average bar while asserting no average at all.
+    MARKET_AVERAGE = "MARKET_AVERAGE"  # "the average Belgian installation costs X"
+    OBSERVED_PRICE_RANGE = "OBSERVED_PRICE_RANGE"   # "source S reports X–Y"
+    MARKET_PRICE = "MARKET_PRICE"      # unqualified price mention — residual
     VENDOR_PRICE = "VENDOR_PRICE"      # a specific vendor's own displayed price
     PRODUCT_SPEC = "PRODUCT_SPEC"
     GENERAL = "GENERAL"

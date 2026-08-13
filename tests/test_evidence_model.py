@@ -192,7 +192,9 @@ class TestClaimPolicy:
         vendor = classify_category(
             "Nos tarifs pour une installation de 5 kWc sont de 4 400 €.",
             solar_profile)
-        assert market is ClaimCategory.MARKET_PRICE
+        # Phase 3.4 split the price taxonomy: "the average is X" is the strict
+        # MARKET_AVERAGE category, distinct from a range one source observed.
+        assert market is ClaimCategory.MARKET_AVERAGE
         assert vendor is ClaimCategory.VENDOR_PRICE
 
     def test_subsidy_requires_official_and_a_date(self, solar_profile):

@@ -297,7 +297,15 @@ _COMPATIBLE_CATEGORIES: dict[ClaimCategory, frozenset[ClaimCategory]] = {
     # Deliberately NOT including VENDOR_PRICE: one installer's own price is not
     # evidence of a market average, and a market claim earns its figure through
     # corroboration across market-level statements instead.
-    ClaimCategory.MARKET_PRICE: frozenset({ClaimCategory.MARKET_PRICE}),
+    ClaimCategory.MARKET_PRICE: frozenset({ClaimCategory.MARKET_PRICE,
+                                           ClaimCategory.OBSERVED_PRICE_RANGE}),
+    # An average may be evidenced by observed ranges; a range is NOT evidenced by
+    # an average, and neither is established by a single vendor's own price.
+    ClaimCategory.MARKET_AVERAGE: frozenset({ClaimCategory.MARKET_AVERAGE,
+                                             ClaimCategory.OBSERVED_PRICE_RANGE,
+                                             ClaimCategory.MARKET_PRICE}),
+    ClaimCategory.OBSERVED_PRICE_RANGE: frozenset({
+        ClaimCategory.OBSERVED_PRICE_RANGE, ClaimCategory.MARKET_PRICE}),
     # A vendor price is established by that vendor's page and nothing else.
     ClaimCategory.VENDOR_PRICE: frozenset({ClaimCategory.VENDOR_PRICE}),
     ClaimCategory.ROI: frozenset({ClaimCategory.ROI, ClaimCategory.ENERGY_PRICE}),
@@ -331,6 +339,17 @@ def match(claim: Concepts, passage: Concepts) -> MatchResult:
     # ── Stage D: region ──────────────────────────────────────────────────────
     # Checked first: a Walloon passage cannot support a Brussels claim however
     # well the words line up, and refusing early keeps the reason unambiguous.
+    #
+    # Only a claim that NAMES a region is constrained here. Phase 3.3 defaulted a
+    # region-neutral claim to the market (`BE`), and since 16 of 27 live sources
+    # were detected `BE-WAL` — any page mentioning Wallonia once — a claim was
+    # refused by the very passage it had been extracted from. Sub-national
+    # evidence does not cover a national claim, so the default silently made most
+    # claims unsupportable.
+    #
+    # The HIGH-risk scope rule in `evaluate_claim` still applies the market
+    # default, so a subsidy claim cannot be over-generalised. That is where
+    # over-generalisation is a legal problem; here it was only arithmetic.
     if (claim.region is not Region.UNKNOWN and passage.region is not Region.UNKNOWN
             and not passage.region.covers(claim.region)):
         return MatchResult(

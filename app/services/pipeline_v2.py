@@ -485,10 +485,16 @@ async def run_pipeline_v2(
         unresolved = [c for c in payload["claims"]
                       if c["claim_risk"] == "HIGH"
                       and c["evidence_status"] != EvidenceStatus.SUPPORTED.value]
-        if unresolved:
+        # Phase 3.4: an unanswered core question is also a research gap. The
+        # HIGH-risk trigger alone never fired for pricing — price claims are
+        # MEDIUM and LOW risk — so a price query whose evidence answered nothing
+        # produced no second look at all.
+        price_gap = _price_answer_missing(query, payload["claims"], profile)
+        if unresolved or price_gap:
             plan = plan_authoritative_research(
                 topic=query, market=market,
-                unresolved=_as_evaluated(payload["claims"], profile),
+                unresolved=_as_evaluated(payload["claims"], profile,
+                                         price_gap=price_gap),
                 profile=profile)
             if not plan.is_empty:
                 run = await execute_plan(
@@ -811,8 +817,39 @@ async def _persist_usage(session, usage: UsageRecorder, correlation_id: str) -> 
     await session.commit()
 
 
-def _as_evaluated(claims: list[dict], profile) -> list:
-    """Rehydrate unresolved HIGH-risk claims for the planner.
+_PRICE_ANSWER_CATEGORIES = ("OBSERVED_PRICE_RANGE", "MARKET_AVERAGE",
+                            "MARKET_PRICE", "VENDOR_PRICE")
+
+
+def _price_answer_missing(query: str, claims: list[dict], profile) -> bool:
+    """Whether a price query ended with no usable, supported price figure.
+
+    Config-driven throughout: a vertical that declares no price policy, or a query
+    its own vocabulary does not recognise as a price question, has no price gap by
+    definition.
+    """
+    from app.services.price_normalization import extract_price_context
+
+    policy = getattr(profile, "price_policy", None) or {}
+    if not policy.get("enabled"):
+        return False
+    terms = [t.casefold() for t in policy.get("price_query_terms") or ()]
+    if not any(term in query.casefold() for term in terms):
+        return False
+
+    for claim in claims:
+        if claim.get("category") not in _PRICE_ANSWER_CATEGORIES:
+            continue
+        if claim.get("evidence_status") != EvidenceStatus.SUPPORTED.value:
+            continue
+        context = extract_price_context(claim.get("claim") or "")
+        if context is not None and context.is_usable:
+            return False
+    return True
+
+
+def _as_evaluated(claims: list[dict], profile, *, price_gap: bool = False) -> list:
+    """Rehydrate claims the planner should look for better sources for.
 
     The planner reasons over `EvaluatedClaim`, and the package carries dicts. A
     thin shim beats threading the objects through the whole builder just so one
@@ -824,7 +861,10 @@ def _as_evaluated(claims: list[dict], profile) -> list:
 
     out = []
     for claim in claims:
-        if claim.get("claim_risk") != "HIGH":
+        wanted = (claim.get("claim_risk") == "HIGH"
+                  or (price_gap
+                      and claim.get("category") in _PRICE_ANSWER_CATEGORIES))
+        if not wanted:
             continue
         if claim.get("evidence_status") == EvidenceStatus.SUPPORTED.value:
             continue

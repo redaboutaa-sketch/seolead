@@ -165,6 +165,19 @@ authority_policy:
       A vendor is the authority on its own displayed price, and establishes
       that price only — never a market average.
 
+# Answering the price question. A page that ranks for "prix ..." and states no
+# price has failed, but the fix is evidence, never invention — so the minimum
+# number of comparable observations is set here rather than assumed in code.
+price_policy:
+  enabled: true
+  # Two independent, comparable observations before a range may be stated. One is
+  # a single source's figure and is reported as exactly that.
+  observed_range_min_sources: 2
+  # Intents whose page owes the reader a figure.
+  answer_required_intents: [COMMERCIAL, TRANSACTIONAL]
+  # Query vocabulary that makes this a price question.
+  price_query_terms: [prix, coût, cout, tarif, tarifs, combien, budget, prijs, kost]
+
 # Where targeted authoritative research looks when a HIGH-risk claim is
 # unresolved. Placeholder shape: populate without changing orchestration code.
 official_source_policy:
@@ -185,7 +198,7 @@ official_source_policy:
       market: BE
       languages: [fr]
       priority: 95
-      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI]
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI, MARKET_AVERAGE]
     - domain: cwape.be
       name: CWaPE — régulateur wallon de l'énergie
       authority_type: REGULATOR
@@ -253,7 +266,7 @@ official_source_policy:
       market: BE
       languages: [nl]
       priority: 95
-      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI]
+      claim_categories: [SUBSIDY, ELIGIBILITY, REGULATION, ROI, MARKET_AVERAGE]
     - domain: vreg.be
       name: VREG — Vlaamse regulator
       authority_type: REGULATOR
@@ -319,7 +332,7 @@ official_source_policy:
       market: BE
       languages: [fr]
       priority: 60
-      claim_categories: [SUBSIDY, ROI, ENERGY_PRICE]
+      claim_categories: [SUBSIDY, ROI, ENERGY_PRICE, MARKET_AVERAGE]
 
   # Claim-category-specific official queries. Regional variants matter: a single
   # "Belgium" query returns the federal level and misses the regional schemes
@@ -337,6 +350,13 @@ official_source_policy:
     ENERGY_PRICE: "prix electricite tarif regule menages"
     ROI: "rentabilite installation photovoltaique etude officielle"
     TARIFF: "tarif periodique reseau distribution electricite"
+    # Phase 3.4: the pilot query is a price question, and the first live run
+    # produced no answerable price at all. These look for cost guidance published
+    # BY the bodies above — a figure they state is attributable, which is what a
+    # market-average claim requires and a comparison site cannot supply.
+    MARKET_AVERAGE: "cout moyen installation photovoltaique menage prix indicatif"
+    MARKET_AVERAGE_VLG: "gemiddelde kostprijs zonnepanelen installatie richtprijs"
+    OBSERVED_PRICE_RANGE: "prix installation photovoltaique kWc fourchette indicative"
     GRID_FEE: "cout raccordement installation photovoltaique reseau"
 
 # ── Matching vocabulary (Phase 3.3) ──────────────────────────────────────────

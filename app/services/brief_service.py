@@ -32,6 +32,85 @@ _MAX_REQUIRED_FACTS = 12
 _MAX_OUTLINE_SECTIONS = 9
 
 
+# Categories whose SUPPORTED claims can answer a price question. MARKET_PRICE is
+# the residual bucket and is included because a figure it carries is still a
+# figure — the wording rules downstream are what keep it from being called an
+# average.
+_PRICE_ANSWER_CATEGORIES = ("OBSERVED_PRICE_RANGE", "MARKET_AVERAGE",
+                            "MARKET_PRICE", "VENDOR_PRICE")
+_MAX_CORE_EVIDENCE = 6
+
+
+def _core_question(query: str, intent: SearchIntent, profile: VerticalProfile,
+                   supported: list[dict]) -> dict:
+    """What this page must answer, and whether the evidence lets it.
+
+    Phase 3.4's live draft was titled "Prix des panneaux solaires en Belgique" and
+    contained no price. Factual QA passed because it asserted nothing checkable —
+    a vacuous pass. Recording the core question and its answerability separately is
+    what makes that state visible instead of silently acceptable.
+
+    Two outcomes only, and both are honest. Either the evidence answers the
+    question and the page must say so, or it does not and the page must say *that*.
+    There is no third branch where the writer fills the gap.
+    """
+    from app.services.price_normalization import (extract_price_context,
+                                                  observed_range)
+
+    policy = profile.price_policy or {}
+    required = {i.upper() for i in policy.get("answer_required_intents") or ()}
+    terms = [t.casefold() for t in policy.get("price_query_terms") or ()]
+    normalized = query.casefold()
+    # A price question is one the vertical's own vocabulary recognises. Nothing
+    # here knows that "prix" is French or that solar panels have a price.
+    if (not policy.get("enabled") or intent.value not in required
+            or not any(term in normalized for term in terms)):
+        return {"question": None, "status": "NOT_APPLICABLE",
+                "must_answer_directly": False, "evidence": [], "range": None}
+
+    question = query.strip()
+    answers, contexts = [], []
+    for claim in supported:
+        if claim.get("category") not in _PRICE_ANSWER_CATEGORIES:
+            continue
+        context = extract_price_context(_claim_text(claim))
+        if context is None or not context.is_usable:
+            # A bare amount with no stated basis is not an answer: €6 000 could be
+            # a total, a per-kWc rate or a per-m² figure.
+            continue
+        contexts.append(context)
+        answers.append({
+            "claim": _claim_text(claim),
+            "category": claim.get("category"),
+            "price_context": context.as_dict(),
+            "qualification": ("a figure this source reports"
+                              if claim.get("category") != "MARKET_AVERAGE"
+                              else "an average this source reports"),
+            "sources": [e.get("url") for e in claim.get("evidence") or []
+                        if e.get("supports")],
+        })
+
+    if not answers:
+        return {
+            "question": question, "status": "CORE_QUESTION_UNRESOLVED",
+            "must_answer_directly": False, "evidence": [], "range": None,
+            "note": ("The core question of this page is unresolved: no price claim "
+                     "reached SUPPORTED with a stated basis. The page must say so "
+                     "plainly rather than imply an answer the research did not "
+                     "produce."),
+        }
+
+    minimum = int(policy.get("observed_range_min_sources", 2) or 2)
+    return {
+        "question": question, "status": "EVIDENCE_AVAILABLE",
+        "must_answer_directly": True,
+        "evidence": answers[:_MAX_CORE_EVIDENCE],
+        # None when the observations are not comparable — different bases or VAT
+        # treatments are not a range, and stating one would invent a figure.
+        "range": observed_range(contexts, minimum=minimum),
+    }
+
+
 def _claim_text(item: dict) -> str:
     """Claim text from a V3 claim or a V2 fact, whichever shape arrived."""
     return str(item.get("claim") or item.get("fact") or "")
@@ -147,10 +226,29 @@ def build_brief_payload(
             "Coverage gaps must not be presented as absence of information."
         )
 
+    core = _core_question(query, intent, profile, list(supported_facts))
+    if core["status"] == "EVIDENCE_AVAILABLE":
+        # The answer leads. A price page that buries its price under six sections
+        # of context has not answered the query.
+        for answer in reversed(core["evidence"][:3]):
+            required_facts.insert(0, {
+                "fact": answer["claim"], "source_ref": None,
+                "observability": None, "category": answer["category"],
+                "evidence_status": "SUPPORTED",
+                "price_context": answer["price_context"]})
+        required_facts = required_facts[:_MAX_REQUIRED_FACTS]
+    elif core["status"] == "CORE_QUESTION_UNRESOLVED":
+        missing.insert(0, core["note"])
+
     title = query.strip()
     title = title[0].upper() + title[1:] if title else "Untitled"
 
     return {
+        "core_question": core["question"],
+        "core_answer_status": core["status"],
+        "core_answer_evidence": {"answers": core["evidence"],
+                                 "observed_range": core.get("range")},
+        "must_answer_directly": core["must_answer_directly"],
         "content_type": content_type.value,
         "primary_query": query,
         "search_intent": intent.value,

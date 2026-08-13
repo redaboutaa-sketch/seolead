@@ -11,8 +11,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, String,
-                        Text, UniqueConstraint)
+from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer,
+                        String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import (ApprovalState, ContentStatus, ContentType, QAStatus,
@@ -57,6 +57,18 @@ class ContentBrief(Base):
     cta_strategy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     internal_linking_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     missing_information: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # The one question the page exists to answer, and whether the evidence lets it.
+    # Phase 3.4: a price page that states no price passed factual QA because it
+    # asserted nothing checkable. Recorded here, that state is visible.
+    core_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    core_answer_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # {"answers": [...], "observed_range": {...} | None}. The range is separate
+    # because it is a different kind of statement: a sample the pipeline observed,
+    # never a market average.
+    core_answer_evidence: Mapped[dict] = mapped_column(JSONType, nullable=False,
+                                                       default=dict)
+    must_answer_directly: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                       default=False)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=ContentStatus.BRIEF_CREATED.value
     )

@@ -69,9 +69,21 @@ def extract_draft_claims(body: str) -> list[str]:
 def _matches_claim(sentence: str, claim: dict) -> bool:
     """Whether a draft sentence corresponds to a ledger claim."""
     claim_text = str(claim.get("claim", ""))
-    if len(_content_words(sentence) & _content_words(claim_text)) < _TOPIC_MATCH_MIN:
-        return False
+    shared = len(_content_words(sentence) & _content_words(claim_text))
     sentence_numbers = _numbers(sentence)
+
+    # Phase 3.4: "Le panneau seul coûte entre 130 € et 170 €/m²" failed against
+    # "Le panneau seul revient à 130 € – 170 €/m²" — same figures, same subject,
+    # one shared long word, so the draft was blocked for asserting exactly what
+    # the evidence said. Reproducing every figure of a claim, on a shared topic
+    # term, is stronger correspondence than two shared words and no numbers, so
+    # it carries the match on its own.
+    if (sentence_numbers and shared >= 1
+            and sentence_numbers <= _numbers(claim_text)):
+        return True
+
+    if shared < _TOPIC_MATCH_MIN:
+        return False
     if not sentence_numbers:
         return True
     # A quantified sentence must carry a figure the claim actually contains.

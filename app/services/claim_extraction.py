@@ -53,6 +53,41 @@ _NON_ASSERTION = re.compile(
     re.IGNORECASE)
 _QUESTION = re.compile(r"\?\s*$")
 
+# A promotional imperative anywhere in the sentence, not only at its start.
+# Phase 3.3's draft linked to a competitor because "Pour en savoir plus,
+# découvrez notre article sur les panneaux Plug and Play !" reached the brief as
+# a fact the writer was told to state — the opening clause moved the verb past
+# the start-anchored test above.
+_PROMOTIONAL = re.compile(
+    r"\b(?:d[ée]couvrez|profitez|cliquez|contactez[- ]nous|demandez\s+(?:votre|un)|"
+    r"remplissez|inscrivez[- ]vous|commandez|r[ée]servez|"
+    r"discover|click here|contact us|sign up|order now)\b", re.IGNORECASE)
+
+# ── Page titles are not claims ───────────────────────────────────────────────
+# Phase 3.4 found "CREG : Commission de Régulation de l'Électricité et du Gaz"
+# sitting in the claim set as a supported factual claim. It is a page title: a
+# label, not a proposition, and nothing about it is true or false. Worse, such
+# fragments corroborate each other across pages and inflate support counts.
+#
+# The test is a predicate. An assertion says something *about* its subject, so a
+# fragment with no verb and the shape of a heading is a label.
+_VERB_MARKER = re.compile(
+    r"\b(?:est|sont|était|étaient|sera|seront|a|ont|avait|avaient|aura|auront|"
+    r"peut|peuvent|doit|doivent|faut|coûte|coûtent|revient|reviennent|s'élève|"
+    r"s'élèvent|varie|varient|représente|représentent|permet|permettent|"
+    r"dépend|dépendent|atteint|atteignent|comprend|comprennent|génère|génèrent|"
+    r"produit|produisent|bénéficie|bénéficient|dispose|disposent|reste|restent|"
+    r"s'agit|concerne|concernent|s'applique|s'appliquent|octroie|octroient|"
+    r"is|are|was|were|has|have|can|may|must|costs?|ranges?|varies|depends|"
+    r"includes?|provides?|remains?)\b"
+    # Inflected forms, minus the endings French nouns share with them: `-ment`
+    # (gouvernement) and `-ité` (électricité) would otherwise make every title
+    # look like a sentence.
+    r"|\b\w{3,}(?<!ment)ent\b|\b\w{3,}(?:aient|ait|eront|era|issent)\b",
+    re.IGNORECASE)
+# Site-title furniture: "Page — Site", "Accueil | Domaine", "CREG : ...".
+_TITLE_SEPARATOR = re.compile(r"\s[|–—]\s|^\s*[A-ZÉÈÀ]{2,}\s*:")
+
 
 @dataclass(frozen=True)
 class AtomicClaim:
@@ -90,11 +125,35 @@ def _is_assertion(text: str) -> bool:
         return False
     if _QUESTION.search(stripped):
         return False
-    if _NON_ASSERTION.match(stripped):
+    if _NON_ASSERTION.match(stripped) or _PROMOTIONAL.search(stripped):
         # "Vous souhaitez un devis ?" is a call to action, not a proposition.
         return False
     # Needs at least a handful of real words.
-    return len([w for w in stripped.split() if len(w) > 2]) >= 5
+    if len([w for w in stripped.split() if len(w) > 2]) < 5:
+        return False
+    return not _is_title_fragment(stripped)
+
+
+def _is_title_fragment(text: str) -> bool:
+    """Whether this is a heading or site title rather than a proposition.
+
+    Only fragments that assert nothing are rejected: a predicate anywhere in the
+    text is enough to keep it, because a real claim with an unusual verb must not
+    be lost to a heuristic about capitalisation.
+    """
+    if _VERB_MARKER.search(text):
+        return False
+    if _TITLE_SEPARATOR.search(text):
+        return True
+    words = [w for w in text.split() if len(w) > 2]
+    if not words:
+        return True
+    capitalised = sum(1 for w in words if w[:1].isupper())
+    # A verbless run of mostly-capitalised words is a name or a heading.
+    if capitalised >= max(2, len(words) * 0.4):
+        return True
+    # A verbless fragment that does not even end a sentence is not an assertion.
+    return not text.rstrip().endswith((".", "!"))
 
 
 def _is_quantified(text: str) -> bool:

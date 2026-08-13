@@ -80,6 +80,12 @@ class VerticalProfile(BaseModel):
     # deliberate: it can be populated without touching orchestration code.
     official_source_policy: dict = Field(default_factory=dict)
 
+    # ── Price answering (Phase 3.4) ──────────────────────────────────────────
+    # How many comparable observations before a range may be stated, and whether
+    # this vertical's core query is a price question at all. Configuration, so no
+    # Solar-specific rule reaches the orchestrator.
+    price_policy: dict = Field(default_factory=dict)
+
     # ── Matching vocabulary (Phase 3.3) ──────────────────────────────────────
     # Terms that are CONTEXT rather than TOPIC in this vertical. `solaire` is
     # generic for Solar Belgium and highly discriminative for a roofing vertical,

@@ -130,11 +130,23 @@ _DEFAULT_POLICY: dict[ClaimCategory, tuple[str, AuthorityRequirement,
         ClaimRisk.HIGH, AuthorityRequirement.INSTITUTIONAL,
         FreshnessRequirement.REQUIRED, 1,
         "Energy prices are volatile; an undated figure misleads."),
+    ClaimCategory.MARKET_AVERAGE: (
+        ClaimRisk.MEDIUM, AuthorityRequirement.SPECIALIST,
+        FreshnessRequirement.PREFERRED, 3,
+        "An average across a market needs more than one seller's page; a few "
+        "search results are not a survey."),
+    ClaimCategory.OBSERVED_PRICE_RANGE: (
+        ClaimRisk.LOW, AuthorityRequirement.SPECIALIST,
+        FreshnessRequirement.PREFERRED, 1,
+        "A range reported BY a named source is a statement about what that "
+        "source observed, not a claim about the market. One specialist source "
+        "establishes what that source reports — and the wording must attribute "
+        "it rather than promote it to an average."),
     ClaimCategory.MARKET_PRICE: (
         ClaimRisk.MEDIUM, AuthorityRequirement.SPECIALIST,
         FreshnessRequirement.PREFERRED, 2,
-        "A market-wide average needs more than one seller's page; a few search "
-        "results are not a survey."),
+        "An unqualified price statement reads as market-wide; it needs more "
+        "than one seller's page."),
     ClaimCategory.VENDOR_PRICE: (
         ClaimRisk.LOW, AuthorityRequirement.ANY,
         FreshnessRequirement.PREFERRED, 1,
@@ -177,10 +189,20 @@ _TAX_RATE = re.compile(
     r"\b(?:taux\s+(?:de\s+)?(?:tva|btw)|tva\s+(?:de|a|à)\s*\d|"
     r"btw[- ]tarief|vat\s+rate)\b", re.IGNORECASE)
 
-# Market-average language: "en moyenne", "le prix moyen", "comptez environ".
-_MARKET_MARKERS = ("en moyenne", "prix moyen", "cout moyen", "moyenne",
-                   "comptez environ", "comptez a present", "generalement entre",
-                   "varie entre", "gemiddeld", "on average", "typically between")
+# An explicit average: "en moyenne", "le prix moyen". These genuinely assert a
+# market-wide central value and keep the strict bar.
+_AVERAGE_MARKERS = ("en moyenne", "prix moyen", "cout moyen", "moyenne",
+                    "gemiddeld", "on average")
+# A reported RANGE: "entre X et Y", "de X à Y", "X – Y". This asserts what a
+# source observed, which is a different and far more defensible statement.
+_RANGE_MARKERS = ("entre", "varie entre", "varie de", "compris entre",
+                  "de l'ordre de", "comptez environ", "comptez a present",
+                  "generalement entre", "a partir de", "jusqu'a",
+                  "tussen", "van tot", "typically between", "ranges from")
+_RANGE_PATTERN = re.compile(
+    r"\d[\d\s.,]*\s*(?:€|eur|euros?)?\s*(?:[-–—]|a|à|et|to|tot)\s*"
+    r"\d[\d\s.,]*\s*(?:€|eur|euros?|/|par)", re.IGNORECASE)
+_MARKET_MARKERS = _AVERAGE_MARKERS + _RANGE_MARKERS
 # First-person / vendor-page language: "nos tarifs", "notre offre", "chez nous".
 _VENDOR_MARKERS = ("nos tarifs", "nos prix", "notre offre", "notre prix",
                    "chez nous", "our price", "our pricing", "onze prijs")
@@ -236,8 +258,13 @@ def classify_category(claim: str, profile: VerticalProfile) -> ClaimCategory:
     if has_money or _has_currency(claim):
         if any(marker in normalized for marker in _VENDOR_MARKERS):
             return ClaimCategory.VENDOR_PRICE
-        if any(marker in normalized for marker in _MARKET_MARKERS):
-            return ClaimCategory.MARKET_PRICE
+        # An explicit average outranks a range: "le prix moyen varie entre X et Y"
+        # is still an average claim and keeps the strict bar.
+        if any(marker in normalized for marker in _AVERAGE_MARKERS):
+            return ClaimCategory.MARKET_AVERAGE
+        if (_RANGE_PATTERN.search(claim)
+                or any(marker in normalized for marker in _RANGE_MARKERS)):
+            return ClaimCategory.OBSERVED_PRICE_RANGE
         # An unqualified price claim in an editorial context reads as market-wide.
         return ClaimCategory.MARKET_PRICE
 

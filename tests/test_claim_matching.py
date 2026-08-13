@@ -95,7 +95,7 @@ class TestNamedRegressions:
         market = _match(
             "Le prix moyen d'une installation en Belgique est de 4 400 €.",
             "Nos tarifs pour une installation de 5 kWc sont de 4 400 €.",
-            solar_profile, claim_category=ClaimCategory.MARKET_PRICE)
+            solar_profile, claim_category=ClaimCategory.MARKET_AVERAGE)
         vendor = _match(
             "Nos tarifs pour une installation de 5 kWc sont de 4 400 €.",
             "Nos tarifs pour une installation de 5 kWc sont de 4 400 €.",

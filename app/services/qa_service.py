@@ -49,6 +49,23 @@ _NUMBER_PATTERN = re.compile(
 )
 _STANDALONE_PERCENT = re.compile(r"(?<![\w/])(\d{1,3}(?:[.,]\d+)?)\s*%")
 
+# "Ces prix incluent la TVA", "tous ces montants sont TVAC", "these prices
+# include VAT" — a plural subject carrying one VAT treatment for the whole list.
+_VAT_GENERALISATION = re.compile(
+    r"\b(?:ces|les|tous\s+ces|nos)\s+(?:prix|tarifs|montants|budgets)\b[^.!?]{0,80}"
+    r"(?:tvac|ttc|incluent\s+la\s+tva|comprennent\s+la\s+tva|tva\s+comprise|"
+    r"tva\s+incluse|hors\s+tva|htva)"
+    r"|\b(?:these|all)\s+prices\b[^.!?]{0,60}(?:include|exclude)\s+vat",
+    re.IGNORECASE)
+# ...unless the sentence says the treatment holds only where a source stated it.
+# That is the correct qualification, not the overstatement being caught.
+_VAT_QUALIFIER = re.compile(
+    r"\b(?:lorsqu[e\']|quand|si)\s+(?:cela|c[\']est|elle\s+est|il\s+est)?\s*"
+    r"(?:est\s+)?(?:sp[ée]cifi[ée]|pr[ée]cis[ée]|indiqu[ée]|mentionn[ée])"
+    r"|\ble\s+cas\s+[ée]ch[ée]ant\b|\bo[uù]\s+(?:cela\s+est\s+)?indiqu[ée]\b"
+    r"|\bwhere\s+(?:so\s+)?(?:stated|specified|indicated)\b",
+    re.IGNORECASE)
+
 _META_TITLE_MAX = 60
 _META_DESCRIPTION_MAX = 155
 _KEYWORD_DENSITY_MAX = 0.025          # 2.5% of body words
@@ -71,8 +88,22 @@ def _digits(text: str) -> str:
 
 
 def _evidence_numbers(package: dict) -> set[str]:
+    """Numbers a retrieved source actually stated.
+
+    Only SUPPORTED claims count. A V3 package keys its propositions `claim` while
+    a V2 package keys its excerpts `fact`, and reading only `fact` meant every
+    figure in a V3 package was invisible here — so a correctly sourced price was
+    reported as appearing "in no retrieved source". Phase 3.3's draft hid the bug
+    by containing no numbers at all.
+    """
+    # A V2 package carries no support verdict per fact, so its whole fact list is
+    # the corpus, exactly as before. Where the V3 builder ran, only claims that
+    # reached SUPPORTED count — strictly narrower than the V2 rule.
+    entries = package.get("supported_claims")
+    if entries is None:
+        entries = package.get("facts") or []
     corpus = " ".join(
-        [str(f.get("fact", "")) for f in package.get("facts") or []]
+        [str(f.get("claim") or f.get("fact") or "") for f in entries]
         + [str(s.get("title") or "") for s in package.get("sources") or []]
     )
     found = {_digits(m.group(1)) for m in _NUMBER_PATTERN.finditer(corpus)}
@@ -463,11 +494,43 @@ def run_seo_qa_v2(
             r"\d[\d\s.,]*\s*(?:%|€|\$|£|eur|euros?|kwh|kwc|kwp|ans?)",
             body, re.IGNORECASE)
         if not quantified:
+            # Phase 3.4: whether silence is a failure depends entirely on whether
+            # the evidence could have spoken. With eligible price evidence in the
+            # brief, an unanswered page is a writer failure and must block. With
+            # none, silence is the correct outcome and blocking it would only
+            # pressure the next run into inventing a figure.
+            answerable = bool(brief.get("must_answer_directly"))
             findings.append(_finding(
                 "NO_QUANTIFIED_ANSWER",
-                f"Brief targets {intent} intent but the body states no figure at "
-                f"all. The page may be honest and still not answer the query.",
-                blocking=False))
+                (f"The brief supplied "
+                 f"{len((brief.get('core_answer_evidence') or {}).get('answers') or [])} "
+                 f"evidence-backed figure(s) and required a direct answer to "
+                 f"\"{brief.get('core_question')}\", but the body states no figure "
+                 f"at all."
+                 if answerable else
+                 f"Brief targets {intent} intent but the body states no figure at "
+                 f"all. The page may be honest and still not answer the query."),
+                blocking=answerable))
+
+    # ── VAT generalised across figures that never stated it ──────────────────
+    # A blanket "these prices include VAT" restates every figure in the list by
+    # up to 21%. The first regenerated Phase 3.4 draft did exactly this: one of
+    # six supplied figures was marked TVAC, the other five said nothing.
+    answers = (brief.get("core_answer_evidence") or {}).get("answers") or []
+    vat_sentence = _VAT_GENERALISATION.search(body)
+    if (answers and vat_sentence
+            and not _VAT_QUALIFIER.search(
+                body[vat_sentence.start():vat_sentence.end() + 60])):
+        unknown = [a for a in answers
+                   if (a.get("price_context") or {}).get("vat_status") == "UNKNOWN"]
+        if unknown:
+            findings.append(_finding(
+                "VAT_STATUS_GENERALISED",
+                f"The body states a VAT treatment for the prices as a group, but "
+                f"{len(unknown)} of {len(answers)} supplied figures carry no VAT "
+                f"status in their source. VAT belongs to one figure, not a list.",
+                blocking=True,
+                detail=str(unknown[0].get("claim", ""))[:200]))
 
     # ── Content gap the SERP revealed ────────────────────────────────────────
     for gap in (package.get("content_gap") or [])[:3]:

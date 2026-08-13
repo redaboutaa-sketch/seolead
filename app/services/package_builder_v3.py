@@ -158,7 +158,11 @@ def build_package_v3(
         # passage is judged against the claim's own scope rather than re-derived
         # per passage.
         requirements = claim_policy.requirements_for(claim.text, profile)
-        claim_region = detect_region(claim.text, default=default_region).region
+        # UNKNOWN when the claim names no region: the matcher treats that as "no
+        # regional constraint" rather than "nationwide", which would wrongly
+        # exclude every sub-national source. `evaluate_claim` still applies the
+        # market default for the HIGH-risk scope rule.
+        claim_region = detect_region(claim.text).region
         candidates = evidence_model.build_candidates(
             claim, sources_by_ref, passages_by_ref, profile=profile,
             claim_category=requirements.category, claim_region=claim_region)
