@@ -276,3 +276,85 @@ on `lead.id` regardless.
    the lead, and a destination that markets to someone who declined would make
    this system the cause of that.
 3. How long a lead stays in this database after a successful export.
+
+
+---
+
+# Phase 5A addendum — measured against the deployed platform
+
+**Status: still NOT IMPLEMENTED.** Phase 5A stopped at the platform gate (§50).
+What follows replaces inference with facts read from the deployed revision
+`79666ba912cb` and the live `acquisition_platform` database on 2026-08-13.
+
+Everything above this line was written from Phase 1 discovery. Where the two
+disagree, this section is newer.
+
+## Deployment, verified
+
+```
+repository   github.com/redaboutaa-sketch/techformanord   (private)
+revision     79666ba912cb9a92ac342654036c1729c552e952     (= default branch tip)
+image        ghcr.io/redaboutaa-sketch/techformanord/api@sha256:e2b695c2a40b…
+database     acquisition_platform @ platform_postgres
+tenant       64edc9e3-0b91-442a-9d02-7964f2001a55 | solar-belgium | Solar Belgium
+```
+
+`/opt/techformanord` is **not** the deployed source — it is a stale checkout on
+`claude/beaver-ui-redesign` with uncommitted changes. Use the GHCR image revision.
+
+## What changed since Phase 1
+
+**`tenant_service_accounts` is now implemented**, not just migrated. Create,
+rotate and revoke exist in `services/tenant_membership_service.py`, exposed via
+`routes/tenant_admin.py` behind `tenant.service_accounts.manage`. The schema is
+tenant-scoped, hashes the secret, versions the credential, and arms a kill switch
+by default. **Reuse it.**
+
+The gap is narrower than Phase 1 implied: accounts can be minted but **nothing
+verifies a credential on an inbound request**. A verifier must be built.
+
+**`prospects` already carries** `utm_source`, `utm_medium`, `utm_campaign`,
+`utm_content`, `source`, `source_detail`. It does **not** carry `utm_term`,
+`landing_page`, `content_id`, `locale`, `search_intent`, `keyword_cluster`, `cta`,
+`conversion_type`, or any external correlation identifier.
+
+**Consent is an SSOT**, not two booleans. `consent_records.type` ∈
+`{data_processing, email_marketing, sms_marketing, phone_marketing, cookies,
+profiling}` with `status`, `text_version`, `purpose`, `proof`, `evidence`,
+`granted_at`, `revoked_at`, `actor_type`, `actor_id`.
+
+Mapping: `consent_processing → data_processing` is clean. `consent_marketing` is
+**channel-unspecified on our side** and Prospect 360 requires a channel — an
+unresolved decision, not a mapping.
+
+## Constraints any implementation must respect
+
+Read from that repository's `CLAUDE.md`, and non-negotiable there:
+
+- No ORM and no Alembic. `asyncpg` with hand-written SQL; migrations are numbered
+  `database/migrations/NNN_*.sql` files, additive and idempotent, inventoried in
+  `MANIFEST.tsv`, each ending in a `DO $$ … RAISE EXCEPTION` block that refuses to
+  declare success without proof.
+- Every read and write inside `tenant_transaction(tenant_id, pool=pool)`. Tenant
+  from verified identity only. Another tenant's object → **404**, never 403.
+- **No external effect from an HTTP request.** Outbound work is written to
+  `event_outbox` in the same transaction as the business write.
+- A new external capability is disabled by default. "Un drapeau neuf vaut `False`.
+  Toujours."
+
+## Blocking finding
+
+There is **no canonical prospect-creation service**. The logic is inline in
+`routes/prospects.py::create_prospect`, and two other `INSERT INTO prospects` sites
+exist (`prospect_import_runner.py`, `calendly_webhook_service.py`). A thin ingest
+route cannot call a service that does not exist, and duplicating the INSERT is
+forbidden. Extracting one is the correct fix and is an owner decision, because it
+refactors a live production write path.
+
+## Still required before implementation
+
+1. Approval to extract a prospect-creation domain service.
+2. The marketing-consent channel decision.
+3. Attribution model: dedicated table (recommended) vs widening `prospects`.
+4. Whether the audit/event vocabulary may be extended without a separate
+   architecture amendment.
