@@ -5,23 +5,35 @@
 `seolead_web` — Next.js standalone, bound to **127.0.0.1:3100 only**. No Traefik
 label, no public hostname. Traefik configuration was not touched.
 
-## Domain state (2026-08-13)
+## Domain state (2026-08-13) — LIVE, and not indexable
 
-The production domain `monprojetsolaire.be` is **configured but not routed**.
+`https://monprojetsolaire.be` is reachable over HTTPS and remains entirely
+non-indexable. Those are two different things, and keeping them apart is the point.
 
 | Item | State |
 |---|---|
-| domain in `SiteConfig` | `monprojetsolaire.be` |
+| domain | `monprojetsolaire.be` |
 | canonical origin | `https://monprojetsolaire.be` |
-| DNS | **not delegated** — no NS, no SOA, no A/AAAA |
-| Traefik routing | prepared in `infra/traefik/docker-compose.public.yml`, **not applied** |
-| TLS certificate | not requested |
+| DNS | delegated to `dns-parking.com`; apex + www → this VPS, A and AAAA |
+| Traefik routing | **applied** — `infra/traefik/docker-compose.public.yml` |
+| TLS | Let's Encrypt, both hostnames, valid to 2026-11-11 |
+| www | 308 permanent → apex |
 | indexable | **no** — `staging: true`, `allow_indexing: false` |
+| price page | `APPROVED` + `STAGED`, `published_at = NULL`, public route 404 |
 
-The routing lives in a separate overlay so that a routine `docker compose up -d`
-cannot publish the site. Applying it is the deliberate act described in
-`docs/runbooks/MONPROJETSOLAIRE_DEPLOYMENT.md`, and it is blocked on DNS
-(`docs/runbooks/MONPROJETSOLAIRE_DNS.md`).
+The routing lives in a separate overlay so a routine `docker compose up -d` cannot
+publish the site. Re-applying it is the documented act in
+`docs/runbooks/MONPROJETSOLAIRE_DEPLOYMENT.md`.
+
+### Preview access on a public hostname
+
+`/preview/*` is behind HTTP Basic auth at Traefik. The application's preview token
+authenticates the *server* to the API and says nothing about who holds the browser;
+on loopback that was harmless, on a public domain it would have served unpublished
+content to anyone who guessed the path.
+
+- public: `https://monprojetsolaire.be/preview/...` — credentials required
+- operator: `http://127.0.0.1:3100/preview/...` over the SSH tunnel — no credentials
 
 ## Reaching it
 

@@ -43,6 +43,30 @@ services:
       traefik.http.routers.monprojetsolaire.middlewares: >-
         monprojetsolaire-security-headers,monprojetsolaire-compress
 
+      # ── Preview paths — edge authentication ──────────────────────────────
+      # Higher priority than the apex router so it wins for these paths.
+      #
+      # The application's preview token authenticates the SERVER to the API. It
+      # says nothing about who is holding the browser. On loopback that gap did
+      # not matter — the only reachable client was the operator. On a public
+      # hostname it means unpublished content is served to anyone who guesses the
+      # path, which is the outcome publication state exists to prevent.
+      #
+      # So the visitor is authenticated here, at the edge, before the request
+      # reaches an app that would happily render a staged page.
+      traefik.http.routers.monprojetsolaire-preview.rule: >-
+        Host(`monprojetsolaire.be`) && PathPrefix(`/preview`)
+      traefik.http.routers.monprojetsolaire-preview.priority: "100"
+      traefik.http.routers.monprojetsolaire-preview.entrypoints: websecure
+      traefik.http.routers.monprojetsolaire-preview.tls: "true"
+      traefik.http.routers.monprojetsolaire-preview.tls.certresolver: letsencrypt
+      traefik.http.routers.monprojetsolaire-preview.service: monprojetsolaire
+      traefik.http.routers.monprojetsolaire-preview.middlewares: >-
+        monprojetsolaire-preview-auth,monprojetsolaire-security-headers
+      traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.users: "${SEOLEAD_PREVIEW_BASICAUTH}"
+      traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.realm: "Apercu - contenu non publie"
+      traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.removeheader: "true"
+
       # ── www → apex, permanent ────────────────────────────────────────────
       # A separate router rather than a rule alternation, because the two need
       # different middleware: www only ever redirects and never serves content.

@@ -89,12 +89,32 @@ curl -sI https://monprojetsolaire.be/prix-panneaux-solaires-belgique | head -1
 
 ## 4. Owner validation
 
-The staged page is reachable through the preview path with the preview token, or
-locally over the SSH tunnel:
+Two routes, and they differ in who may use them.
+
+**Over the public domain** — `/preview/*` is behind HTTP Basic auth at Traefik:
+
+```
+https://monprojetsolaire.be/preview/fr/prix-panneaux-solaires-belgique
+```
+
+Credentials are in `.env` as `SEOLEAD_PREVIEW_BASICAUTH_USER` and
+`SEOLEAD_PREVIEW_BASICAUTH_PASSWORD`. This exists because the application's preview
+token authenticates the *server* to the API — it says nothing about who is holding
+the browser. Without the edge check, a public hostname would serve unpublished
+content to anyone who guessed the path.
+
+**Over the SSH tunnel** — unauthenticated, because only the operator can reach it:
 
 ```bash
 ssh -L 3100:127.0.0.1:3100 <user>@<vps>
 open http://localhost:3100/preview/fr/prix-panneaux-solaires-belgique
+```
+
+To rotate the credential:
+
+```bash
+printf '%s:%s\n' apercu "$(openssl passwd -apr1)" | sed 's/\$/$$/g'
+# put the result in SEOLEAD_PREVIEW_BASICAUTH, then re-apply the overlay
 ```
 
 ---

@@ -139,6 +139,39 @@ class TestTraefikRoutingIsPreparedNotApplied:
         assert "traefik" not in overlay["services"], \
             "the overlay must never define a Traefik instance"
 
+    def test_preview_paths_require_edge_authentication(self):
+        """The gap a public hostname opened, and why it is closed here.
+
+        The application's preview token authenticates the SERVER to the API; it
+        says nothing about who holds the browser. On loopback that gap was
+        harmless — the only reachable client was the operator. On a public
+        hostname it served unpublished content to anyone who guessed the path,
+        which is exactly what publication state exists to prevent.
+        """
+        labels = yaml.safe_load(OVERLAY.read_text())["services"]["seolead_web"]["labels"]
+
+        rule = labels["traefik.http.routers.monprojetsolaire-preview.rule"]
+        assert "PathPrefix(`/preview`)" in rule
+        # It must out-prioritise the catch-all apex router, or it never matches.
+        apex_priority = int(labels.get(
+            "traefik.http.routers.monprojetsolaire.priority", 0))
+        preview_priority = int(
+            labels["traefik.http.routers.monprojetsolaire-preview.priority"])
+        assert preview_priority > apex_priority
+
+        middlewares = labels[
+            "traefik.http.routers.monprojetsolaire-preview.middlewares"]
+        assert "monprojetsolaire-preview-auth" in middlewares
+        assert any("basicauth.users" in k for k in labels)
+
+    def test_the_edge_credential_is_not_committed(self):
+        """The label interpolates an env var; the secret lives only in .env."""
+        raw = OVERLAY.read_text()
+        assert "${SEOLEAD_PREVIEW_BASICAUTH}" in raw
+        # An apr1 hash or a plaintext pair would both be secrets in git.
+        assert "$apr1$" not in raw
+        assert "$$apr1$$" not in raw
+
     def test_the_overlay_forces_noindex_at_the_edge_too(self):
         labels = yaml.safe_load(OVERLAY.read_text())["services"]["seolead_web"]["labels"]
         tag = next(v for k, v in labels.items() if k.endswith("X-Robots-Tag"))
