@@ -85,9 +85,16 @@ Content-Type: application/json
 |---|---|---|
 | 201 / 200 | accepted | record `lead_reference.p360_lead_id` |
 | 401 / 403 | credential rejected | stop, alert — do not retry blindly |
-| 409 | idempotency conflict | treat as accepted, reconcile |
+| ~~409~~ | ~~idempotency conflict~~ | ~~treat as accepted, reconcile~~ **WRONG — corrected by DEC-P5A-INGEST-01, §Phase 5A-P6** |
 | 422 | payload rejected | do not retry; the lead needs a human |
 | 5xx | platform fault | retry with backoff, then queue |
+
+> **The 409 row above is struck out deliberately rather than edited away.** It was
+> written in Phase 1 and is the exact error migration 091 exists to prevent:
+> *« un envoi DIFFÉRENT réutilisant la même clé … sans l'empreinte, le second cas
+> passerait pour un rejeu et la modification serait perdue en silence »*. Treating
+> a 409 as accepted moves that silent loss from the platform to the producer
+> instead of removing it. The normative matrix is in §Phase 5A-P6.
 
 ### Idempotency
 
@@ -1031,3 +1038,212 @@ alone changes the digest and two sequential edits would burn two golden updates:
 
 `creer_prospect` still receives `job_title`; only the DTO block it is read from
 changes. No canonical prospect-creation behaviour is affected.
+
+
+---
+
+# Phase 5A-P6 — Reliable ingestion: delivery, idempotency, durability
+
+**Status: SPECIFIED, not implemented.** No service, no route, no migration, no
+DTO or fingerprint change, `prospects.ingest.enforced` untouched. This section is
+normative and **supersedes the Phase 1 status table above** where they disagree.
+
+Platform tracer: **T12** in `doc/plan.md`. Product story: **US-16** in
+`doc/prd.md`.
+
+## Owner decisions — final, not reopenable
+
+| id | decision |
+|---|---|
+| **DEC-P5A-INGEST-01** | A same-key / different-payload conflict is **not accepted**. Domain outcome `IDEMPOTENCY_CONFLICT`, future HTTP 409. Zero prospect, zero consent, zero attribution, zero `prospect.created`, zero qualification work. The producer **must not** mark the lead exported, **must not** auto-mint a new `external_correlation_id`, and parks it for explicit reconciliation. |
+| **DEC-P5A-INGEST-02** | Machine ingest **must not** copy the browser's post-COMMIT fire-and-forget HTTP call. Qualification is a **durable outbox work item** written inside the business transaction; a consumer performs the external trigger. Failure must never lose the intent. Browser alignment is recorded as debt, not done here. |
+| **DEC-P5A-INGEST-03** | An idempotency conflict requires **durable platform audit evidence**, via the existing `platform_audit_logs` architecture and one new allowlisted event type. **No separate business conflict table.** PII-safe fields only. |
+
+## The atomic unit
+
+```
+BEGIN tenant_transaction(tenant_id)     ← tenant from the VERIFIED identity only
+    prospect                            (creer_prospect, provenance service_account)
+    data_processing consent             (same connection — see refactor below)
+    lead_acquisition_attributions       (… payload_fingerprint)
+    prospect.created                    (event_outbox, same connection)
+    qualification work item             (event_outbox, same connection)
+COMMIT
+──────────────────────────────────────────────────────────────────────────────
+AFTER COMMIT: nothing. The outbox worker performs the external trigger.
+```
+
+**No outbound HTTP inside the transaction, and none from the request path after
+COMMIT.** A prospect cannot commit without its idempotency key, and the intent to
+qualify it cannot be lost while the prospect survives.
+
+## Required consent refactor
+
+Measured, not assumed: `consent_service.record_consent` and
+`consent_capture_service.capture_consent` are both **channel-keyed**
+(`email → email_marketing`, `sms → sms_marketing`, `whatsapp → sms_marketing`,
+`phone → phone_marketing`) and both open **their own** `tenant_transaction`.
+
+**No code path can write `type = 'data_processing'` at all**, and none accepts a
+caller's connection. This is the same defect Phase 5A-P2 found for prospect
+creation, one layer down.
+
+```
+REQUIRED   the canonical consent writer gains a data_processing path that
+           accepts the caller's connection/transaction
+FORBIDDEN  a bare INSERT into consent_records from the ingest service —
+           consent is an SSOT, not a column
+INVARIANT  browser marketing-consent behaviour is unchanged: same channels,
+           same own transaction, same prospects.consent_<channel> projection
+```
+
+## Idempotency — algorithm A
+
+Identity fixed by 091: `(tenant_id, source_system, external_correlation_id)`.
+
+```
+1. optional fast-path read of the attribution by its identity
+2. if absent: attempt the COMPLETE business transaction
+3. uq_lead_acq_attr_identite decides the concurrent winner
+4. the loser takes an EXPECTED unique violation
+   (recognised by constraint name, not by exception type)
+5. its transaction rolls back ENTIRELY — prospect, consent, attribution,
+   events: nothing survives
+6. it opens a FRESH tenant transaction
+7. it re-reads the committed winner
+8. same fingerprint      → IDEMPOTENT_REPLAY
+9. different fingerprint → IDEMPOTENCY_CONFLICT
+```
+
+**No advisory lock by default.** The repository uses them (`appointment_service`,
+`twilio_canary_guard`) exactly where no constraint can express the invariant —
+overlapping time ranges. Here one can, and 091 says so: *« L'idempotence est une
+contrainte, pas une vérification applicative »*. A lock would not remove the
+exception path, which must be written and tested regardless.
+
+**No second idempotency mechanism.** `webhook_replay_keys` is provider-scoped and
+serves provider callbacks; 091 supersedes it here.
+
+## Domain results — transport-free
+
+```
+CREATED               prospect_id · external_correlation_id
+IDEMPOTENT_REPLAY     original prospect_id · external_correlation_id
+IDEMPOTENCY_CONFLICT  external_correlation_id
+                      NO identifier from the rolled-back work
+```
+
+No HTTP status code inside the application service. The transport tracer maps
+them, as `_TIMELINE_ERRORS` already does for the timeline.
+
+## Write counts per outcome
+
+| | prospect | consent | attribution | `prospect.created` | qualification |
+|---|---|---|---|---|---|
+| `CREATED` | 1 | 1 | 1 | 1 | 1 |
+| `IDEMPOTENT_REPLAY` | 0 | 0 | 0 | 0 | 0 |
+| `IDEMPOTENCY_CONFLICT` | 0 | 0 | 0 | 0 | 0 |
+| concurrent loser | 0 | 0 | 0 | 0 | 0 (rolled back) |
+
+A replay writes no consent, and that is semantics rather than optimisation: a
+second row would fabricate a second granting instant for one signature.
+`consent_records` is evidence, not a counter.
+
+## Qualification as durable work
+
+Two properties come free from what exists:
+
+- `event_outbox` carries `uq_outbox_idempotency (tenant_id, idempotency_key)`,
+  so a doubled emit is absorbed by `ON CONFLICT DO NOTHING`. The key derives from
+  the prospect identity;
+- the worker claims with `FOR UPDATE SKIP LOCKED` **and** honours
+  `next_attempt_at`, so two workers never process the same item and backoff is
+  real rather than notional.
+
+**One catalogue entry must be added.** `domain_events.CATALOGUE` has
+`prospect.created` and `prospect.qualified` — the fact and the outcome — but
+nothing expressing the *request*. Reusing `prospect.created` would make the
+browser path qualify too, and it already triggers by its own route: the same
+person would be qualified twice. The catalogue states the rule itself: *« l'ajouter
+est une décision, pas un effet de bord »*.
+
+### Failure of the external trigger
+
+```
+destination unavailable
+  → the prospect STAYS accepted
+  → the work item stays PENDING with next_attempt_at (exponential backoff)
+  → event_retry_service classifies the error: retry or abandon
+  → abandoning writes event_dead_letters (category, first AND last error,
+    attempt count, replayable or not) and marks the event FAILED
+  → FAILED is terminal, countable and visible
+NEVER
+  → the call fails, the intent disappears, and the prospect stays
+    unqualified forever with nobody informed
+```
+
+Nothing new is built: retry / abandon / replay already exist and are the entire
+reason `event_retry_service` was written.
+
+## Conflict audit
+
+A conflict writes no business row, so without evidence only a rotating log would
+remain. `platform_audit.record` acquires its **own** connection and never raises,
+so it survives the loser's rollback — precisely the property needed.
+
+```
+ONE audit event type to add, following the existing SCREAMING_SNAKE convention
+(cf. PLATFORM_AUTH_FAILURE, CROSS_TENANT_ACCESS_DENIED):
+
+  LEAD_INGEST_IDEMPOTENCY_CONFLICT
+
+Bounded by chk_platform_audit_event_type; migration 075 is the extension
+precedent. No business conflict table — DEC-P5A-INGEST-03.
+```
+
+**Safe:** `tenant_id` · service-account **public** identifier · `source_system` ·
+`external_correlation_id` · operation · outcome · timestamp · fingerprint prefix.
+**Never:** canonical payload · full fingerprint · email · phone · postcode ·
+`Authorization` · token · secret · credential hash or version.
+
+`platform_audit._scrub` already denies keys matching
+`email|phone|token|secret|authorization|address` *and* redacts values that look
+like an email or phone — it catches the `detail="…"` case a key allowlist misses.
+
+## Producer retry matrix — normative
+
+**This replaces the Phase 1 status table where they disagree.**
+
+| class | examples | producer behaviour |
+|---|---|---|
+| **TRANSIENT** | DB unavailable, timeout with no response, selected 5xx | retry with bounded backoff, then queue |
+| **PERMANENT** | validation (422), authentication (401), authorization (403) | **do not retry blindly** — stop and alert |
+| **IDEMPOTENT_REPLAY** | 200 | treat as success, store the returned `prospect_id` |
+| **IDEMPOTENCY_CONFLICT** | 409 | **not accepted.** Park for reconciliation. **No automatic retry. No new correlation id. Do not mark the lead exported.** |
+
+The last row is the correction. A producer that auto-minted a fresh correlation
+id would turn one person into two prospects and hand the problem to contact
+deduplication, which nobody owns.
+
+## Observability
+
+**Allowed:** `tenant_id` · service-account public identifier · `source_system` ·
+`external_correlation_id` · `prospect_id` after success · `attribution_id` ·
+domain outcome · `duration_ms` · replay/conflict classification · short
+fingerprint prefix.
+
+**Forbidden:** `first_name` · `last_name` · `email` · `phone` · `postcode` ·
+canonical payload · full fingerprint · `Authorization` · secret · credential hash
+· credential version.
+
+## Boundary with the transport tracer
+
+T12 receives an **already-verified machine identity** and owns orchestration,
+atomicity, idempotency, durable scheduling, conflict evidence and the domain
+result. A later tracer owns `Authorization` parsing, invoking the verifier,
+enforcing `prospects.ingest`, HTTP status mapping, route exposure, and the
+`enforced = TRUE` transition.
+
+Splitting here is deliberate: bundling them would force capability enforcement
+live before the domain behaviour is proven, and a new external capability is
+disabled by default — *« Un drapeau neuf vaut `False`. Toujours. »*
