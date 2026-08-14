@@ -358,3 +358,150 @@ refactors a live production write path.
 3. Attribution model: dedicated table (recommended) vs widening `prospects`.
 4. Whether the audit/event vocabulary may be extended without a separate
    architecture amendment.
+
+
+---
+
+# Phase 5A-P2 — the authentication design, fully resolved
+
+**Status: designed and verified against the deployed code; NOT implemented.**
+Everything below was read from revision `9931c5f` / branch `phase-5a-lead-ingest`
+at `142146d`. There are no remaining unknowns and no architecture gate — what is
+left is writing it.
+
+## SERVICE_ACCOUNT_WIRE_FORMAT
+
+Reuses the existing issuance in `services/tenant_membership_service.py`; no second
+credential system.
+
+```
+public_identifier   "sa_" + secrets.token_hex(8)     → 19 chars, circulates, logged
+secret              secrets.token_urlsafe(32)        → 256 bits, crosses once
+credential_hash     hashlib.sha256(secret).hexdigest()
+```
+
+Proposed presentation:
+
+```
+Authorization: Bearer <public_identifier>.<secret>
+```
+
+One header, split on the first `.`. The left half is the lookup key, the right
+half is verified. Malformed input (no dot, wrong prefix, wrong length) is rejected
+before any database work.
+
+## PRE_TENANT_LOOKUP_PATH — the bootstrap problem, already solved
+
+The platform already answers this and it must not be reinvented:
+`services/platform_context.find_owning_tenant(sql, *args, purpose=...)`.
+
+It asks each **active** tenant in turn, inside that tenant's own context, and:
+
+- needs no privilege — `platform_app` stays NOSUPERUSER / NOBYPASSRLS;
+- never weakens `FORCE ROW LEVEL SECURITY`;
+- each probe sees exactly one tenant's rows;
+- **refuses ambiguity** — two matches return `(None, None)` rather than picking.
+
+So the credential is resolved by probing for `public_identifier`, and the tenant
+falls out of the row that matched. `tenant_id` is never read from the body, the
+Host header or a query parameter.
+
+`RLS_BOOTSTRAP_MODEL`: discovery is not access. Cost is N scoped queries per
+authentication, N = active tenants.
+
+## SECRET_VERIFICATION_PRIMITIVE
+
+`_empreinte()` — SHA-256 hex — compared to the stored `credential_hash`.
+
+SHA-256 rather than a slow KDF is correct **here**: the secret is a 256-bit random
+token, not a human password, so there is nothing to brute-force. The comparison
+must still use `hmac.compare_digest`.
+
+The verifier must reject: missing, malformed, unknown identifier, wrong secret,
+`credential_version` mismatch (rotated), `status` revoked/disabled, and
+`kill_switch_engaged = TRUE` — which is the default on creation, so a new account
+is inert until someone deliberately disarms it.
+
+## CAPABILITY — `prospects.ingest`
+
+The platform has a real RBAC catalogue; no parallel system is needed:
+
+```
+rbac_permissions(code, category, description, enforced, humans_only, created_at)
+rbac_role_permissions(role_code, permission_code)
+tenant_service_account_permissions(tenant_id, service_account_id, role_code,
+                                   permission_code, granted_by, granted_at)
+```
+
+Naming follows the existing convention, which is **plural**: `prospects.delete`,
+`campaigns.activate`, `reports.export`. So the capability is **`prospects.ingest`**,
+not `prospect.ingest`.
+
+Registered with `humans_only = FALSE` (machine-assignable) and `enforced = TRUE`.
+It must **not** appear in migration 069's forbidden-for-machine list — that block
+already raises if a machine role holds `prospects.delete`, `consents.override`,
+`tenant.service_accounts.manage` and the rest, and it is the existing guarantee
+that an ingest account cannot quietly acquire dangerous rights.
+
+## TRANSACTION BOUNDARY
+
+The extraction already made this possible: `creer_prospect` takes a connection and
+opens no transaction of its own.
+
+```
+BEGIN tenant_transaction(tenant_id)          ← tenant from the verified credential
+    creer_prospect(conn, …, provenance="service_account",
+                   actor=<public_identifier>, correlation_id=<external id>)
+      └─ INSERT prospects
+      └─ domain_events.emit("prospect.created")   (already catalogued)
+      └─ score_and_persist_prospect
+    INSERT consent_records (type='data_processing')
+    INSERT lead_acquisition_attributions (… payload_fingerprint)
+COMMIT
+──────────────────────────────────────────────
+AFTER COMMIT: trigger_qualification            ← never inside the transaction
+```
+
+One boundary. A prospect cannot commit without its attribution, and an attribution
+cannot commit without its prospect.
+
+## IDEMPOTENCY
+
+Identity: `(tenant_id, source_system, external_correlation_id)`, enforced by
+`uq_lead_acq_attr_identite` — the constraint is the source of truth, a fast-path
+SELECT is only an optimisation.
+
+Concurrency: both racers may observe "absent". One commits; the loser takes the
+unique violation, **rolls back entirely including the prospect it attempted**, then
+re-reads the committed row in a fresh transaction. Same fingerprint → replay;
+different → 409. The loser must not leak its rolled-back prospect id and must not
+trigger qualification.
+
+## FINGERPRINT v1
+
+Over the **validated semantic request**, never raw bytes:
+
+- included: `fingerprint_version`, `source_system`, `external_correlation_id`,
+  all persisted contact fields, all persisted project fields, processing-consent
+  fields (granted / version / timestamp / source), all persisted attribution
+  fields;
+- excluded: the credential and Authorization header, `tenant_id` (already part of
+  the unique identity), server-generated ids and `created_at`, retry timestamps,
+  tracing ids, any non-persisted transport metadata.
+
+Canonicalisation: `json.dumps(..., sort_keys=True, separators=(",", ":"),
+ensure_ascii=False)` over the validated model with explicit `None` for absent
+optionals, then SHA-256, stored lowercase hex — the format migration 091's CHECK
+already enforces.
+
+## AUDIT — no new vocabulary
+
+- success → `prospect.created`, already in `domain_events.CATALOGUE`, carrying
+  provenance, actor and correlation id;
+- authentication failure → `PLATFORM_AUTH_FAILURE` via `platform_audit.record`;
+- cross-tenant probe → `CROSS_TENANT_ACCESS_DENIED`.
+
+## What remains
+
+Verifier, capability migration (092), DTO, fingerprint module, ingest application
+service, the thin route, and the security matrix.
