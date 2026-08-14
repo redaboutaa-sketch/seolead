@@ -505,3 +505,220 @@ already enforces.
 
 Verifier, capability migration (092), DTO, fingerprint module, ingest application
 service, the thin route, and the security matrix.
+
+
+---
+
+# Phase 5A-P3 — Machine Ingest DTO v1 and Fingerprint v1
+
+**Status: implemented on `phase-5a-lead-ingest`, not merged, not deployed, not
+reachable.** There is no route and no database orchestration yet. This section is
+normative: it defines the wire contract and the fingerprint rule that the ingest
+application service and the HTTP route must both honour.
+
+Implementation: `backend/services/lead_ingest_dto.py` and
+`backend/services/lead_ingest_fingerprint.py` in the platform repository.
+
+## Request shape
+
+```jsonc
+{
+  "external_correlation_id": "conv-…",   // required, 1–128
+  "source_system":           "seo_lead_factory",  // required, 1–64
+
+  "contact":     { "first_name", "last_name", "email", "phone" },
+  "project":     { "job_title" },
+  "consent":     { "processing", "version", "timestamp", "source" },  // required
+  "attribution": { "source", "source_detail", "landing_page", "content_id",
+                   "locale", "search_intent", "keyword_cluster",
+                   "utm_source", "utm_medium", "utm_campaign",
+                   "utm_content", "utm_term", "cta", "conversion_type" }
+}
+```
+
+`contact`, `project` and `attribution` may be omitted entirely; `consent` may not.
+
+Models: `LeadIngestRequest`, `ContactIngest`, `ProjectIngest`, `ConsentIngest`,
+`AttributionIngest`.
+
+## Forbidden input
+
+`extra: "forbid"` on **every** model. Unknown fields are a 422, never a silent
+drop — a producer that misspells a field must learn it from a refusal, not from a
+report three weeks later.
+
+Specifically rejected rather than ignored: `tenant_id`, `service_account_id`,
+`prospect_id`, `destination_tenant`, `role`, `permission`, `permissions`,
+`score`, `status`, `created_at`, `ip_address`, `user_agent`, `session_id`,
+`request_id`, `trace_id`, `host`, `retry_count`, and every channel-marketing
+consent field.
+
+**The tenant is never an input.** It falls out of the presented secret via
+`service_account_auth.authentifier` → `platform_context.find_owning_tenant`. No
+model in the module declares a tenant field, and a test parses the AST to keep it
+that way.
+
+## Why `project` carries only `job_title`
+
+`creer_prospect` persists exactly seven caller-supplied fields: `first_name`,
+`last_name`, `email`, `phone`, `mobile`, `job_title`, `source`. Four are identity,
+`source` is derived from `source_system` by the ingest service, `mobile` is
+outside the published contract. `job_title` is what is left.
+
+What a solar form calls a project — postcode, roof area, consumption, simulator
+answers — has **no canonical column in Prospect 360 today**. Inventing columns
+here would make the DTO accept data the database discards; accepting a free-form
+blob would break minimisation. Both are refused.
+
+**This is the next owner decision**, and it is narrow: either widen the canonical
+prospect-creation service with named, bounded qualification fields, or accept that
+Phase 5A ingests a lead without its project detail.
+
+## Consent — processing only
+
+`consent.processing` is typed `Literal[True]`. There is no value a producer can
+send that means "no": the documented transaction boundary writes a
+`consent_records` row of type `data_processing` with no conditional branch, so a
+refusal has no row to write and no place in this contract.
+
+`version`, `timestamp` and `source` are **required and never manufactured**. They
+are the proof. A platform that filled them itself would be attesting to a consent
+it did not collect, at an instant it did not observe, on a text it did not show.
+
+**No marketing consent exists in v1 and none is inferred.** `email_marketing`,
+`sms_marketing` and `phone_marketing` are unreachable — not declared, and rejected
+by `extra: "forbid"`. Two independent tests hold this: one walks the whole model
+tree for a marketing-shaped field name, one parses the AST. A mutation test proves
+both would fail if such a field were introduced.
+
+## Bounds
+
+Application bounds are **≤** the database constraint, always. A validator laxer
+than its CHECK is a deferred outage.
+
+| Field | Max | Enforced by |
+|---|---|---|
+| `external_correlation_id` | 128 | 091 `lead_acq_attr_correlation_borne` |
+| `source_system` | 64 | 091 `lead_acq_attr_source_system_borne` |
+| `contact.first_name` / `last_name` | 100 | `prospects` VARCHAR(100) |
+| `contact.email` | 255 | `prospects` VARCHAR(255) |
+| `contact.phone` | 20 | `prospects` VARCHAR(20) |
+| `project.job_title` | 200 | `prospects` VARCHAR(200) |
+| `consent.version` | 64 | application only (`text_version` is TEXT) |
+| `consent.source` | 100 | `consent_records.source` VARCHAR(100) |
+| `attribution.source` | 128 | 091 |
+| `attribution.source_detail` | 256 | 091 |
+| `attribution.landing_page` | 512 | 091 |
+| `attribution.content_id` | 128 | 091 |
+| `attribution.locale` | 16 | 091 |
+| `attribution.search_intent` | 32 | 091 |
+| `attribution.keyword_cluster` | 255 | 091 |
+| `attribution.utm_*` (5) | 255 | 091 |
+| `attribution.cta` | 128 | 091 |
+| `attribution.conversion_type` | 64 | 091 |
+
+`TestBornesContreLaBase` re-reads `091_lead_acquisition_attributions.sql` and
+`schema.sql` and compares every bound. Drift is a red suite, not an incident.
+
+UTM values are bounded by 091 (255) rather than by `prospects.utm_*` (100)
+because the ingest writes attribution to `lead_acquisition_attributions`, which is
+the entire reason that table exists. **An ingest service that also wrote UTMs onto
+`prospects` would violate this table and must not.**
+
+## Fingerprint v1
+
+`fingerprint_version = 1`. Computed over the **validated semantic model**, never
+over raw request bytes.
+
+**Included** — everything the producer controls that the database persists:
+
+```
+fingerprint_version
+external_correlation_id, source_system
+contact.{first_name, last_name, email, phone}
+project.{job_title}
+consent.{processing, version, timestamp, source}
+attribution.{source, source_detail, landing_page, content_id, locale,
+             search_intent, keyword_cluster, utm_source, utm_medium,
+             utm_campaign, utm_content, utm_term, cta, conversion_type}
+```
+
+**Excluded:**
+
+- `tenant_id` — already in `uq_lead_acq_attr_identite (tenant_id, source_system,
+  external_correlation_id)`. Counting it twice distinguishes nothing.
+- the credential: `Authorization`, public identifier, secret, `credential_hash`,
+  `credential_version`, `service_account_id`. A secret rotation must not turn a
+  legitimate replay into a 409.
+- transport: headers, `Host`, client IP, trace id, request id, retry count.
+- server-decided values: `prospect_id`, `created_at`, database defaults,
+  qualification result, score.
+
+The exclusion is **structural**, not a maintained deny-list: none of those values
+has a field in the DTO, so none can reach the calculation.
+
+### Canonicalisation
+
+`backend/utils/json_hash.canonical_json` — the repository's single implementation:
+
+```python
+json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+```
+
+then UTF-8 encoded, then SHA-256, lowercase hex, 64 characters — the format
+`lead_acq_attr_fingerprint_format` already enforces. No salt, no HMAC: this is
+request identity, not a secret. A salt would stop two application instances from
+recognising each other's replays.
+
+The canonical payload has a **fixed key set**: every key is always present, and an
+absent optional is explicitly `null`.
+
+### Null / absence semantics
+
+**Absent ≡ `null` ≡ `""`** for every optional string, normalised to `None` during
+validation. Three spellings of "the producer does not have this" must not produce
+three fingerprints. Whitespace-only strings are *preserved* — only the
+unambiguous case is normalised.
+
+### String normalisation
+
+Deliberately minimal. Nothing is lowercased, trimmed, accent-folded or
+semantically rewritten except where a canonical platform normaliser already
+exists. `Google` and `google` are different UTM values and fingerprint
+differently. **A fingerprint is the identity of the persisted request, not a fuzzy
+duplicate detector — idempotency is not contact deduplication.**
+
+- **Email** — `prospect_import_service.normalize_email` (trim + lowercase) then
+  `is_valid_email`. The same rule as the browser route and the CSV import; a third
+  variant would let one person exist in two forms depending on the door used.
+- **Phone** — `prospect_import_service.normalize_phone_e164` (default region FR).
+  Unreadable input is **refused, never invented**. `0612345678`, `+33 6 12 34 56 78`
+  and `0033612345678` all canonicalise to `+33612345678` and fingerprint
+  identically.
+- **Timestamp** — `datetime_utils.normalize_dt` → timezone-aware UTC, serialised
+  with `.isoformat()`. `09:00:00Z`, `11:00:00+02:00` and `09:00:00.000000Z` are the
+  same instant and produce the same fingerprint. Naive input is read as UTC, the
+  platform rule since Phase 4.
+
+### Versioning
+
+`fingerprint_version` is *inside* the payload, so a v2 can never accidentally
+collide with a v1 and rows already written stay interpretable.
+
+**`canonical_ingest_payload_v1` is never edited.** A new rule is a `_v2` function
+beside it. `TestGoldenV1` pins the digest *and* the exact canonical bytes of a
+frozen synthetic request, so any silent change to v1 turns the suite red.
+
+### PII
+
+The digest derives from personal data. It is one-way, over the whole structure.
+**The serialised canonical payload must never be logged in production** to debug a
+fingerprint — it contains the contact in clear text. Logs may carry a fingerprint
+prefix and the correlation id. The module contains no logger, and a test enforces
+that. Tests inspect canonical payloads using synthetic data only.
+
+## Still not built
+
+The ingest application service, `POST /api/v1/lead-ingest`, and the security
+matrix. `prospects.ingest` remains `enforced = FALSE`: it is raised only when a
+real route enforces it, never against a placeholder.
