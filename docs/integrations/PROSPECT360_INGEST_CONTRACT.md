@@ -521,13 +521,19 @@ Implementation: `backend/services/lead_ingest_dto.py` and
 
 ## Request shape
 
+> **Superseded by §Phase 5A-P5.** The block below is what the code declares
+> **today**. `job_title` has since moved to `contact` and `project` has become
+> exclusively Solar qualification (DEC-P5A-QUAL-07). The normative target shape
+> is in Phase 5A-P5; this one is kept because it is what a reader of the current
+> module will actually find.
+
 ```jsonc
 {
   "external_correlation_id": "conv-…",   // required, 1–128
   "source_system":           "seo_lead_factory",  // required, 1–64
 
   "contact":     { "first_name", "last_name", "email", "phone" },
-  "project":     { "job_title" },
+  "project":     { "job_title" },        // ← moves to contact, see P5
   "consent":     { "processing", "version", "timestamp", "source" },  // required
   "attribution": { "source", "source_detail", "landing_page", "content_id",
                    "locale", "search_intent", "keyword_cluster",
@@ -558,21 +564,22 @@ consent field.
 model in the module declares a tenant field, and a test parses the AST to keep it
 that way.
 
-## Why `project` carries only `job_title`
+## Why `project` originally carried only `job_title` — **resolved**
 
 `creer_prospect` persists exactly seven caller-supplied fields: `first_name`,
 `last_name`, `email`, `phone`, `mobile`, `job_title`, `source`. Four are identity,
 `source` is derived from `source_system` by the ingest service, `mobile` is
-outside the published contract. `job_title` is what is left.
+outside the published contract. `job_title` was what was left — so it landed in
+`project` for want of anywhere better, not because it belonged there.
 
 What a solar form calls a project — postcode, roof area, consumption, simulator
-answers — has **no canonical column in Prospect 360 today**. Inventing columns
-here would make the DTO accept data the database discards; accepting a free-form
-blob would break minimisation. Both are refused.
+answers — had **no canonical column in Prospect 360**. Inventing columns would
+have made the DTO accept data the database discards; a free-form blob would have
+broken minimisation. Both were refused, and that refusal still stands.
 
-**This is the next owner decision**, and it is narrow: either widen the canonical
-prospect-creation service with named, bounded qualification fields, or accept that
-Phase 5A ingests a lead without its project detail.
+**Both halves are now decided.** Solar qualification gets a vertical profile
+entity (DEC-P5A-QUAL-01…06, §Phase 5A-P4), and `job_title` moves to `contact`
+where it always belonged (DEC-P5A-QUAL-07, §Phase 5A-P5).
 
 ## Consent — processing only
 
@@ -603,7 +610,7 @@ than its CHECK is a deferred outage.
 | `contact.first_name` / `last_name` | 100 | `prospects` VARCHAR(100) |
 | `contact.email` | 255 | `prospects` VARCHAR(255) |
 | `contact.phone` | 20 | `prospects` VARCHAR(20) |
-| `project.job_title` | 200 | `prospects` VARCHAR(200) |
+| `contact.job_title` (was `project.job_title`, P5) | 200 | `prospects` VARCHAR(200) |
 | `consent.version` | 64 | application only (`text_version` is TEXT) |
 | `consent.source` | 100 | `consent_records.source` VARCHAR(100) |
 | `attribution.source` | 128 | 091 |
@@ -630,13 +637,15 @@ the entire reason that table exists. **An ingest service that also wrote UTMs on
 `fingerprint_version = 1`. Computed over the **validated semantic model**, never
 over raw request bytes.
 
-**Included** — everything the producer controls that the database persists:
+**Included** — everything the producer controls that the database persists. The
+list below is the **as-implemented** v1; §Phase 5A-P5 carries the amended field
+set that supersedes it.
 
 ```
 fingerprint_version
 external_correlation_id, source_system
 contact.{first_name, last_name, email, phone}
-project.{job_title}
+project.{job_title}                          ← becomes contact.job_title (P5)
 consent.{processing, version, timestamp, source}
 attribution.{source, source_detail, landing_page, content_id, locale,
              search_intent, keyword_cluster, utm_source, utm_medium,
@@ -787,7 +796,7 @@ than today's two. Trigger: T1 ships a persisted definition for tenant
 | | finding |
 |---|---|
 | DTO | `ProjectIngest` currently declares **`job_title` only**. None of the seven exist yet. |
-| `job_title` | Appears in **no** Solar form field. After this change it has no Solar producer — see open question Q-A below. |
+| `job_title` | Appears in **no** Solar form field. **Resolved by DEC-P5A-QUAL-07** (§Phase 5A-P5): it moves to `contact` as a cross-vertical person attribute. |
 | `monthly_bill_eur` | Present in `solar_be.yaml` at lines 99 and 156. **No code references it** — removal is a two-line config deletion. |
 | `battery_interest` | Present in the form, deliberately **not** ingested (DEC-03). The form keeps it; the contract does not carry it. |
 | `DEFINITION_PV` | Uses `south/south_east/south_west/east/west/north` where the form uses `SOUTH/EAST_WEST/NORTH/UNKNOWN`, and `dwelling` where the form uses `property_type`. Confirms DEC-01: reconcile, never map both ways forever. |
@@ -902,3 +911,123 @@ mistaken for a specification. That note is **not yet written** — no code was
 modified in this specification pass.
 
 `REMOVAL_TRIGGER` = T1 delivers a persisted definition for `solar-belgium`.
+
+
+---
+
+# Phase 5A-P5 — `job_title` ownership, and the amended v1 field set
+
+**Status: SPECIFIED, not implemented.** No code, no DTO, no fingerprint, no
+migration, no route. This section is **normative** and supersedes the shape and
+fingerprint field set recorded in Phase 5A-P2/P3.
+
+| id | decision |
+|---|---|
+| **DEC-P5A-QUAL-07** | `job_title` is a **person attribute**, not project qualification. It moves from `project` to `contact` and stays a generic cross-vertical contact attribute. It is **not** dropped from the machine-ingest contract, and it does **not** remain inside `project`. `ProjectIngest` becomes exclusively Solar project qualification. |
+
+`job_title` was in `project` for want of anywhere better — it is what remained
+after identity, consent and attribution were accounted for. It describes the
+person, and the block that holds the person is `contact`. Leaving it in `project`
+would have meant a Solar qualification block containing one field no Solar form
+asks and seven it does.
+
+## Normative contract shape
+
+```jsonc
+{
+  "external_correlation_id": "…",   // required, 1–128
+  "source_system":           "…",   // required, 1–64
+
+  "contact": {
+    "first_name", "last_name", "email", "phone",
+    "job_title"                     // ← moved here (DEC-P5A-QUAL-07)
+  },
+
+  "project": {                      // ← exclusively Solar qualification
+    "owner_status", "property_type", "postcode", "project_timeframe",
+    "roof_type", "roof_orientation", "annual_consumption_kwh"
+  },
+
+  "consent":     { "processing", "version", "timestamp", "source" },
+  "attribution": { …14 fields, unchanged… }
+}
+```
+
+Values, bounds and the `UNKNOWN`-is-an-answer rule for the seven project fields
+are in §Phase 5A-P4 and are unchanged by this amendment.
+
+**Absent, and not by omission:** `tenant_id`, `service_account_id`,
+`prospect_id`, every channel-marketing consent field, `monthly_bill_eur`,
+`battery_interest`, and any arbitrary metadata or blob. `extra: "forbid"` on
+every model makes each of these a 422 rather than a silent drop.
+
+## Amended fingerprint v1 field set
+
+```
+fingerprint_version
+external_correlation_id, source_system
+
+contact.{first_name, last_name, email, phone, job_title}
+
+project.{owner_status, property_type, postcode, project_timeframe,
+         roof_type, roof_orientation, annual_consumption_kwh}
+
+consent.{processing, version, timestamp, source}
+
+attribution.{source, source_detail, landing_page, content_id, locale,
+             search_intent, keyword_cluster, utm_source, utm_medium,
+             utm_campaign, utm_content, utm_term, cta, conversion_type}
+```
+
+`job_title` **remains material and remains included** — it is producer-controlled
+and persisted by `creer_prospect`. Only its position changes, from the `project`
+sub-object to the `contact` sub-object.
+
+That relocation is **not** cosmetic for the digest: the canonical payload nests
+by block, so moving a key between blocks changes the canonical bytes and
+therefore the fingerprint of an otherwise identical request. This is one more
+reason the amendment must land before the immutability trigger, not after.
+
+The seven Solar project fields are material and **must** participate: two
+requests differing only in `postcode` are different requests, and a fingerprint
+blind to them would let a corrected roof type replay as identical and be lost in
+silence.
+
+Exclusions are unchanged and remain **structural** — the credential, transport
+metadata and server-decided values have no field to arrive in.
+
+## Immutability trigger — restated
+
+**Fingerprint v1 may still be amended in place.** No v2 is created.
+
+The justification holds because none of its preconditions has changed:
+
+- no production route exists;
+- migration 091 is not deployed;
+- no `lead_acquisition_attributions` row exists anywhere;
+- no producer has ever generated a production v1 fingerprint.
+
+```
+v1 becomes IMMUTABLE at the earlier of:
+  1. the ingest route becoming producer-reachable in any environment
+  2. the first lead_acquisition_attributions row being persisted
+```
+
+After that instant, any change to the field set — including moving a key between
+blocks — is a **v2 written beside v1, never over it**. `fingerprint_version`
+stays `1` and stays inside the payload.
+
+Standing obligation while v1 is still mutable: `TestGoldenV1` — both the pinned
+digest and the pinned canonical bytes — is updated **deliberately, in the same
+commit** as the field-set change, never as a follow-up fix to a red suite.
+
+## Consequences for the implementation
+
+Two amendments now travel together and must land in **one** commit, because each
+alone changes the digest and two sequential edits would burn two golden updates:
+
+1. `job_title` moves `ProjectIngest` → `ContactIngest` (bound 200, unchanged);
+2. `ProjectIngest` gains the seven Solar fields.
+
+`creer_prospect` still receives `job_title`; only the DTO block it is read from
+changes. No canonical prospect-creation behaviour is affected.
