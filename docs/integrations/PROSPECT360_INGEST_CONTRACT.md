@@ -760,7 +760,7 @@ form change. This section is normative and settles what the previous slice left
 open: `project` carried only `job_title` because nothing else had a canonical
 home.
 
-Platform-side tracer: **T13** in `doc/plan.md`. Product story: **US-18** in
+Platform-side tracer: **T13** in `doc/plan.md`. Product story: **US-21** in
 `doc/prd.md`.
 
 ## Owner decisions — final, not reopenable
