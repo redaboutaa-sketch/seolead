@@ -1515,6 +1515,34 @@ The route is **not production-ready** until that record exists. `TestGoldenV1`
 already pins the digest and the canonical bytes; arming makes that pin permanent
 rather than deliberately updatable.
 
+### Arming record — LIVE STATE
+
+```
+ARMING STATE: UNARMED
+
+FINGERPRINT_V1_ARMED
+  arming_commit_sha            <unset — the commit whose deployed image
+                                registers the machine router>
+  deployed_revision            <unset — the image revision actually running>
+  armed_at_utc                 <unset — the instant that image became reachable>
+  fingerprint_version          1
+  golden_digest                68270f1dd40e921a28c42d72a583d3e252a09607b2fa28940175bc8143d57f91
+  canonical_field_set_reference §Phase 5A-P5
+```
+
+**The three unset fields cannot be filled in advance and must never be guessed.**
+A deployed revision and a UTC exposure instant exist only once an image is
+actually running; writing plausible values here would assert a deployment that
+never happened, which is precisely the class of false measurement this contract
+exists to prevent.
+
+Route code existing on a feature branch does **not** arm v1. Migration 098 does
+**not** arm v1. Only the deployed image containing the router registration, or
+the first `lead_acquisition_attributions` row, does — whichever comes first.
+
+A test asserts this block still reads `UNARMED` and carries no real timestamp,
+so the record cannot be pre-filled by accident.
+
 ## OpenAPI, CORS, CSRF
 
 Measured: production serves `/openapi.json` (200, externally reachable) while
