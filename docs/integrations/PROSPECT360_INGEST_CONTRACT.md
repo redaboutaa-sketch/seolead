@@ -1350,6 +1350,19 @@ and `AUTHZ_DECISION`, and reuse `AUTHZ_DENIED` for machine capability denial. Th
 side effect — human authorization decisions start being recorded again — is the
 repair working, not a widening of scope.
 
+**The repair carries its own migration, 097, separate from the enforcement
+declaration.** They do not share a safe moment: 097 fixes a broken log and must
+land *before* the door opens, or the first real capability denial leaves no
+trace; 098 asserts that the capability is enforced and cannot precede the code
+that enforces it. Combining them would force one of the two to lie.
+
+Volume and retention, measured rather than assumed: `platform_audit_logs` holds
+**68 rows** since 2026-07-27 — about four a day — and **no purge exists** for it.
+The 25 permissions concerned are administrative acts whose frequency follows
+human activity, not traffic. Only `calls.start` and `communications.send_approved`
+would track commercial volume and are worth watching if voice usage grows. No
+policy conflict, so no owner decision.
+
 ## Rate limiting
 
 ```
@@ -1437,8 +1450,9 @@ permission — so flipping it is **declarative**, a statement of intent. The act
 enforcement is `possede()` in the route, and **route enforcement must never
 depend on the flag**.
 
-A new migration **097** exists solely to set `enforced = TRUE`, after real
-enforcement ships. Its rollback sets it back to `FALSE`.
+A new migration **098** exists solely to set `enforced = TRUE`, after real
+enforcement ships. Its rollback sets it back to `FALSE`. It is deliberately not
+the same migration as the audit repair (097) — see above.
 
 ## Deployment order
 
@@ -1447,23 +1461,39 @@ and schema are sequenced by hand. Both windows fail closed:
 
 ```
 1. apply migrations 094 / 095 / 096
-2. deploy route code that authenticates and enforces prospects.ingest
-3. apply 097 (enforced = TRUE) + the audit-vocabulary repair
-4. only then mint and grant a service account
+2. apply 097 — authorization audit vocabulary repair
+3. deploy T15 route code (authenticates and enforces prospects.ingest)
+4. VERIFY the route really enforces possede("prospects.ingest")
+5. write the fingerprint v1 arming record at the exposure gate
+6. apply 098 — prospects.ingest.enforced = TRUE
+7. only then mint and grant a production service account
 
-route before 095 → capability absent from the catalogue → no grant can exist
-                 → 403 for everyone
-095 before route → capability exists, nothing reachable
+before 095          capability absent from the catalogue → no grant can exist
+095 + 097, no route vocabulary and permission ready, nothing reachable
+route before 098    possede() IS the real enforcement; the declarative flag is
+                    still FALSE, temporarily and without effect
+after 098           catalogue truth matches runtime truth
 
-ROLLBACK  withdraw the route code first; roll back 097 second if release policy
-          requires it. Removing the router registration closes the door.
+ROLLBACK  1. withdraw the route code — removing the router registration closes
+             the door
+          2. roll 098 back to FALSE if release policy requires it
+          3. KEEP 097 — it repairs the human authorization audit path, which
+             does not depend on T15; reverting it would silence 25 sensitive
+             permissions again for nothing
 ```
+
+**Runtime authorization never depends on the flag.** No code reads `enforced`,
+for any permission, and making it do so would put a security decision behind a
+declarative column a migration can flip on its own.
 
 ## Fingerprint v1 arming
 
 There is no route feature flag in this architecture, and the API is publicly
 served. **Producer-reachable therefore means: the deployed image containing the
 router registration.** The gate is the commit that registers the machine router.
+
+**Migration 098 does not arm v1 — route exposure does.** The arming record is
+written at step 5 of the sequence above, before 098 and independent of it.
 
 Until that ships, v1 changes only by approved spec amendment. After it ships, v1
 is immutable and any canonical field-set or layout change is a **v2 beside v1,
