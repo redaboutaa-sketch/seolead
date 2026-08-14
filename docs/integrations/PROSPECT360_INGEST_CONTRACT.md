@@ -722,3 +722,183 @@ that. Tests inspect canonical payloads using synthetic data only.
 The ingest application service, `POST /api/v1/lead-ingest`, and the security
 matrix. `prospects.ingest` remains `enforced = FALSE`: it is raised only when a
 real route enforces it, never against a placeholder.
+
+
+---
+
+# Phase 5A-P4 — Solar project qualification
+
+**Status: SPECIFIED, not implemented.** No code, no migration, no DTO change, no
+form change. This section is normative and settles what the previous slice left
+open: `project` carried only `job_title` because nothing else had a canonical
+home.
+
+Platform-side tracer: **T11** in `doc/plan.md`. Product story: **US-15** in
+`doc/prd.md`.
+
+## Owner decisions — final, not reopenable
+
+| id | decision |
+|---|---|
+| **DEC-P5A-QUAL-01** | `seolead/config/sites/solar_be.yaml` is the **authoritative** Solar questionnaire. The platform's `DEFINITION_PV` is not, and must eventually be retired or reconciled. **No permanent bidirectional mapping** between the two vocabularies. |
+| **DEC-P5A-QUAL-02** | Persisted questionnaire definitions are **not funded** in ingest v1. v1 uses a bounded, explicit Solar vocabulary. Tenant/versioned definition persistence stays with T1. Temporary by design, with a written retirement condition. |
+| **DEC-P5A-QUAL-03** | Exactly seven fields travel. Required: `owner_status`, `property_type`, `postcode`, `project_timeframe`. Included: `roof_type`, `roof_orientation`, `annual_consumption_kwh`. Excluded: `monthly_bill_eur`, `battery_interest`, free text, IA Tech Forma Nord fields. |
+| **DEC-P5A-QUAL-04** | Filterable/reportable: `postcode` and `project_timeframe` **only**. The other five need to be readable on the record and available to qualification/scoring. No premature projections or indexes. |
+| **DEC-P5A-QUAL-05** | Qualification data follows the prospect lifecycle — 730 days, `purge_at`, cascade. No longer analytics retention path in this phase. |
+| **DEC-P5A-QUAL-06** | `monthly_bill_eur` is removed **entirely** — contract, form, persistence, fingerprint, qualification payload. Not collected and later discarded: not collected. |
+
+## Solar Qualification Vocabulary v1
+
+Identifier: **`solar_qualification_v1`**. Every value below is read from
+`config/sites/solar_be.yaml`. Nothing is invented.
+
+| field | req | canonical values |
+|---|---|---|
+| `owner_status` | ● | `OWNER` · `OWNER_TO_BE` · `TENANT` |
+| `property_type` | ● | `HOUSE` · `APARTMENT` · `BUSINESS` |
+| `postcode` | ● | `^[1-9][0-9]{3}$` — Belgian, 4 digits, no leading zero |
+| `project_timeframe` | ● | `ASAP` · `LT_6M` · `LT_12M` · `EXPLORING` |
+| `roof_type` | ○ | `PITCHED` · `FLAT` · `MIXED` · `UNKNOWN` |
+| `roof_orientation` | ○ | `SOUTH` · `EAST_WEST` · `NORTH` · `UNKNOWN` |
+| `annual_consumption_kwh` | ○ | integer, unit **kWh/year**, `0 ≤ v ≤ 100000` |
+
+`UNKNOWN` is an **answer**, not an absence — the form offers it explicitly. An
+absent answer stays absent and must never be coerced to `UNKNOWN`; the two mean
+different things and would fingerprint differently.
+
+**Postcode contract.** Validated against the pattern above. The producer already
+applies `normalize_postcode` (strip non-word characters, uppercase, truncate 16)
+before the pattern is checked; the platform receives the normalised form and
+re-validates rather than trusting it. Belgium-only in v1 — a second market makes
+this a per-market rule, not a wider regex.
+
+**Consumption contract.** Integer kWh per year. The unit is part of the contract,
+not a convention: a value in kWh/month would be silently plausible and wrong.
+`0` is a legitimate answer (a new build with no history); absent is not `0`.
+
+**Retirement condition.** When T1 delivers persisted, per-tenant, versioned
+questionnaire definitions, `solar_qualification_v1` **migrates onto that
+definition**. It does not coexist — a third questionnaire system would be worse
+than today's two. Trigger: T1 ships a persisted definition for tenant
+`solar-belgium`.
+
+## Differences found against current code
+
+| | finding |
+|---|---|
+| DTO | `ProjectIngest` currently declares **`job_title` only**. None of the seven exist yet. |
+| `job_title` | Appears in **no** Solar form field. After this change it has no Solar producer — see open question Q-A below. |
+| `monthly_bill_eur` | Present in `solar_be.yaml` at lines 99 and 156. **No code references it** — removal is a two-line config deletion. |
+| `battery_interest` | Present in the form, deliberately **not** ingested (DEC-03). The form keeps it; the contract does not carry it. |
+| `DEFINITION_PV` | Uses `south/south_east/south_west/east/west/north` where the form uses `SOUTH/EAST_WEST/NORTH/UNKNOWN`, and `dwelling` where the form uses `property_type`. Confirms DEC-01: reconcile, never map both ways forever. |
+
+## Persistence characteristics required
+
+No SQL here, and no table or index names — those are implementation.
+
+**Authority:** a dedicated Solar vertical profile entity, per **ADR-005**
+(*"les données métier (solaire, énergie, formation) vont dans des profils
+séparés"*). **Projection:** none by default; `postcode` and `project_timeframe`
+may be projected only if measurement shows filtering requires it.
+
+Required properties:
+
+- typed, bounded values with a **closed allowlist per field** — precedent:
+  `contact_classification_records` (028), which mirrors its allowlist in a CHECK;
+- **tenant ownership** — `tenant_id`, composite FK `(tenant_id, prospect_id)`,
+  RLS enabled *and* forced, one policy per command (precedent: 091);
+- **prospect ownership** — cascade delete with the prospect;
+- **provenance** — the answer is *declared by the producer*, never verified; the
+  source is recorded alongside it, as 028 does;
+- **write semantics** — an acquisition answer is a dated fact about an arrival,
+  not a mutable attribute of the person; append-safe, not freely updatable;
+- **retention** — the prospect's: 730 days, `purge_at`, cascade;
+- the **vocabulary version** is stored with each answer set.
+
+Forbidden: Solar columns on `prospects`; a JSON blob; free text.
+
+## Read model
+
+`prospect_360_service` exposes a **"Projet solaire"** section, following the
+existing **"Financement"** section, which is already a vertical block (CPF / FAF /
+OPCO). The sales user reads the seven values on the prospect record. **Raw SQL is
+never a proof path.**
+
+## Machine-ingest DTO impact
+
+`ProjectIngest` gains the seven fields, each as a bounded typed value —
+`Literal` unions for the five enumerations, a pattern-constrained string for
+`postcode`, a bounded integer for `annual_consumption_kwh`. `extra: "forbid"`
+already refuses everything else, so no deny-list grows.
+
+`monthly_bill_eur` is never added.
+
+## Fingerprint impact — decided
+
+**These fields MUST participate in the fingerprint.** They are producer-controlled
+and persisted: two requests differing only in `postcode` are different requests,
+and a fingerprint that ignored them would let a corrected roof type replay as
+identical and be lost in silence — the exact failure `payload_fingerprint` exists
+to prevent.
+
+**Decision: amend v1 in place. Do not bump to v2.**
+
+The versioning rule says `canonical_ingest_payload_v1` is never edited, and its
+stated reason is *"les lignes déjà en base ont été calculées avec la v1"*. That
+reason is **not yet engaged**:
+
+- migration 091 is **absent from production**; `lead_acquisition_attributions`
+  has zero rows anywhere;
+- there is **no route**, so no producer has ever computed a v1 fingerprint;
+- `prospects.ingest` is `enforced = FALSE` and the contract is unpublished.
+
+Burning v2 on a v1 that never existed in the wild would leave two canonicalisers
+to maintain from the first day and a version number that identifies nothing.
+
+Two obligations come with that choice:
+
+1. `TestGoldenV1` — both the pinned digest and the pinned canonical bytes — is
+   updated **deliberately, in the same commit** as the field-set change, never
+   as a follow-up fix to a red suite.
+2. **v1 becomes immutable** at the earlier of: the ingest route being enabled in
+   any environment a producer can reach, or the first
+   `lead_acquisition_attributions` row being written. After that instant, any
+   change to the field set is a v2 written beside v1, never over it.
+
+`fingerprint_version` stays `1` and stays inside the payload.
+
+## SEO Lead Factory form impact
+
+**Remove:** `monthly_bill_eur` — from the `consumption` step field list (line 99)
+and its definition (line 156). No code references it.
+
+**Keep and verify:** `owner_status`, `property_type`, `postcode`,
+`project_timeframe`, `roof_type`, `roof_orientation`, `annual_consumption_kwh`.
+
+**Keep, do not ingest:** `battery_interest`.
+
+**`DESIGN_REFERENCE_REQUIRED = NO.`** The `consumption` step keeps two fields
+(`annual_consumption_kwh`, `battery_interest`), its title and its description. No
+step becomes empty, no step count changes, no new component, state or copy is
+required. This is a field deletion inside an existing multi-step layout.
+
+## Contradiction retirement
+
+```
+AUTHORITATIVE      seolead/config/sites/solar_be.yaml
+NON-AUTHORITATIVE  backend/hermes_skills/… DEFINITION_PV
+                   (test fixture in tests/hermes_solar_bench.py; installed only
+                   by that bench; no production caller)
+```
+
+`DEFINITION_PV` is **not deleted here** — no approved cleanup tracer exists, and
+it is live test scaffolding for the qualification engine. It must stop being
+readable as a second canonical Solar questionnaire. Retirement is owned by **T1**,
+which consolidates qualification onto one definition.
+
+Until then, the first implementation task that touches `tests/hermes_solar_bench.py`
+must add a comment there pointing at this section, so the fixture cannot be
+mistaken for a specification. That note is **not yet written** — no code was
+modified in this specification pass.
+
+`REMOVAL_TRIGGER` = T1 delivers a persisted definition for `solar-belgium`.
