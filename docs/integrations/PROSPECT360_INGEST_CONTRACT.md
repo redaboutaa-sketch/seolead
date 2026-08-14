@@ -72,14 +72,25 @@ Content-Type: application/json
 }
 ```
 
-**Response**
+**Response** — ~~SUPERSEDED by DEC-P5A-TRANSPORT-02, §Phase 5A-P7~~
 
 ```jsonc
-// 201 — created
+// ~~201 — created~~
 { "lead_id": "<uuid>", "tenant_id": "<uuid>", "dedup": false, "score": 42 }
-// 200 — idempotent replay or matched an existing prospect
+// ~~200 — idempotent replay or matched an existing prospect~~
 { "lead_id": "<uuid>", "tenant_id": "<uuid>", "dedup": true, "score": 42 }
 ```
+
+> **Kept, struck out, not deleted.** Anyone who built against this shape needs to
+> see that it changed and why, not find it quietly absent. Four things went:
+> `lead_id` became `prospect_id` (the platform calls it a prospect); `tenant_id`
+> left because the producer already holds it in its own configuration and echoing
+> it publishes tenant internals for no gain; `dedup` became the explicit
+> three-valued `outcome`, since a boolean cannot express the difference between a
+> replay and a refused conflict; and `score` left because it is a server-side
+> qualification value that changes after ingest — returning it here would invite
+> the producer to store it as though it were stable. The canonical shape is in
+> §Phase 5A-P7.
 
 | Status | Meaning | Our behaviour |
 |---|---|---|
@@ -1247,3 +1258,241 @@ enforcing `prospects.ingest`, HTTP status mapping, route exposure, and the
 Splitting here is deliberate: bundling them would force capability enforcement
 live before the domain behaviour is proven, and a new external capability is
 disabled by default — *« Un drapeau neuf vaut `False`. Toujours. »*
+
+
+---
+
+# Phase 5A-P7 — The HTTP transport boundary
+
+**Status: SPECIFIED, not implemented.** No route, no migration, no DTO or
+fingerprint change, `prospects.ingest.enforced` untouched, no credential minted.
+This section is normative and **supersedes the Phase 1 request/response block**
+where they disagree.
+
+Platform tracer: **T15** in `doc/plan.md`. Product story: **US-20** in
+`doc/prd.md`.
+
+## Owner decisions — final, not reopenable
+
+| id | decision |
+|---|---|
+| **DEC-P5A-TRANSPORT-01** | After successful authentication, machine traffic is rate-limited on the **verified** identity — `tenant_id` + service-account public identifier. Before authentication, the existing anonymous/IP protection stands. **No second authentication implementation** may exist inside the rate limiter: the secret is never parsed or revalidated by a parallel security path. Rate limiting is an operational control, never an authentication mechanism. No new infrastructure. |
+| **DEC-P5A-TRANSPORT-02** | The success response is **minimal**: `outcome`, `prospect_id`, `external_correlation_id` — and no `prospect_id` on conflict. `tenant_id`, `score`, `dedup`, attribution internals, fingerprint and service-account internals are never returned. The Phase 1 shape is superseded. |
+
+## The contract
+
+```http
+POST /api/v1/lead-ingest
+Authorization: Bearer <public_identifier>.<secret>
+Content-Type: application/json
+```
+
+Body: `LeadIngestRequest`, unchanged. **Not under `/webhooks`** — that prefix is
+skipped entirely by `rate_limit.classify()` and connotes signature auth, which
+this is not.
+
+| outcome | status | body |
+|---|---|---|
+| `CREATED` | **201** | `outcome`, `prospect_id`, `external_correlation_id` |
+| `IDEMPOTENT_REPLAY` | **200** | `outcome`, `prospect_id`, `external_correlation_id` |
+| `IDEMPOTENCY_CONFLICT` | **409** | `outcome`, `external_correlation_id` |
+
+Errors use the platform's existing global envelope —
+`{"error", "status_code", "request_id"}` — applied by `main.py`'s exception
+handler. The application service knows no HTTP status; the route projects.
+
+## Order of guards
+
+```
+1. Content-Type              non-JSON refused
+2. body size                 refused BEFORE full parse
+3. authentifier()            → IdentiteMachine, or 401
+4. possede(prospects.ingest) → or 403
+5. rate limit                on the VERIFIED machine identity
+6. DTO validation            → or 422
+7. fingerprint v1
+8. T14 ingerer_lead(identite, demande)
+9. status projection         201 / 200 / 409
+```
+
+The order is the specification. **T14 is never reached if 3 or 4 refuses** —
+that is an acceptance criterion, not a hoped-for consequence.
+
+## Authentication and tenant
+
+`service_account_auth.authentifier(<raw header>)`. The route reimplements
+nothing. Tenant comes from `identite.tenant_id` and nowhere else — never body,
+query, path, Host or a tenant header.
+
+**All six refusal categories** — `ABSENT`, `MALFORME`, `INVALIDE`, `INACTIF`,
+`COUPE_CIRCUIT`, `EXPIRE` — return the **same 401 and the same body**. The
+verifier already collapses "unknown identifier" and "wrong secret" into one
+category; the route must not re-expand them.
+
+## Authorization and its audit
+
+`identite.possede("prospects.ingest")`, in the route, before T14. The human path
+(`exiger_permission` → `authorization_service.autoriser`) is membership-centric
+and not reusable for a machine identity. Missing capability → **403**,
+uninformative body, zero T14 invocation.
+
+**A defect this specification surfaced.** `authorization_service.journaliser_decision`
+writes `AUTHZ_DENIED` / `AUTHZ_DECISION`, but **neither is in
+`platform_audit.EVENT_TYPES` nor in the database CHECK**. `record()` never
+raises: it logs `platform_audit_unknown_event_type` and returns `False`. Measured
+consequence — for all **25 sensitive human permissions**, every authorization
+decision has been discarded in silence since that code was written. This is
+migration 075's documented trap one layer up: the Python allowlist refuses before
+the CHECK is ever consulted.
+
+So the vocabulary is not invented, it is **repaired**: register `AUTHZ_DENIED`
+and `AUTHZ_DECISION`, and reuse `AUTHZ_DENIED` for machine capability denial. The
+side effect — human authorization decisions start being recorded again — is the
+repair working, not a widening of scope.
+
+## Rate limiting
+
+```
+BEFORE auth   existing anonymous/IP protection, unchanged
+AFTER auth    rl:machine:<tenant_id>:<public_identifier>
+              — same shape as api_user_key / api_anon_key
+NEVER key on  the secret · Authorization · an email ·
+              external_correlation_id · source_system alone
+```
+
+**Enforced in the route, after authentication**, calling
+`rate_limit_service.check_rate_limit`. Not in the middleware: it runs before the
+route and could only learn the verified identity by **re-authenticating**, i.e.
+by building a second security path that parses the secret. Two implementations of
+one check always diverge, and the one that is not primary is the one nobody
+remembers to fix.
+
+Same Redis, same counters, and the same **fail-open** policy the middleware
+already documents — inventing a stricter one here would create a second policy.
+
+## Body size
+
+```
+MEASURED   sum of DTO bounds                ≈ 3,825 characters
+           + keys and JSON punctuation      ≈ 4,175 bytes in ASCII
+           × 4 (UTF-8 worst case)           ≈ 16 KiB
+           pathological \uXXXX escaping     ≈ 50 KiB
+ADOPTED    64 KiB
+```
+
+About fifteen times the realistic payload, covering the worst encoding case, and
+**four times smaller** than the repository's existing precedent
+(`calendly_webhook_service`: 256 KiB), which carries something else entirely.
+Copying 256 KiB would have been easier and wrong: the bound comes from the actual
+maximum valid document. It must apply early enough that a huge body is never
+parsed in full.
+
+## The two correlations are not the same
+
+```
+TRANSPORT  X-Correlation-ID / X-Request-ID — middleware, honoured inbound,
+           echoed outbound. Does NOT enter fingerprint v1.
+BUSINESS   external_correlation_id, in the body. Enters fingerprint v1 and the
+           database idempotency identity.
+```
+
+Neither is defaulted from the other. Conflating them would make idempotency
+identity depend on a transport header — turning a legitimate replay into a new
+submission.
+
+## Observability
+
+The middleware already logs method, path, status, duration, request id and
+correlation id; the route does not repeat them.
+
+**Allowed:** authenticated `tenant_id` · service-account **public** identifier ·
+`source_system` · `external_correlation_id` · outcome · status · duration ·
+`prospect_id` after success.
+**Never:** `Authorization` · secret · credential hash or version · names · email
+· phone · postcode · canonical payload · full fingerprint.
+
+## Failure matrix
+
+| | HTTP | Retry safe | Business writes | Evidence |
+|---|---|---|---|---|
+| **A** invalid JSON | 422 | no | none | request log |
+| **B** invalid DTO | 422 | no | none | request log, no field values |
+| **C** auth failure | **401**, identical body | no | none | `PLATFORM_AUTH_FAILURE` |
+| **D** capability absent | **403** | no | none | `AUTHZ_DENIED` |
+| **E** CREATED | 201 | yes → replay | five, one txn | request log |
+| **F** REPLAY | 200 | yes | **none** | request log |
+| **G** CONFLICT | 409 | **no** — park | none | `LEAD_INGEST_IDEMPOTENCY_CONFLICT` |
+| **H** transient internal | 5xx | **yes**, backoff | none | error log, no PII |
+| **I** disconnect after COMMIT | not observed | yes → **F** | committed once | request log |
+| **J** revoked concurrently | 401 or 201 | yes | 0 or 1 | auth audit if refused |
+
+**J** resolves at authentication: status and permissions are read there, so a
+revocation lands either before the check (401, nothing written) or after it (the
+request completes). No torn state either way.
+
+## `prospects.ingest.enforced`
+
+Migration 095 stays **immutable**. No runtime code reads `enforced` — for any
+permission — so flipping it is **declarative**, a statement of intent. The actual
+enforcement is `possede()` in the route, and **route enforcement must never
+depend on the flag**.
+
+A new migration **097** exists solely to set `enforced = TRUE`, after real
+enforcement ships. Its rollback sets it back to `FALSE`.
+
+## Deployment order
+
+The CD pipeline runs **no migrations** (`cd.yml`: *« aucune migration »*), so code
+and schema are sequenced by hand. Both windows fail closed:
+
+```
+1. apply migrations 094 / 095 / 096
+2. deploy route code that authenticates and enforces prospects.ingest
+3. apply 097 (enforced = TRUE) + the audit-vocabulary repair
+4. only then mint and grant a service account
+
+route before 095 → capability absent from the catalogue → no grant can exist
+                 → 403 for everyone
+095 before route → capability exists, nothing reachable
+
+ROLLBACK  withdraw the route code first; roll back 097 second if release policy
+          requires it. Removing the router registration closes the door.
+```
+
+## Fingerprint v1 arming
+
+There is no route feature flag in this architecture, and the API is publicly
+served. **Producer-reachable therefore means: the deployed image containing the
+router registration.** The gate is the commit that registers the machine router.
+
+Until that ships, v1 changes only by approved spec amendment. After it ships, v1
+is immutable and any canonical field-set or layout change is a **v2 beside v1,
+never over it**.
+
+An **arming record** must be written into this document at that moment:
+
+```
+FINGERPRINT_V1_ARMED
+  arming commit      <sha>
+  deployed revision  <image revision / sha>
+  armed at           <UTC timestamp>
+  fingerprint_version 1
+  golden digest      <TestGoldenV1.CONDENSE>
+  canonical field set §Phase 5A-P5
+```
+
+The route is **not production-ready** until that record exists. `TestGoldenV1`
+already pins the digest and the canonical bytes; arming makes that pin permanent
+rather than deliberately updatable.
+
+## OpenAPI, CORS, CSRF
+
+Measured: production serves `/openapi.json` (200, externally reachable) while
+`/docs` and `/redoc` are 404 (`docs_url` gated on `app_debug`). The convention is
+*schema public, UI disabled*, and the route follows it. **Hiding the route would
+be security through obscurity and is not a control** — it is authenticated, and
+that is the control.
+
+No CSRF machinery exists in the backend, and none applies to a bearer M2M call.
+CORS governs browsers only, grants no authentication, and must never become the
+access control. Neither changes.
