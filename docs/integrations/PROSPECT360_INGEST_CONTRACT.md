@@ -90,7 +90,7 @@ Content-Type: application/json
 | 5xx | platform fault | retry with backoff, then queue |
 
 > **The 409 row above is struck out deliberately rather than edited away.** It was
-> written in Phase 1 and is the exact error migration 091 exists to prevent:
+> written in Phase 1 and is the exact error migration 094 exists to prevent:
 > *« un envoi DIFFÉRENT réutilisant la même clé … sans l'empreinte, le second cas
 > passerait pour un rejeu et la modification serait perdue en silence »*. Treating
 > a 409 as accepted moves that silent loss from the platform to the producer
@@ -498,7 +498,7 @@ Over the **validated semantic request**, never raw bytes:
 
 Canonicalisation: `json.dumps(..., sort_keys=True, separators=(",", ":"),
 ensure_ascii=False)` over the validated model with explicit `None` for absent
-optionals, then SHA-256, stored lowercase hex — the format migration 091's CHECK
+optionals, then SHA-256, stored lowercase hex — the format migration 094's CHECK
 already enforces.
 
 ## AUDIT — no new vocabulary
@@ -510,7 +510,7 @@ already enforces.
 
 ## What remains
 
-Verifier, capability migration (092), DTO, fingerprint module, ingest application
+Verifier, capability migration (095), DTO, fingerprint module, ingest application
 service, the thin route, and the security matrix.
 
 
@@ -612,29 +612,29 @@ than its CHECK is a deferred outage.
 
 | Field | Max | Enforced by |
 |---|---|---|
-| `external_correlation_id` | 128 | 091 `lead_acq_attr_correlation_borne` |
-| `source_system` | 64 | 091 `lead_acq_attr_source_system_borne` |
+| `external_correlation_id` | 128 | 094 `lead_acq_attr_correlation_borne` |
+| `source_system` | 64 | 094 `lead_acq_attr_source_system_borne` |
 | `contact.first_name` / `last_name` | 100 | `prospects` VARCHAR(100) |
 | `contact.email` | 255 | `prospects` VARCHAR(255) |
 | `contact.phone` | 20 | `prospects` VARCHAR(20) |
 | `contact.job_title` (was `project.job_title`, P5) | 200 | `prospects` VARCHAR(200) |
 | `consent.version` | 64 | application only (`text_version` is TEXT) |
 | `consent.source` | 100 | `consent_records.source` VARCHAR(100) |
-| `attribution.source` | 128 | 091 |
-| `attribution.source_detail` | 256 | 091 |
-| `attribution.landing_page` | 512 | 091 |
-| `attribution.content_id` | 128 | 091 |
-| `attribution.locale` | 16 | 091 |
-| `attribution.search_intent` | 32 | 091 |
-| `attribution.keyword_cluster` | 255 | 091 |
-| `attribution.utm_*` (5) | 255 | 091 |
-| `attribution.cta` | 128 | 091 |
-| `attribution.conversion_type` | 64 | 091 |
+| `attribution.source` | 128 | 094 |
+| `attribution.source_detail` | 256 | 094 |
+| `attribution.landing_page` | 512 | 094 |
+| `attribution.content_id` | 128 | 094 |
+| `attribution.locale` | 16 | 094 |
+| `attribution.search_intent` | 32 | 094 |
+| `attribution.keyword_cluster` | 255 | 094 |
+| `attribution.utm_*` (5) | 255 | 094 |
+| `attribution.cta` | 128 | 094 |
+| `attribution.conversion_type` | 64 | 094 |
 
 `TestBornesContreLaBase` re-reads `091_lead_acquisition_attributions.sql` and
 `schema.sql` and compares every bound. Drift is a red suite, not an incident.
 
-UTM values are bounded by 091 (255) rather than by `prospects.utm_*` (100)
+UTM values are bounded by 094 (255) rather than by `prospects.utm_*` (100)
 because the ingest writes attribution to `lead_acquisition_attributions`, which is
 the entire reason that table exists. **An ingest service that also wrote UTMs onto
 `prospects` would violate this table and must not.**
@@ -749,7 +749,7 @@ form change. This section is normative and settles what the previous slice left
 open: `project` carried only `job_title` because nothing else had a canonical
 home.
 
-Platform-side tracer: **T11** in `doc/plan.md`. Product story: **US-15** in
+Platform-side tracer: **T13** in `doc/plan.md`. Product story: **US-18** in
 `doc/prd.md`.
 
 ## Owner decisions — final, not reopenable
@@ -822,7 +822,7 @@ Required properties:
 - typed, bounded values with a **closed allowlist per field** — precedent:
   `contact_classification_records` (028), which mirrors its allowlist in a CHECK;
 - **tenant ownership** — `tenant_id`, composite FK `(tenant_id, prospect_id)`,
-  RLS enabled *and* forced, one policy per command (precedent: 091);
+  RLS enabled *and* forced, one policy per command (precedent: 094);
 - **prospect ownership** — cascade delete with the prospect;
 - **provenance** — the answer is *declared by the producer*, never verified; the
   source is recorded alongside it, as 028 does;
@@ -863,7 +863,7 @@ The versioning rule says `canonical_ingest_payload_v1` is never edited, and its
 stated reason is *"les lignes déjà en base ont été calculées avec la v1"*. That
 reason is **not yet engaged**:
 
-- migration 091 is **absent from production**; `lead_acquisition_attributions`
+- migration 094 is **absent from production**; `lead_acquisition_attributions`
   has zero rows anywhere;
 - there is **no route**, so no producer has ever computed a v1 fingerprint;
 - `prospects.ingest` is `enforced = FALSE` and the contract is unpublished.
@@ -1010,7 +1010,7 @@ metadata and server-decided values have no field to arrive in.
 The justification holds because none of its preconditions has changed:
 
 - no production route exists;
-- migration 091 is not deployed;
+- migration 094 is not deployed;
 - no `lead_acquisition_attributions` row exists anywhere;
 - no producer has ever generated a production v1 fingerprint.
 
@@ -1048,7 +1048,7 @@ changes. No canonical prospect-creation behaviour is affected.
 DTO or fingerprint change, `prospects.ingest.enforced` untouched. This section is
 normative and **supersedes the Phase 1 status table above** where they disagree.
 
-Platform tracer: **T12** in `doc/plan.md`. Product story: **US-16** in
+Platform tracer: **T14** in `doc/plan.md`. Product story: **US-19** in
 `doc/prd.md`.
 
 ## Owner decisions — final, not reopenable
@@ -1099,7 +1099,7 @@ INVARIANT  browser marketing-consent behaviour is unchanged: same channels,
 
 ## Idempotency — algorithm A
 
-Identity fixed by 091: `(tenant_id, source_system, external_correlation_id)`.
+Identity fixed by 094: `(tenant_id, source_system, external_correlation_id)`.
 
 ```
 1. optional fast-path read of the attribution by its identity
@@ -1117,12 +1117,12 @@ Identity fixed by 091: `(tenant_id, source_system, external_correlation_id)`.
 
 **No advisory lock by default.** The repository uses them (`appointment_service`,
 `twilio_canary_guard`) exactly where no constraint can express the invariant —
-overlapping time ranges. Here one can, and 091 says so: *« L'idempotence est une
+overlapping time ranges. Here one can, and 094 says so: *« L'idempotence est une
 contrainte, pas une vérification applicative »*. A lock would not remove the
 exception path, which must be written and tested regardless.
 
 **No second idempotency mechanism.** `webhook_replay_keys` is provider-scoped and
-serves provider callbacks; 091 supersedes it here.
+serves provider callbacks; 094 supersedes it here.
 
 ## Domain results — transport-free
 
@@ -1238,7 +1238,7 @@ canonical payload · full fingerprint · `Authorization` · secret · credential
 
 ## Boundary with the transport tracer
 
-T12 receives an **already-verified machine identity** and owns orchestration,
+T14 receives an **already-verified machine identity** and owns orchestration,
 atomicity, idempotency, durable scheduling, conflict evidence and the domain
 result. A later tracer owns `Authorization` parsing, invoking the verifier,
 enforcing `prospects.ingest`, HTTP status mapping, route exposure, and the
