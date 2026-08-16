@@ -83,6 +83,25 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = Field(120, alias="SEOLEAD_LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(2, alias="SEOLEAD_LLM_MAX_RETRIES")
 
+    # ── Prospect 360 producer (TR-SL-01) ────────────────────────────────────
+    # Empty by default, and that is the safe position: an unconfigured producer
+    # leaves every lead in PENDING_EXPORT, which is exactly what Phase 4 already
+    # did. Nothing starts exporting because a release shipped.
+    prospect360_endpoint: str = Field("", alias="PROSPECT360_INGEST_URL")
+    # `<public_identifier>.<secret>` — the whole bearer, opaque to this side.
+    # Split here would tempt something to log the half that looks harmless.
+    prospect360_credential: str = Field("", alias="PROSPECT360_CREDENTIAL")
+    prospect360_timeout_seconds: int = Field(
+        30, alias="PROSPECT360_TIMEOUT_SECONDS")
+    prospect360_max_attempts: int = Field(5, alias="PROSPECT360_MAX_ATTEMPTS")
+
+    @property
+    def prospect360_configured(self) -> bool:
+        """Both halves, or nothing. An endpoint without a credential would send
+        an unauthenticated request and read 401 as if it were news."""
+        return bool(self.prospect360_endpoint.strip()
+                    and self.prospect360_credential.strip())
+
     @property
     def llm_configured(self) -> bool:
         """Whether a real LLM call is possible.
