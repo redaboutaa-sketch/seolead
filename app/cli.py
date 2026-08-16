@@ -22,6 +22,7 @@ box where the API is not exposed at all — which is the intended deployment.
     seolead content stage <draft-id> [--site solar_be] [--locale fr] [--slug ...]
     seolead content publish <published-content-id>
     seolead leads list [--status PENDING_EXPORT]
+    seolead leads export [--limit 50] [--dry-run]
 """
 from __future__ import annotations
 
@@ -661,6 +662,52 @@ async def cmd_leads_list(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+
+async def cmd_leads_export(args: argparse.Namespace) -> int:
+    """Déposer les leads en attente chez Prospect 360 — TR-SL-01.
+
+    Le mécanisme d'exécution est cette commande, pas un ordonnanceur : le dépôt
+    n'a pas d'autre planificateur, et en inventer un ici serait un second cadre
+    à maintenir pour un besoin qu'un cron couvre.
+
+    Sans producteur configuré, la commande le DIT et ne touche à rien. C'est
+    l'état de la production aujourd'hui, et il doit rester sûr.
+    """
+    settings = get_settings()
+    if not settings.prospect360_configured:
+        _emit({"status": "NOT_CONFIGURED",
+               "detail": "PROSPECT360_INGEST_URL and PROSPECT360_CREDENTIAL "
+                         "are both required; nothing was attempted"})
+        return EXIT_OK
+
+    from app.services import lead_export
+    from app.site.config import load_site
+    from app.site.prospect360_destination import Prospect360Destination
+
+    config = load_site("solar_be")
+    destination = Prospect360Destination(settings)
+    resultats = []
+    async with get_sessionmaker()() as session:
+        attente = await lead_export.leads_a_exporter(
+            session, vertical_code="SOLAR_BE", limit=int(args.limit or 50))
+        if args.dry_run:
+            _emit({"status": "DRY_RUN", "pending": len(attente),
+                   "lead_ids": [str(l.id) for l in attente]})
+            return EXIT_OK
+        for lead in attente:
+            r = await lead_export.exporter_lead(
+                session, lead, destination=destination, config=config,
+                max_attempts=settings.prospect360_max_attempts)
+            # Ni courriel, ni téléphone, ni charge : un opérateur veut savoir
+            # ce qui est parti et ce qui coince.
+            resultats.append({"lead_id": r.lead_id,
+                              "external_correlation_id": r.correlation_id,
+                              "outcome": r.resultat, "state": r.etat,
+                              "http_status": r.http_status})
+    _emit({"status": "DONE", "attempted": len(resultats), "results": resultats})
+    return EXIT_OK
+
+
 def _mask_email(email: str) -> str:
     local, _, domain = (email or "").partition("@")
     head = local[:2] if len(local) > 2 else local[:1]
@@ -841,6 +888,10 @@ def build_parser() -> argparse.ArgumentParser:
     leads_list = leads_sub.add_parser("list")
     leads_list.add_argument("--status", default="")
     leads_list.set_defaults(func=cmd_leads_list)
+    leads_export = leads_sub.add_parser("export")
+    leads_export.add_argument("--limit", default=50)
+    leads_export.add_argument("--dry-run", action="store_true")
+    leads_export.set_defaults(func=cmd_leads_export)
 
     health_cmd = sub.add_parser("health", help="check dependencies")
     health_cmd.set_defaults(func=cmd_health)

@@ -135,6 +135,26 @@ class CapturedLead(Base):
     export_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     exported_at: Mapped[object | None] = mapped_column(TZDateTime, nullable=True)
 
+    # ── Export identity (TR-SL-01) ──────────────────────────────────────────
+    # Prospect 360 reads `(tenant, source_system, external_correlation_id)` as
+    # the identity of a deposit. It must therefore be minted ONCE, persisted
+    # BEFORE the first attempt, and never regenerated — not on timeout, not on
+    # restart, not on a lost response. Regenerating it would turn a retry into a
+    # second prospect, which is the exact failure exactly-once exists to stop.
+    external_correlation_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True)
+
+    # The canonical payload, frozen at the moment the identity is minted. A
+    # retry replays THIS, never a payload rebuilt from a row that may have moved
+    # since: same correlation with a different payload is a 409, not a replay.
+    export_payload: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+
+    # What Prospect 360 called the prospect. Written on 201 CREATED and on
+    # 200 REPLAY alike — a replay returns the ORIGINAL id, which is what makes
+    # the crash-after-success window recoverable.
+    remote_prospect_id: Mapped[str | None] = mapped_column(String(64),
+                                                           nullable=True)
+
     created_at = created_column()
     updated_at = updated_column()
 
