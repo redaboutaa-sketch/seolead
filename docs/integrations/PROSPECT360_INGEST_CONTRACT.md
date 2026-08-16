@@ -1518,30 +1518,52 @@ rather than deliberately updatable.
 ### Arming record — LIVE STATE
 
 ```
-ARMING STATE: UNARMED
+ARMING STATE: ARMED
 
 FINGERPRINT_V1_ARMED
-  arming_commit_sha            <unset — the commit whose deployed image
-                                registers the machine router>
-  deployed_revision            <unset — the image revision actually running>
-  armed_at_utc                 <unset — the instant that image became reachable>
+  arming_commit_sha            7391c9665e6f8bea0bae8bb2373cf2d481f77c12
+  deployed_revision            7391c9665e6f8bea0bae8bb2373cf2d481f77c12
+  armed_at_utc                 2026-08-16T17:34:58Z
   fingerprint_version          1
   golden_digest                68270f1dd40e921a28c42d72a583d3e252a09607b2fa28940175bc8143d57f91
   canonical_field_set_reference §Phase 5A-P5
 ```
 
-**The three unset fields cannot be filled in advance and must never be guessed.**
-A deployed revision and a UTC exposure instant exist only once an image is
-actually running; writing plausible values here would assert a deployment that
-never happened, which is precisely the class of false measurement this contract
-exists to prevent.
+**Armed on 2026-08-16. This record is now permanent.**
 
-Route code existing on a feature branch does **not** arm v1. Migration 098 does
-**not** arm v1. Only the deployed image containing the router registration, or
-the first `lead_acquisition_attributions` row, does — whichever comes first.
+#### How each value was measured
 
-A test asserts this block still reads `UNARMED` and carries no real timestamp,
-so the record cannot be pre-filled by accident.
+| Field | Evidence |
+|---|---|
+| `arming_commit_sha` | deploy run `31961940811`, input `sha=7391c96…`, ancestry verified against the authorized branch |
+| `deployed_revision` | `platform_api` OCI label `org.opencontainers.image.revision`, and `APP_RELEASE_SHA` baked into the image — both read back by `health_gate.sh` |
+| `armed_at_utc` | `platform_api` container `State.StartedAt` = `2026-08-16T17:34:58.773875003Z`, truncated to the second. This is the instant the route-bearing image began serving; the router registration in `backend/main.py` makes `POST /api/v1/lead-ingest` reachable from that moment |
+| `golden_digest` | unchanged since P3; the deployed image's own golden test pins it |
+
+Confirmed live at that revision: `POST /api/v1/lead-ingest` present in the
+production OpenAPI (295 paths, +1), and **401** — with an indistinguishable body —
+for a missing, malformed, unknown-identity or wrong-scheme credential.
+
+#### What this now forbids
+
+Fingerprint v1 is **frozen**. The canonical field set, the serialization, and the
+digest above must never change. Any future change to the canonical payload is
+**fingerprint v2, published beside v1** — v1 is never overwritten, never
+recomputed, and never returns to `UNARMED`, even if this release is rolled back.
+A rollback removes the route; it does not unmake the exposure that already
+happened.
+
+Route code on a feature branch did **not** arm v1. Migration 098 did **not** arm
+v1. The deployed image containing the router registration did — at the instant
+recorded above, before any `lead_acquisition_attributions` row existed (the table
+was, and remains, empty: no producer credential has been issued).
+
+> **Note for the platform repository.** `test_dod23_aucun_enregistrement_d_armement_n_est_pre_rempli`
+> asserts this block reads `UNARMED`. That guard did its job — it prevented the
+> record from being pre-filled before a real deployment — and its premise is now
+> spent. It must be inverted to assert `ARMED` with the real values. Doing so
+> changes the platform release SHA, so it belongs to a later slice, not to this
+> rollout.
 
 ## OpenAPI, CORS, CSRF
 
