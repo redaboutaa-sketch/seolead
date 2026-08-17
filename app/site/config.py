@@ -54,6 +54,10 @@ class LegalConfig(BaseModel):
     cookie_policy_path: str | None = None
     consent_version: str = "placeholder-v0"
     data_controller: str | None = None
+    # Adresse d'exercice des droits. Publiée sur la page de confidentialité :
+    # un responsable du traitement sans point de contact ne permet à personne
+    # d'exercer les droits que la politique annonce.
+    privacy_contact_email: str | None = None
     reviewed: bool = False
 
 

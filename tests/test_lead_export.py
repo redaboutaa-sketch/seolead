@@ -443,3 +443,46 @@ class TestConfiguration:
             assert interdit not in source, interdit
         # Et l'URL réellement utilisée par les bancs est une adresse morte.
         assert "p360.invalid" in source
+
+
+# ── 8 — le consentement exporté est un consentement RÉEL ───────────────────
+
+class TestConsentementApprouve:
+    """Ce qui part chez Prospect 360 doit nommer un consentement qui existe.
+
+    Un `placeholder-v0` déposé dans un CRM attache à une personne réelle une
+    version de texte qui n'a jamais été rédigée : la trace de consentement
+    devient invérifiable, et c'est précisément ce que la version sert à rendre
+    possible. Le garde vit ici plutôt que dans la configuration parce que c'est
+    l'EXPORT qui rend la valeur irrattrapable.
+    """
+
+    def test_la_configuration_solaire_ne_porte_plus_de_version_provisoire(self):
+        from app.site.config import load_site
+        legal = load_site("solar_be").legal
+        assert legal.reviewed is True
+        assert "placeholder" not in legal.consent_version.lower()
+        assert legal.data_controller and legal.privacy_contact_email
+
+    @pytest.mark.asyncio
+    async def test_la_charge_porte_la_version_approuvee(self, session, solar_site):
+        from app.site.config import load_site
+        lead = await _capturer(session, solar_site)
+        charge = construire_charge(
+            lead, correlation_id="c-1",
+            consent_version=lead.consent_version
+            or load_site("solar_be").legal.consent_version)
+        version = charge["consent"]["version"]
+        assert version == "solar-be-consent-v1.0-2026-08-17"
+        assert "placeholder" not in version.lower()
+
+    @pytest.mark.asyncio
+    async def test_aucun_consentement_marketing_ne_part(self, session, solar_site):
+        """Le contrat refuse nommément les champs de consentement marketing, et
+        le formulaire les tient séparés. Rien ne doit les rapprocher."""
+        lead = await _capturer(session, solar_site)
+        charge = construire_charge(lead, correlation_id="c-1",
+                                   consent_version="v1")
+        assert set(charge["consent"]) == {"processing", "version", "timestamp",
+                                          "source"}
+        assert "marketing" not in json.dumps(charge).lower()
