@@ -539,8 +539,15 @@ class TestSiteConfiguration:
         assert config.brand_name_is_placeholder is False
         assert config.contact.company_name is None
         assert config.contact.phone is None
-        assert config.legal.reviewed is False, \
-            "no generated legal text may be presented as reviewed"
+        # Le texte légal a été FOURNI et approuvé par le propriétaire le
+        # 2026-08-17 (version `solar-be-consent-v1.0-2026-08-17`). Ce garde
+        # existait pour empêcher un texte GÉNÉRÉ de se présenter comme relu ;
+        # sa prémisse est éteinte, et il affirme désormais l'inverse : ce qui a
+        # été fourni est présent, exactement.
+        assert config.legal.reviewed is True
+        assert config.legal.consent_version == "solar-be-consent-v1.0-2026-08-17"
+        assert config.legal.data_controller == "BEAVER DATA GROUP"
+        assert config.legal.privacy_contact_email == "reda.boutaa@gmail.com"
 
     def test_an_unknown_site_is_refused(self):
         with pytest.raises(InvalidSite):

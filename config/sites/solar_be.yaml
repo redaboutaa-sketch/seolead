@@ -40,15 +40,16 @@ contact:
   lead_destination_email: null
 
 legal:
-  # No legal text is generated. Until `reviewed: true`, the site renders an
-  # explicit "awaiting owner/legal wording" placeholder rather than plausible
-  # invented policy — which would be worse than an obvious gap.
+  # Texte approuvé par le propriétaire le 2026-08-17. La version est ENREGISTRÉE
+  # avec chaque consentement et voyage jusqu'à Prospect 360 : la changer sans
+  # changer la version rendrait intraçable ce à quoi une personne a consenti.
   privacy_policy_path: /confidentialite
   terms_path: /conditions
   cookie_policy_path: null
-  consent_version: "placeholder-v0"
-  data_controller: null
-  reviewed: false
+  consent_version: "solar-be-consent-v1.0-2026-08-17"
+  data_controller: "BEAVER DATA GROUP"
+  privacy_contact_email: "reda.boutaa@gmail.com"
+  reviewed: true
 
 analytics:
   first_party_events: true
@@ -199,7 +200,12 @@ conversion:
     # conditional on accepting marketing, which is not a real choice.
     - key: consent_processing
       type: consent
-      label: "J'accepte que mes données soient utilisées pour traiter ma demande."
+      label: >-
+        J'accepte que mes données personnelles soient traitées par BEAVER DATA
+        GROUP, responsable du traitement de Solar Belgium, afin d'analyser ma
+        demande relative à mon projet solaire, me recontacter à ce sujet et
+        assurer le suivi de ma demande. J'ai pris connaissance de la Politique
+        de confidentialité et je peux retirer mon consentement à tout moment.
       required: true
     - key: consent_marketing
       type: consent
