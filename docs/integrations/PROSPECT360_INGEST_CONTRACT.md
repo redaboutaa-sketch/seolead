@@ -9,7 +9,7 @@ scheduled early — it is the longest-lead item in the roadmap.
 
 ## Why a new endpoint is needed
 
-Phase 1 verified (evidence in `SEO_LEAD_FACTORY_DISCOVERY_REPORT.md` §4):
+Phase 1 verified (evidence in the Phase 1 discovery report, kept privately):
 
 1. Every prospect-writing route sits behind cookie-JWT auth with host↔tenant
    binding (`backend/deps.py: enforce_host_binding`), which **fails closed on an

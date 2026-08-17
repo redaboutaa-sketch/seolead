@@ -73,7 +73,6 @@ Full instructions: [`docs/runbooks/LOCAL_PIPELINE.md`](docs/runbooks/LOCAL_PIPEL
 
 | Document | What it covers |
 |---|---|
-| [`SEO_LEAD_FACTORY_DISCOVERY_REPORT.md`](SEO_LEAD_FACTORY_DISCOVERY_REPORT.md) | Phase 1 — infrastructure, Prospect 360, Last30Days, Hermes, n8n, Traefik |
 | [`PHASE2_IMPLEMENTATION_REPORT.md`](PHASE2_IMPLEMENTATION_REPORT.md) | Phase 2 — what was built, what was measured, what is blocked |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Ports, layer separation, idempotency, known gaps |
 | [`docs/PHASE2_IMPLEMENTATION.md`](docs/PHASE2_IMPLEMENTATION.md) | Design decisions and their reasoning |
