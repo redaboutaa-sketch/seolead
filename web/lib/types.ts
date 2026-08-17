@@ -149,6 +149,7 @@ export interface SiteConfigDTO {
     cookie_policy_path: string | null;
     consent_version: string;
     data_controller: string | null;
+    privacy_contact_email: string | null;
     reviewed: boolean;
   };
   conversion: {
