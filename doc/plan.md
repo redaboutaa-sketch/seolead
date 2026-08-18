@@ -413,6 +413,17 @@ document. Only brotli beats the old gzip everywhere.
 The lesson is narrow and worth keeping: a content-negotiation probe has to use the
 header a client actually sends, not a convenient subset.
 
+A second measurement error surfaced immediately after, in the test rather than in
+production. The size assertion used `fetch`, which transparently decompresses — so
+`arrayBuffer()` returned the expanded 67 594 B, not the 10 624 B that crossed the
+wire, and there is no `content-length` to fall back on because Traefik streams the
+compressed body chunked. It had been passing only because undici happens *not* to
+decompress zstd, so while the edge served zstd the assertion was reading true wire
+bytes by accident. The moment brotli arrived it broke. The test now counts raw
+chunks through `node:http`, and compares what a browser receives against what gzip
+alone would have given it — a byte-count test that only works for the encodings its
+runtime declines to handle is not measuring anything.
+
 ### What this costs
 
 Anything reaching the app **without** passing through Traefik is now served
