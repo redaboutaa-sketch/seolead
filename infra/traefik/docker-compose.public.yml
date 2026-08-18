@@ -108,6 +108,21 @@ services:
       traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.X-Robots-Tag: "noindex, nofollow, noarchive, nosnippet"
 
       traefik.http.middlewares.monprojetsolaire-compress.compress: "true"
+      # Brotli first, explicitly.
+      #
+      # Traefik's default preference is zstd, and with `compress: false` in the
+      # app that is what a browser offering `gzip, deflate, br, zstd` received.
+      # Measured on production, brotli is smaller on every resource this site
+      # serves — not marginally:
+      #
+      #   document /                12 986 B zstd  →  10 621 B br   (-2 365)
+      #   chunk 4bd1b696…js         59 879 B zstd  →  51 001 B br   (-8 878)
+      #   chunk 255…js              49 377 B zstd  →  41 645 B br   (-7 732)
+      #   stylesheet                 5 726 B zstd  →   4 395 B br   (-1 331)
+      #
+      # About 20 kB on a cold visit. zstd stays second so a client that speaks it
+      # but not brotli is still compressed, and gzip remains the floor.
+      traefik.http.middlewares.monprojetsolaire-compress.compress.encodings: "br,zstd,gzip"
 
       # ── Service ──────────────────────────────────────────────────────────
       traefik.http.services.monprojetsolaire.loadbalancer.server.port: "3100"
