@@ -17,6 +17,8 @@
  * opposite (no compression at all), and that is asserted too rather than skipped.
  */
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -27,17 +29,54 @@ const THROUGH_EDGE = BASE.startsWith("https://");
 /** What a current Chrome actually sends. */
 const BROWSER_AE = "gzip, deflate, br, zstd";
 
-async function fetchWith(path: string, acceptEncoding: string) {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { "Accept-Encoding": acceptEncoding },
-    redirect: "manual",
+/**
+ * Raw wire bytes, via `node:http` rather than `fetch`.
+ *
+ * `fetch` transparently decompresses, so `arrayBuffer()` returns the *expanded*
+ * body — 67 594 B for a document that crossed the wire as 10 624 B of brotli.
+ * There is no `content-length` to fall back on either: Traefik streams the
+ * compressed response chunked.
+ *
+ * This mattered in practice. An earlier version of this file measured with
+ * `fetch` and passed, because undici happened not to decompress zstd — so the
+ * size assertion was reading true wire bytes by accident. The moment the edge
+ * started serving brotli, which undici does decompress, the same assertion
+ * failed. A byte-count test that only works for the encodings its runtime
+ * declines to handle is not measuring anything.
+ */
+function fetchWith(
+  path: string,
+  acceptEncoding: string,
+): Promise<{ status: number; encoding: string | null; bytes: number }> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${BASE}${path}`);
+    const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const req = send(
+      {
+        hostname: url.hostname,
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        method: "GET",
+        headers: { "accept-encoding": acceptEncoding },
+      },
+      (res) => {
+        let bytes = 0;
+        res.on("data", (chunk: Buffer) => {
+          bytes += chunk.length;
+        });
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            encoding: (res.headers["content-encoding"] as string | undefined) ?? null,
+            bytes,
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
   });
-  const body = Buffer.from(await response.arrayBuffer());
-  return {
-    status: response.status,
-    encoding: response.headers.get("content-encoding"),
-    bytes: body.byteLength,
-  };
 }
 
 describe("configuration", () => {
@@ -120,13 +159,20 @@ describe.skipIf(!THROUGH_EDGE)("the wire, through Traefik", () => {
     ).toBe("br");
   }, 30_000);
 
-  it("keeps the document materially smaller than the gzip it replaced", async () => {
+  it("keeps the document materially smaller than the gzip it would otherwise get", async () => {
     const browser = await fetchWith("/", BROWSER_AE);
+    const gzip = await fetchWith("/", "gzip");
     const identity = await fetchWith("/", "identity");
 
-    // Brotli measured at 10.6 kB against 19.7 kB of gzip. The bound is loose
-    // enough to survive content edits and tight enough that a silent fallback to
-    // gzip — or to no compression — fails it.
+    // The comparison that states the tracer's whole point: what a browser
+    // receives must beat what gzip alone would have given it.
+    expect(
+      browser.bytes,
+      `browser got ${browser.bytes} B, gzip would have given ${gzip.bytes} B`,
+    ).toBeLessThan(gzip.bytes * 0.85);
+
+    // An absolute floor as well, so "smaller than gzip" cannot be satisfied by
+    // both of them quietly growing.
     expect(browser.bytes, `document was ${browser.bytes} B on the wire`).toBeLessThan(14_000);
     expect(browser.bytes).toBeLessThan(identity.bytes / 3);
   }, 30_000);
