@@ -48,6 +48,26 @@ describe("configuration", () => {
     expect(config).toMatch(/compress:\s*false/);
   });
 
+  it("asks the edge for brotli first", () => {
+    const overlay = readFileSync(
+      join(process.cwd(), "..", "infra", "traefik", "docker-compose.public.yml"),
+      "utf8",
+    );
+    /*
+     * Traefik's own default is zstd-first, and that is what shipped in the first
+     * cut of this tracer. It was measurably the wrong choice for this site:
+     * brotli was smaller on every single resource — the document by 2.4 kB, the
+     * two large chunks by 7.7 and 8.9 kB, the stylesheet by 1.3 kB. Roughly 20 kB
+     * on a cold visit.
+     *
+     * Without this line the site silently falls back to zstd, which still looks
+     * like "compression is working" from every angle except the byte count.
+     */
+    expect(overlay).toMatch(
+      /monprojetsolaire-compress\.compress\.encodings:\s*"br,zstd,gzip"/,
+    );
+  });
+
   it("compresses on every router that returns a body", () => {
     const overlay = readFileSync(
       join(process.cwd(), "..", "infra", "traefik", "docker-compose.public.yml"),

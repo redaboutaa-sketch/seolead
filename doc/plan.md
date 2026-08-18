@@ -386,9 +386,32 @@ alone, this change would have silently started serving ~55 kB of raw HTML to the
 one person the preview route exists for. Found by reading the chain, not by
 waiting for someone to notice.
 
-Traefik's encoding order is left at its default. It already prefers brotli, which
-is the smallest of the three here; forcing an order would be a second decision
-with no measured benefit.
+3. `compress.encodings: "br,zstd,gzip"` on that middleware.
+
+Point 3 was **not** in the first cut of this tracer, and the reason is worth
+recording. Traefik's preference had been probed with `Accept-Encoding: br, zstd`
+and `zstd, br`, and both returned brotli — so the order was left at its default as
+"already correct". That probe was not the real header. A browser sends
+`gzip, deflate, br, zstd`, and against *that* set Traefik picks **zstd**. The first
+deployment therefore shipped zstd, and the wire test written for this tracer
+failed on production and said so.
+
+The measured difference is not marginal:
+
+| Resource | zstd | brotli | Δ |
+|---|---|---|---|
+| document `/` | 12 986 B | 10 621 B | −2 365 |
+| chunk `4bd1b696…js` | 59 879 B | 51 001 B | −8 878 |
+| chunk `255…js` | 49 377 B | 41 645 B | −7 732 |
+| stylesheet | 5 726 B | 4 395 B | −1 331 |
+
+About 20 kB on a cold visit. Worse, zstd was **larger than the gzip it replaced**
+on the static assets — the stylesheet went 4 711 B (Next's gzip) to 5 726 B — so
+the first cut was a genuine regression there while being an improvement on the
+document. Only brotli beats the old gzip everywhere.
+
+The lesson is narrow and worth keeping: a content-negotiation probe has to use the
+header a client actually sends, not a convenient subset.
 
 ### What this costs
 
