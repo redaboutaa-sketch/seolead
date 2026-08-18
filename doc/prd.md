@@ -119,3 +119,33 @@ supplied. That file, not the designer's judgement, is the authority.
 A savings or ROI calculator (needs irradiation, roof geometry, consumption and
 tariff data — none of which exist), Dutch content, analytics vendors, indexing,
 and any change to lead destination or Prospect 360 producer configuration.
+
+---
+
+## Standing non-functional requirements
+
+These are not user stories and carry no `US-SL-nn`. They are properties the
+product is already required to hold, established before this backlog existed and
+authoritative without being restated per feature. They are recorded here so a
+tracer that defends one has something to point at.
+
+### NFR-SEC-CSP — The site never executes a script it did not author
+
+`middleware.ts` and `next.config.ts` implement a Content-Security-Policy whose
+purpose is stated in their own headers: an evidence passage that smuggled markup
+past the sanitiser must not be able to run. The policy is enforced with a
+per-request nonce and `'strict-dynamic'`, deliberately without `'unsafe-inline'`.
+
+Two consequences follow, and both are requirements rather than implementation
+detail:
+
+1. **The policy must actually be satisfiable by the pages it protects.** A page
+   whose own framework scripts the policy refuses is not "extra secure" — it is a
+   page whose CSP has stopped meaning anything, because nobody can tell a real
+   violation from the permanent noise, and because the page is one Client
+   Component away from serving a blank screen with HTTP 200.
+2. **The policy must not be relaxed to make a page work.** `'unsafe-inline'`
+   would restore every page instantly and reopen the exact hole the policy
+   exists to close — on the pages that render owner-approved legal text.
+
+`TRACER SL-T2` in `doc/plan.md` repairs a violation of (1) without touching (2).
