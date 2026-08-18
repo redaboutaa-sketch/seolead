@@ -14,11 +14,43 @@ const NAV_LABELS: Record<string, Record<string, string>> = {
   en: { "/": "Home" },
 };
 
+/**
+ * The wordmark.
+ *
+ * A drawn mark rather than a logo file, because the owner has not supplied a
+ * logo — `OWNER_INPUTS_REQUIRED_FOR_LAUNCH.md` lists it under RECOMMENDED. It is
+ * built from the same sun-over-roof idea as `public/favicon.svg` so the two do
+ * not diverge, and it is replaced wholesale the day a real logo arrives.
+ */
+function BrandMark({ size = 30 }: { size?: number }) {
+  return (
+    <svg
+      className="site-header__mark"
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect width="64" height="64" rx="14" fill="var(--brand)" />
+      <circle cx="32" cy="23" r="8" fill="var(--solar)" />
+      <path
+        d="M32 8v5M32 33v5M17 23h5M42 23h5M21.4 12.4l3.5 3.5M39.1 30.1l3.5 3.5M42.6 12.4l-3.5 3.5M24.9 30.1l-3.5 3.5"
+        stroke="var(--solar)"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path d="M12 48 32 36l20 12v6H12z" fill="var(--brand-contrast)" />
+      <path d="M18 49h28" stroke="var(--brand)" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function StagingBanner({ config }: { config: SiteConfigDTO | null }) {
   if (!config || config.indexable) return null;
   return (
     <div className="staging-banner" role="status">
-      <div className="container">
+      <div className="container container--wide">
         <strong>Environnement de préproduction</strong> — contenu non public,
         indexation désactivée. Marque et coordonnées à confirmer.
       </div>
@@ -28,69 +60,134 @@ export function StagingBanner({ config }: { config: SiteConfigDTO | null }) {
 
 export function Header({ config, locale }: { config: SiteConfigDTO | null; locale: string }) {
   const routes = knownRoutesForLocale(config, locale).filter(
-    (route) => route.type !== "LEGAL",
+    (route) => route.type !== "LEGAL" && route.type !== "CONVERSION",
   );
   const labels = NAV_LABELS[locale] ?? {};
+  const formPath = "/demande-etude";
+  const hasForm = config?.routes.some((route) => route.path === formPath) ?? false;
   return (
     <header className="site-header">
-      <div className="container site-header__inner">
+      <div className="container container--wide site-header__inner">
         <Link className="site-header__brand" href={localizedPath(config, locale, "/")}>
+          <BrandMark />
           {brandName(config)}
         </Link>
-        <nav className="site-nav" aria-label="Navigation principale">
-          <ul>
-            {routes.map((route) => (
-              <li key={route.path}>
-                <Link href={localizedPath(config, locale, route.path)}>
-                  {labels[route.path] ?? route.path.replace(/^\//, "")}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className="site-header__actions">
+          <nav className="site-nav" aria-label="Navigation principale">
+            <ul>
+              {routes.map((route) => (
+                <li key={route.path}>
+                  <Link href={localizedPath(config, locale, route.path)}>
+                    {labels[route.path] ?? route.path.replace(/^\//, "")}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          {/*
+            The conversion route is promoted out of the nav list into a button:
+            one visually primary action per viewport. Hidden below 52rem, where
+            the sticky bar carries it instead.
+          */}
+          {hasForm ? (
+            <Link
+              className="button site-header__cta"
+              href={localizedPath(config, locale, formPath)}
+            >
+              {config?.conversion.primary_cta_label ?? "Demander une estimation"}
+            </Link>
+          ) : null}
+        </div>
       </div>
     </header>
   );
 }
 
 export function Footer({ config, locale }: { config: SiteConfigDTO | null; locale: string }) {
-  const legal = knownRoutesForLocale(config, locale).filter(
-    (route) => route.type === "LEGAL",
-  );
+  const all = knownRoutesForLocale(config, locale);
+  const legal = all.filter((route) => route.type === "LEGAL");
+  const pages = all.filter((route) => route.type !== "LEGAL" && route.path !== "/");
+  const labels = NAV_LABELS[locale] ?? {};
   return (
     <footer className="site-footer">
-      <div className="container">
-        <p>
-          {brandName(config)}
-          {config?.brand_name_is_placeholder
-            ? " — nom commercial provisoire, en attente de validation."
-            : ""}
-        </p>
-        {/*
-          Contact details are shown only when the owner has supplied them. An
-          invented phone number on a lead-generation site is a lie that rings.
-        */}
-        {config?.contact.email || config?.contact.phone ? (
+      <div className="container container--wide">
+        <div className="site-footer__grid">
+          <div>
+            <span className="site-footer__brand">
+              <BrandMark size={26} />
+              {brandName(config)}
+              {config?.brand_name_is_placeholder ? " (provisoire)" : ""}
+            </span>
+            <p>
+              Information sur le photovoltaïque résidentiel en Belgique, appuyée
+              sur des sources consultées plutôt que sur des moyennes annoncées
+              sans origine.
+            </p>
+          </div>
+
+          {pages.length > 0 ? (
+            <div>
+              <h2>Le site</h2>
+              <ul>
+                {pages.map((route) => (
+                  <li key={route.path}>
+                    <Link href={localizedPath(config, locale, route.path)}>
+                      {labels[route.path] ?? route.path.replace(/^\//, "")}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div>
+            <h2>Contact &amp; mentions</h2>
+            {/*
+              Contact details are shown only when the owner has supplied them. An
+              invented phone number on a lead-generation site is a lie that rings.
+            */}
+            {config?.contact.email || config?.contact.phone ? (
+              <ul>
+                {config?.contact.email ? (
+                  <li>
+                    <a href={`mailto:${config.contact.email}`}>{config.contact.email}</a>
+                  </li>
+                ) : null}
+                {config?.contact.phone ? (
+                  <li>
+                    <a href={`tel:${config.contact.phone.replace(/\s/g, "")}`}>
+                      {config.contact.phone}
+                    </a>
+                  </li>
+                ) : null}
+              </ul>
+            ) : (
+              <p>Coordonnées commerciales à confirmer par le propriétaire du site.</p>
+            )}
+            {legal.length > 0 ? (
+              <ul>
+                {legal.map((route) => (
+                  <li key={route.path}>
+                    <Link href={localizedPath(config, locale, route.path)}>
+                      {route.path === config?.legal.privacy_policy_path
+                        ? "Confidentialité"
+                        : "Conditions"}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="site-footer__legal">
           <p>
-            {config?.contact.email ? <span>{config.contact.email} </span> : null}
-            {config?.contact.phone ? <span>{config.contact.phone}</span> : null}
+            {brandName(config)}
+            {config?.brand_name_is_placeholder
+              ? " — nom commercial provisoire, en attente de validation."
+              : ""}
           </p>
-        ) : (
-          <p>Coordonnées commerciales à confirmer par le propriétaire du site.</p>
-        )}
-        {legal.length > 0 ? (
-          <ul>
-            {legal.map((route) => (
-              <li key={route.path}>
-                <Link href={localizedPath(config, locale, route.path)}>
-                  {route.path === config?.legal.privacy_policy_path
-                    ? "Confidentialité"
-                    : "Conditions"}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        </div>
       </div>
     </footer>
   );

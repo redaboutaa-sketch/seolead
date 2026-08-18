@@ -1,10 +1,11 @@
 import Link from "next/link";
 
+import { IconSource, IconSun, IconUnknown } from "@/components/home/Icons";
 import { isKnownRoute, localizedPath } from "@/lib/site";
 import type { SiteConfigDTO } from "@/lib/types";
 
 /**
- * The conversion block.
+ * The conversion block, used by content pages.
  *
  * No countdown, no scarcity, no "3 places restantes". The offer is an estimate;
  * the honest reason to act is that the visitor wants one. Manufactured urgency on
@@ -32,13 +33,17 @@ export function CtaBlock({
       </p>
       <div className="cta-actions">
         {isKnownRoute(config, formPath) ? (
-          <Link className="button" href={localizedPath(config, locale, formPath)}>
+          <Link
+            className="button button--large"
+            href={localizedPath(config, locale, formPath)}
+            data-cta="primary"
+          >
             {config?.conversion.primary_cta_label ?? "Demander une estimation"}
           </Link>
         ) : null}
         {isKnownRoute(config, toolPath) ? (
           <Link
-            className="button button--secondary"
+            className="button button--secondary button--large"
             href={localizedPath(config, locale, toolPath)}
           >
             Cadrer mon projet en 2 minutes
@@ -49,12 +54,22 @@ export function CtaBlock({
   );
 }
 
+/**
+ * How the figures on a content page were established.
+ *
+ * Same three properties as the homepage's assurance strip, at the length a
+ * content page can carry — and for the same reason: this is the only trust
+ * material the project actually holds.
+ */
 export function TrustSection() {
   return (
     <section className="section" aria-labelledby="methode">
       <h2 id="methode">Comment ces informations sont établies</h2>
       <div className="card-grid">
         <article className="card">
+          <span className="card__icon">
+            <IconSource size={24} />
+          </span>
           <h3>Chiffres sourcés</h3>
           <p>
             Chaque montant affiché provient d&apos;une source publiée et consultée,
@@ -63,6 +78,9 @@ export function TrustSection() {
           </p>
         </article>
         <article className="card">
+          <span className="card__icon card__icon--solar">
+            <IconUnknown size={24} />
+          </span>
           <h3>Incertitude affichée</h3>
           <p>
             Quand une source ne précise pas la TVA ou la base d&apos;un prix, nous
@@ -70,6 +88,9 @@ export function TrustSection() {
           </p>
         </article>
         <article className="card">
+          <span className="card__icon">
+            <IconSun size={24} />
+          </span>
           <h3>Pas de moyenne inventée</h3>
           <p>
             Une fourchette relevée dans une source reste une observation. Elle

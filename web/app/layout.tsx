@@ -28,6 +28,10 @@ export async function generateMetadata(): Promise<Metadata> {
     ...(config?.seo.canonical_origin
       ? { metadataBase: new URL(config.seo.canonical_origin) }
       : {}),
+    // A vector favicon: same sun-over-roof mark as the header wordmark, a few
+    // hundred bytes, and it adapts to any tab size. `public/favicon.svg` is
+    // same-origin, which the CSP's `img-src 'self'` requires.
+    icons: { icon: [{ url: "/favicon.svg", type: "image/svg+xml" }] },
   };
 }
 
@@ -41,6 +45,13 @@ export default async function RootLayout({
   return (
     <html lang={locale}>
       <body>
+        {/*
+          The brand green, so the mobile browser chrome matches the page instead
+          of framing it in default grey. Declared here rather than as a token
+          because a meta tag cannot read a CSS custom property.
+        */}
+        <meta name="theme-color" content="#0f6b4f" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#0c1210" media="(prefers-color-scheme: dark)" />
         <a className="skip-link" href="#contenu">
           Aller au contenu
         </a>

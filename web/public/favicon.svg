@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mon Projet Solaire">
+  <rect width="64" height="64" rx="14" fill="#0f6b4f"/>
+  <circle cx="32" cy="23" r="8" fill="#f2a71b"/>
+  <path d="M32 8v5M32 33v5M17 23h5M42 23h5M21.4 12.4l3.5 3.5M39.1 30.1l3.5 3.5M42.6 12.4l-3.5 3.5M24.9 30.1l-3.5 3.5"
+        stroke="#f2a71b" stroke-width="3" stroke-linecap="round"/>
+  <path d="M12 48 32 36l20 12v6H12z" fill="#ffffff"/>
+  <path d="M18 49h28" stroke="#0f6b4f" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
