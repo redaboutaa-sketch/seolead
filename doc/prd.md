@@ -149,3 +149,26 @@ detail:
    exists to close — on the pages that render owner-approved legal text.
 
 `TRACER SL-T2` in `doc/plan.md` repairs a violation of (1) without touching (2).
+
+### NFR-PERF-WIRE — What the visitor downloads is a cost someone pays
+
+The site's own stylesheet states the constraint in its header: *"every kilobyte of
+CSS is a kilobyte the visitor on 4G in a Walloon village pays for."* That is a
+product position, not a developer preference — this site's audience is Belgian
+homeowners on domestic connections, and the pages that matter most are the ones a
+visitor sees before deciding whether to stay.
+
+The requirement, stated so a tracer can be measured against it:
+
+1. **Bytes on the wire are the measure, not bytes on disk.** A resource is as
+   large as what the browser actually receives, after content negotiation.
+2. **The best available encoding must reach the visitor.** Where the
+   infrastructure can serve a smaller representation and does not, that is a
+   defect regardless of whether any single component is misconfigured.
+3. **No route may lose compression as a side effect of a change to another
+   route.** Compression is a property of the deployment, and it has to be true
+   everywhere or it is not a property.
+
+`TRACER SL-T3` in `doc/plan.md` repairs a violation of (2) and, in doing so,
+closes a latent violation of (3).
+

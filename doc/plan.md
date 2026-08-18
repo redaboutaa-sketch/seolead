@@ -292,6 +292,10 @@ dynamic responses at a faster, weaker one — the same HTML re-gzipped at `-9` i
 compress instead, which is a second variable and does not belong in a security
 fix. Recorded as a follow-up, not smuggled in.
 
+**Done by `TRACER SL-T3` below — and the follow-up turned out to be worth more
+than this note estimated: the real figure was 19.7 kB → 10.6 kB, not 19.7 → 13.7,
+because Traefik serves brotli rather than a better gzip.**
+
 ### Rollback
 
 `docker tag seolead/web:rollback-pre-csp-fix seolead/web:0.1.0 && docker compose
@@ -303,3 +307,119 @@ the current production state: broken CSP on four routes, no visible symptom.
 apex / www / legal / preview unchanged; all three noindex mechanisms unchanged;
 zero CSP violations in a real browser at 1440, 1024 and 390; a Client Component
 hydrates; an injected inline script is still refused.
+
+
+---
+
+## TRACER SL-T3 — The edge compresses, because it compresses better
+
+**Owning requirement:** `NFR-PERF-WIRE` in `doc/prd.md`.
+
+### The defect
+
+Two compressors sat in the request path, and the weaker one won every
+negotiation.
+
+Next's built-in compressor speaks **only gzip**. Traefik 3.7, which fronts every
+public request, speaks **brotli and zstd** and prefers brotli. A browser offers
+`gzip, deflate, br, zstd` in one header. Next saw `gzip`, compressed, and Traefik
+could not improve on a response that already carried a `Content-Encoding`. So the
+visitor received the worst algorithm available, on every request.
+
+`SL-T2` noticed the symptom and mis-sized it, estimating a 5.8 kB recovery from
+matching gzip's old compression level. The real figure is larger, and for a
+different reason.
+
+### Measured, on production
+
+| Accept-Encoding | Encoding served | Homepage document |
+|---|---|---|
+| `gzip, deflate, br, zstd` (a real browser) | gzip | **19 737 B** |
+| `br, gzip` | gzip | 19 746 B |
+| `zstd, gzip` | gzip | 19 690 B |
+| `br` alone | br | **10 624 B** |
+| `zstd` alone | zstd | 12 303 B |
+| `br, zstd` | br | 10 624 B |
+| `identity` | none | 67 594 B |
+
+The pattern is unambiguous: **whenever `gzip` appears in the request, gzip is
+what comes back**, whatever else was on offer.
+
+### Root cause
+
+`DOUBLE_COMPRESSION_LAYER_CONFLICT`.
+
+Not "Traefik is misconfigured" and not "Next compresses badly" — both components
+behave exactly as documented. The defect is in the composition: an inner
+compressor with a narrower algorithm set answers first, and content negotiation
+has no mechanism to reconsider.
+
+Discriminated rather than assumed:
+
+| Test | Result |
+|---|---|
+| Does the backend alone emit brotli? | No — `Accept-Encoding: br` against `127.0.0.1:3100` returns 67 594 B, identity. Next is gzip-only |
+| Does Traefik compress when the backend does not? | Yes — the same request through the edge returns 10 624 B of brotli |
+| Which does Traefik prefer? | brotli — `br, zstd` and `zstd, br` both return br |
+| Is the gap the compression *level* or the *algorithm*? | Algorithm. The same HTML at `gzip -9` is 13 651 B; brotli reaches 10 624 B |
+
+### Why the gap is widest on the document
+
+Next stores cached routes pre-compressed at a high level and compresses streamed
+dynamic responses at a fast, weak one. Since `SL-T2` every route is dynamic, so
+every document takes the weak path. Static assets were never as badly affected —
+CSS 4 711 → 4 395 B, a chunk 1 672 → 1 570 B — because they are not streamed.
+
+The saving is therefore concentrated exactly where it matters: the HTML document
+on the critical path.
+
+### The fix
+
+1. `compress: false` in `next.config.ts`. One line. The app stops answering the
+   negotiation and Traefik gets to choose.
+2. `monprojetsolaire-compress` added to the **preview** router's middleware chain
+   in `infra/traefik/docker-compose.public.yml`.
+
+Point 2 is not incidental. That router carried `preview-auth` and
+`security-headers` and no compression — it was covered only by Next's gzip. Left
+alone, this change would have silently started serving ~55 kB of raw HTML to the
+one person the preview route exists for. Found by reading the chain, not by
+waiting for someone to notice.
+
+Traefik's encoding order is left at its default. It already prefers brotli, which
+is the smallest of the three here; forcing an order would be a second decision
+with no measured benefit.
+
+### What this costs
+
+Anything reaching the app **without** passing through Traefik is now served
+uncompressed. That is the loopback `127.0.0.1:3100`, which exists for operator
+diagnostics and carries no bandwidth cost — and raw HTML is easier to read in
+`curl` anyway.
+
+### Regression matrix
+
+| Mutation | Bites |
+|---|---|
+| Remove `compress: false` | Yes — the config assertion, and the wire test sees gzip instead of br |
+| Remove compress from the preview router | Yes — the router-chain assertion |
+| Remove compress from the apex router | Yes — same assertion, and every wire test |
+| Serve a document route uncompressed | Yes — "compresses every document route" |
+
+The suite splits by vantage point. Source assertions run anywhere. Wire
+assertions require Traefik and run only against an `https://` base URL; against
+the loopback backend the opposite is asserted — that the app compresses nothing —
+so neither environment silently skips its half of the contract.
+
+### Rollback
+
+`docker tag seolead/web:rollback-pre-compress seolead/web:0.1.0 && docker compose
+up -d --no-deps seolead_web`. Reverting restores Next's gzip; the preview router
+keeps the extra middleware harmlessly, since Traefik will not re-compress an
+already-encoded response.
+
+### Production acceptance
+
+A browser-like `Accept-Encoding` must return `content-encoding: br` on every
+document route; the homepage must be under 14 kB on the wire; `/preview` must be
+compressed behind its auth; and the three indexing refusals must be untouched.
