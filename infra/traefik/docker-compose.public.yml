@@ -61,8 +61,15 @@ services:
       traefik.http.routers.monprojetsolaire-preview.tls: "true"
       traefik.http.routers.monprojetsolaire-preview.tls.certresolver: letsencrypt
       traefik.http.routers.monprojetsolaire-preview.service: monprojetsolaire
+      # `monprojetsolaire-compress` is on this chain deliberately.
+      #
+      # The application no longer compresses anything (`compress: false` in
+      # next.config.ts, so Traefik's brotli is not pre-empted by Next's gzip).
+      # This router did not carry the middleware, and without it the preview
+      # route would have quietly started serving ~55 kB of uncompressed HTML to
+      # the one person the route exists for.
       traefik.http.routers.monprojetsolaire-preview.middlewares: >-
-        monprojetsolaire-preview-auth,monprojetsolaire-security-headers
+        monprojetsolaire-preview-auth,monprojetsolaire-security-headers,monprojetsolaire-compress
       traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.users: "${SEOLEAD_PREVIEW_BASICAUTH}"
       traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.realm: "Apercu - contenu non publie"
       traefik.http.middlewares.monprojetsolaire-preview-auth.basicauth.removeheader: "true"
