@@ -141,6 +141,23 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    /*
+     * Only the final step may submit.
+     *
+     * Without this guard, advancing from step 4 to step 5 submitted the form.
+     * React reuses the same DOM button for "Continuer" and for the submit
+     * action — same position, same element — and it flushes a discrete click
+     * synchronously. So `next()` ran, the re-render retyped that very button
+     * from `type="button"` to `type="submit"`, and the browser then applied the
+     * submit default action to a click the visitor meant as "continue". The
+     * visitor landed on the contact step already showing two red errors for
+     * fields they had not been offered yet, and a spurious FORM_SUBMITTED event
+     * was recorded.
+     *
+     * Nothing about the payload, the fields or the validation rules changes
+     * here; this only refuses a submission the visitor never asked for.
+     */
+    if (stepIndex !== steps.length - 1) return;
     if (!validateStep()) return;
     setStatus("sending");
     track("FORM_SUBMITTED", { form: config.conversion.form_id });
@@ -255,11 +272,16 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
           </button>
         ) : null}
         {isLast ? (
-          <button type="submit" className="button" disabled={status === "sending"}>
+          <button
+            key="submit"
+            type="submit"
+            className="button button--large"
+            disabled={status === "sending"}
+          >
             {status === "sending" ? "Envoi…" : config.conversion.primary_cta_label}
           </button>
         ) : (
-          <button type="button" className="button" onClick={next}>
+          <button key="next" type="button" className="button button--large" onClick={next}>
             Continuer
           </button>
         )}
