@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 
 import "./globals.css";
 import { Footer, Header, StagingBanner } from "@/components/Layout";
@@ -35,11 +36,47 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
+/**
+ * Every route is rendered at request time. This is a security requirement, not a
+ * preference.
+ *
+ * `middleware.ts` mints a Content-Security-Policy nonce per request, and Next
+ * stamps that nonce onto the scripts it generates by reading the CSP header off
+ * the *request*. A statically prerendered page is built when no request exists,
+ * so there is no nonce to stamp — and the response header still carries a fresh
+ * one. Every script on such a page is then refused.
+ *
+ * That was not theoretical. Before this call, production served `/`,
+ * `/confidentialite`, `/conditions` and the 404 from the full route cache, and a
+ * browser reported 26, 16, 16 and 15 CSP violations on them respectively. The
+ * pages still painted only because they ship no Client Component: nothing
+ * hydrated, so nothing could blank. A single interactive component would have
+ * reproduced the blank-page bug the CSP nonce exists to have fixed — a
+ * reproduction route carrying one `useState` component measured `hydrated: no`.
+ *
+ * Next's own documentation is unambiguous: "To use a nonce, your page must be
+ * dynamically rendered ... Static pages are generated at build time, when no
+ * request or response headers exist—so no nonce can be injected."
+ *
+ * `connection()` is the documented opt-in, and it lives HERE rather than in each
+ * page for one reason: a per-page opt-in is a rule someone has to remember. A new
+ * route added next month would be static by default, would carry no nonce, and
+ * would fail silently — a broken page with HTTP 200 and complete HTML, which is
+ * precisely the failure mode this codebase has already been bitten by once. At
+ * the root it cannot be forgotten.
+ *
+ * `connection()` rather than `export const dynamic = "force-dynamic"`: the latter
+ * also flips the default fetch cache to `no-store`, which would put the SEO Lead
+ * Factory API on the path of every request. `connection()` only says "wait for a
+ * request before rendering", so `lib/api.ts` keeps its `revalidate` data cache and
+ * the API is still called at most once per revalidation window.
+ */
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  await connection();
   const config = await getSiteConfig();
   const locale = config?.default_language ?? "fr";
   return (

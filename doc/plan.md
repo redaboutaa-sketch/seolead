@@ -166,3 +166,140 @@ Not fixed here because the fix belongs to `middleware.ts` or `next.config.ts`,
 both of which SL-T1 is explicitly forbidden to touch, and because it is a
 security-policy change rather than a presentation one. It deserves its own
 tracer.
+
+**Resolved by `TRACER SL-T2` below.**
+
+
+---
+
+## TRACER SL-T2 — Every page can satisfy the policy that protects it
+
+**Owning requirement:** `NFR-SEC-CSP` in `doc/prd.md`. No product story is
+created: nobody needs to ask for a security policy that works, and inventing a
+`US-SL-nn` for a defect would put a bug in the product backlog.
+
+### The defect
+
+`middleware.ts` mints a CSP nonce per request. Next stamps that nonce onto the
+scripts it generates by reading the CSP header off the **request**, during
+server-side rendering. Four routes were statically prerendered — `/`,
+`/confidentialite`, `/conditions` and the 404 — and a prerendered page is built
+when no request exists. Their HTML therefore carried either no nonce at all
+(fresh build) or a frozen one belonging to whichever request last populated the
+route cache (after an ISR revalidation), while the response header carried a
+fresh nonce every time. Every script on those pages was refused.
+
+Measured on production before the fix: **26 CSP violations on `/`, 16 on
+`/confidentialite`, 15 on a reproduction route.** The pages still painted only
+because none of them shipped a Client Component — nothing hydrated, so nothing
+could blank.
+
+### Root cause
+
+`STATIC_RENDERING_INCOMPATIBLE_WITH_REQUEST_NONCE`.
+
+Not "the nonce is missing" — that is the symptom. The cause is an architecture
+contradiction: a nonce must be unpredictable per response, and a prerendered
+response is fixed at build. Next's documentation states the constraint directly:
+*"To use a nonce, your page must be dynamically rendered ... Static pages are
+generated at build time, when no request or response headers exist—so no nonce
+can be injected."*
+
+Proven by discrimination, not inference:
+
+| Test | Result |
+|---|---|
+| Does the header nonce vary per request? | Yes, every request |
+| Does the prerendered body nonce vary? | No — constant across requests, or absent on a fresh build |
+| Does forcing dynamic rendering fix it, changing nothing else? | **Yes — 15 violations → 0, `hydrated: no` → `hydrated: yes`** |
+| Does request-header propagation work on dynamic routes? | Yes — header and body nonce identical, 0 violations |
+| Is `'strict-dynamic'` to blame? | No. Removing it *worsened* the failure: 26 → 19 violations but the page then **blanked** (`__next_f` empty, 2 page errors) — the original bug this CSP was written to fix |
+
+### Options evaluated
+
+- **A — dynamic rendering everywhere.** Proven to work. Costs the full route
+  cache on four low-traffic noindex pages. **Selected.**
+- **B — static-safe CSP (hashes / experimental `sri`).** Rejected on evidence,
+  not taste: Next's SRI support is experimental, App-Router-only, and documented
+  as unable to handle *dynamically generated scripts* — which is exactly what the
+  inline RSC payload (`self.__next_f.push(...)`) is. Its content changes with page
+  data, so no build-time hash set can cover an ISR re-render.
+- **C — hybrid: static routes get a nonce-free policy.** Rejected. The only
+  non-nonce directive that admits the inline RSC payload is `'unsafe-inline'`,
+  which `NFR-SEC-CSP` (2) forbids — and it would apply precisely to the legal
+  pages.
+- **D — propagation fix.** Falsified. Propagation demonstrably works; dynamic
+  routes were already correct.
+
+### The fix
+
+`await connection()` in `app/layout.tsx`. Three deliberate choices:
+
+- **At the root, not per page.** A per-page opt-in is a rule someone has to
+  remember; a route added next month would be static by default and would fail
+  silently, with HTTP 200 and complete HTML. At the root it cannot be forgotten.
+- **`connection()` rather than `dynamic = "force-dynamic"`.** The latter also
+  flips the default fetch cache to `no-store`, putting the SEO Lead Factory API
+  on the path of every request. Verified: after the fix, 12 homepage requests
+  produced **0** API calls — the fetch-level data cache is intact.
+- **Nothing in the policy changed.** Same directives, same nonce, same
+  `'strict-dynamic'`, no `'unsafe-inline'`, no `'unsafe-eval'`.
+
+One comment in `middleware.ts` was also corrected. It claimed that setting the
+CSP only on the response "would leave them unstamped and reproduce the original
+bug". Measured on Next 15.5.23: removing `x-nonce`, or the request CSP header, or
+both, changes nothing — only the response header is load-bearing. The lines stay
+(they are the documented pattern and guard against a version change), but a false
+claim in security-critical code is worse than none.
+
+### Security invariant
+
+Every page must satisfy its enforced CSP with zero browser violations caused by
+framework-required scripts — **without** any directive being relaxed. Asserted by
+`web/tests/csp.browser.test.ts`, which fails if `script-src` gains
+`'unsafe-inline'`, `'unsafe-eval'` or a wildcard, and which proves enforcement by
+splicing an un-nonced inline script into the served HTML and requiring the
+browser to refuse it.
+
+### Regression matrix
+
+| Mutation | Bites |
+|---|---|
+| Remove `await connection()` | **Yes** — 9 failures across render-mode and CSP suites |
+| Add `'unsafe-inline'` to `script-src` | **Yes** |
+| Remove the CSP response header | **Yes** — 9 failures |
+| Remove request-header propagation | **No, and correctly so** — inert on this Next version; recorded above rather than papered over |
+
+`web/tests/render-mode.test.ts` catches the cause one layer earlier and with no
+server running: it asserts the build prerenders nothing, by reading
+`prerender-manifest.json` and looking for emitted `.html`.
+
+### Cost
+
+| | Before | After |
+|---|---|---|
+| `/` median TTFB (loopback) | 9.3 ms | 21.6 ms |
+| `/confidentialite` | 5.9 ms | 13.7 ms |
+| `/conditions` | 5.3 ms | 12.3 ms |
+| API calls per 12 homepage requests | 0 | 0 |
+| `/` HTML, gzipped | 13.9 kB | 19.8 kB |
+
+The TTFB change is ~7–12 ms of server render on pages whose network round trip
+from Belgium is several times that. The transfer change is real and worth naming:
+Next stores cached routes pre-compressed at a high level and compresses streamed
+dynamic responses at a faster, weaker one — the same HTML re-gzipped at `-9` is
+13.7 kB. Recovering it means disabling Next's compression and letting Traefik
+compress instead, which is a second variable and does not belong in a security
+fix. Recorded as a follow-up, not smuggled in.
+
+### Rollback
+
+`docker tag seolead/web:rollback-pre-csp-fix seolead/web:0.1.0 && docker compose
+up -d --no-deps seolead_web`. Reverting restores the pre-fix behaviour, which is
+the current production state: broken CSP on four routes, no visible symptom.
+
+### Production acceptance
+
+apex / www / legal / preview unchanged; all three noindex mechanisms unchanged;
+zero CSP violations in a real browser at 1440, 1024 and 390; a Client Component
+hydrates; an injected inline script is still refused.

@@ -51,9 +51,21 @@ export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = buildCsp(nonce);
 
-  // Next looks for the nonce on the REQUEST's CSP header to stamp its own
-  // scripts. Setting it only on the response would leave them unstamped and
-  // reproduce the original bug with extra steps.
+  /*
+   * Both request headers are set because Next's documented pattern sets both,
+   * and because which one it reads has changed between versions.
+   *
+   * Measured on Next 15.5.23 while fixing the prerender defect (TRACER SL-T2):
+   * removing `x-nonce`, or the request CSP header, or BOTH, changes nothing —
+   * every script is still stamped with the right nonce. Only removing the
+   * *response* header breaks it. An earlier comment here asserted the opposite,
+   * that response-only "would leave them unstamped"; that is not true of this
+   * version, and a false claim in security-critical code is worse than none.
+   *
+   * They stay anyway. They cost one header each, they are what the framework
+   * documents, and relying on an undocumented behaviour that happens to work
+   * today is how this file earns its next incident.
+   */
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("content-security-policy", csp);
