@@ -527,6 +527,17 @@ same link, so fixing only the header would have fixed half a 404.
    `NAV_LABELS`, publication from `listPublished()` — the same source the sitemap
    and the homepage's published-pages section already use. The day the owner
    publishes at that path, the link returns by itself.
+4. The stale route path itself. Fixing (3) alone removed the 404 but left the
+   site with no navigation to its only published page, which is a worse answer
+   than the question deserved. The published content's **own canonical** is
+   `/prix-panneaux-solaires-belgique`; the route entry said
+   `/prix-panneaux-solaires`. The configuration was what had gone stale — the
+   content has been published at the longer slug since Phase 4 — so the entry now
+   matches the canonical and the navigation works again.
+
+   The guard in (3) stays. Both mechanisms now agree, and the one that does not
+   depend on someone keeping two files in step is the one that runs at render
+   time.
 
 The scoping of (1) is load-bearing. Applied to `/:path*`, the new header
 downgraded `/_next/static` from `public, max-age=31536000, immutable` to

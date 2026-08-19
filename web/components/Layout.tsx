@@ -6,7 +6,7 @@ import type { PublishedContentDTO, SiteConfigDTO } from "@/lib/types";
 const NAV_LABELS: Record<string, Record<string, string>> = {
   fr: {
     "/": "Accueil",
-    "/prix-panneaux-solaires": "Prix",
+    "/prix-panneaux-solaires-belgique": "Prix",
     "/outils/estimation-solaire": "Estimation",
     "/demande-etude": "Demander une étude",
   },
