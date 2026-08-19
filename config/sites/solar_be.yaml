@@ -66,7 +66,16 @@ seo:
   # publishes nothing by itself.
   allow_publication: true
   default_title_suffix: "Mon Projet Solaire"
-  default_meta_description: null
+  # Lighthouse flagged the homepage, /confidentialite and /conditions as having
+  # no meta description. It was masked by the deliberate noindex failure in the
+  # same category, so the SEO score looked like one intentional problem when it
+  # was two problems, one of them real and waiting for launch day.
+  #
+  # Derived from copy already on the page rather than written fresh: it asserts
+  # nothing the site does not already say.
+  default_meta_description: >-
+    Photovoltaïque résidentiel en Belgique : décrivez votre projet en quelques
+    questions, et lisez des montants qui disent d'où ils viennent.
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
