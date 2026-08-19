@@ -564,6 +564,32 @@ and a test now asserts the assets stay immutable.
 | Re-link an unpublished landing page in the nav or footer | Yes — the link-integrity test walks every internal `href` |
 | Ship a web font, a raster hero or a new client library | Yes — the transfer budget |
 
+### The LCP question, answered properly
+
+After deployment, production Lighthouse runs reported LCP at 1.6–1.7 s against a
+1.28 s baseline. On the tracer named for LCP, that could not be waved away as
+noise, so it was attributed rather than assumed: both builds were served side by
+side on loopback and measured with Lighthouse three times each, alternating
+between them so any drift fell on both.
+
+| | LCP median | runs | TBT | TTFB | Performance |
+|---|---|---|---|---|---|
+| Before SL-T4 | **3 375 ms** | 3375 / 4130 / 3373 | 102 ms | 58 ms | 91 |
+| After SL-T4 | **3 363 ms** | 3374 / 3363 / 3334 | 76 ms | 22 ms | 92 |
+
+Twelve milliseconds apart, far inside the spread of either column. **There is no
+LCP regression.** The production swing was measurement variance, and the reason it
+looked like a regression is that the baseline was a *single run* — the same error,
+in a fourth costume, as the three below.
+
+(Loopback LCP is ~3.4 s against production's ~1.7 s because nothing is compressed
+without Traefik in front, so Lantern models roughly three times the payload. That
+is `SL-T3` showing up as a cross-check nobody asked for.)
+
+The LCP element itself is the hero lede paragraph — text, not the illustration.
+Measured under emulated mobile conditions it paints at 508–632 ms. Lighthouse
+scores the metric 0.99.
+
 ### A note on instruments
 
 The first bfcache measurement was a Playwright harness that navigated away, went
@@ -572,8 +598,15 @@ after it, including with `--enable-back-forward-cache`. It was not measuring the
 server at all. Lighthouse can, because it asks Chrome for the blocking reasons over
 CDP, and that is what recorded 0 → 1. The harness was dropped rather than tuned:
 an instrument that cannot distinguish the two states is not a slow instrument, it
-is the wrong one. Third measurement error in this series, and the same shape as the
-other two.
+is the wrong one.
+
+That was the third measurement error in this series, and the single-run LCP
+baseline above was the fourth. They share a shape worth naming, because it is the
+one that keeps recurring: **a number was taken once, under conditions that were
+not controlled, and then treated as a fact to reason from.** The probe that used a
+convenient `Accept-Encoding` instead of a real one, the byte count read after
+transparent decompression, the bfcache harness blind to bfcache, and a baseline of
+one Lighthouse run — all four looked like measurements and were not.
 
 ### Deployment note
 
