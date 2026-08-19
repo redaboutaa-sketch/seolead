@@ -3,7 +3,7 @@ import { connection } from "next/server";
 
 import "./globals.css";
 import { Footer, Header, StagingBanner } from "@/components/Layout";
-import { getSiteConfig } from "@/lib/api";
+import { getSiteConfig, listPublished } from "@/lib/api";
 
 /**
  * `metadataBase` comes from the site's configured canonical origin, never from the
@@ -79,6 +79,10 @@ export default async function RootLayout({
   await connection();
   const config = await getSiteConfig();
   const locale = config?.default_language ?? "fr";
+  // The header needs to know what is actually published before it links to it.
+  // This is the same cached fetch the homepage already makes, so it costs a
+  // cache lookup rather than a round trip.
+  const published = await listPublished(locale);
   return (
     <html lang={locale}>
       <body>
@@ -93,9 +97,9 @@ export default async function RootLayout({
           Aller au contenu
         </a>
         <StagingBanner config={config} />
-        <Header config={config} locale={locale} />
+        <Header config={config} locale={locale} published={published} />
         <main id="contenu">{children}</main>
-        <Footer config={config} locale={locale} />
+        <Footer config={config} locale={locale} published={published} />
       </body>
     </html>
   );

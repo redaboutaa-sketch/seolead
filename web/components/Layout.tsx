@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { brandName, knownRoutesForLocale, localizedPath } from "@/lib/site";
-import type { SiteConfigDTO } from "@/lib/types";
+import type { PublishedContentDTO, SiteConfigDTO } from "@/lib/types";
 
 const NAV_LABELS: Record<string, Record<string, string>> = {
   fr: {
@@ -58,10 +58,42 @@ export function StagingBanner({ config }: { config: SiteConfigDTO | null }) {
   );
 }
 
-export function Header({ config, locale }: { config: SiteConfigDTO | null; locale: string }) {
-  const routes = knownRoutesForLocale(config, locale).filter(
-    (route) => route.type !== "LEGAL" && route.type !== "CONVERSION",
+/**
+ * The route list in `solar_be.yaml` declares which paths the site MAY link to.
+ * For `TOOL` and `CONVERSION` routes that is the same thing as which paths
+ * exist, because those are application routes. For `LANDING_PAGE` routes it is
+ * not: their existence depends on the owner having published the content.
+ *
+ * The header treated the two as identical and shipped a link to
+ * `/prix-panneaux-solaires`, which returns 404 — the published price page lives
+ * at `prix-panneaux-solaires-belgique`. The mechanism whose stated purpose is
+ * that "a link cannot ship pointing at a page that does not exist" was doing
+ * exactly that, in the primary navigation, and spending an RSC prefetch on it
+ * with every page load.
+ *
+ * A landing-page route is now rendered only when something is actually
+ * published at that path. Nothing is invented to do it: the label still comes
+ * from `NAV_LABELS`, and publication comes from `listPublished()`, the same
+ * source the sitemap and the homepage's published-pages section already use.
+ * The day the owner publishes at that path, the link reappears on its own.
+ */
+export function Header({
+  config,
+  locale,
+  published = [],
+}: {
+  config: SiteConfigDTO | null;
+  locale: string;
+  published?: PublishedContentDTO[];
+}) {
+  const publishedPaths = new Set(
+    published.map((item) => localizedPath(config, item.locale, `/${item.slug}`)),
   );
+  const routes = knownRoutesForLocale(config, locale).filter((route) => {
+    if (route.type === "LEGAL" || route.type === "CONVERSION") return false;
+    if (route.type !== "LANDING_PAGE") return true;
+    return publishedPaths.has(localizedPath(config, locale, route.path));
+  });
   const labels = NAV_LABELS[locale] ?? {};
   const formPath = "/demande-etude";
   const hasForm = config?.routes.some((route) => route.path === formPath) ?? false;
@@ -103,10 +135,28 @@ export function Header({ config, locale }: { config: SiteConfigDTO | null; local
   );
 }
 
-export function Footer({ config, locale }: { config: SiteConfigDTO | null; locale: string }) {
+export function Footer({
+  config,
+  locale,
+  published = [],
+}: {
+  config: SiteConfigDTO | null;
+  locale: string;
+  published?: PublishedContentDTO[];
+}) {
   const all = knownRoutesForLocale(config, locale);
   const legal = all.filter((route) => route.type === "LEGAL");
-  const pages = all.filter((route) => route.type !== "LEGAL" && route.path !== "/");
+  // Same rule as the header, for the same reason: the footer was shipping the
+  // identical link to an unpublished landing page, so removing it from one place
+  // and not the other would have fixed half a 404.
+  const publishedPaths = new Set(
+    published.map((item) => localizedPath(config, item.locale, `/${item.slug}`)),
+  );
+  const pages = all.filter((route) => {
+    if (route.type === "LEGAL" || route.path === "/") return false;
+    if (route.type !== "LANDING_PAGE") return true;
+    return publishedPaths.has(localizedPath(config, locale, route.path));
+  });
   const labels = NAV_LABELS[locale] ?? {};
   return (
     <footer className="site-footer">

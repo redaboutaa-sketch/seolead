@@ -64,6 +64,40 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        /*
+         * `Cache-Control` without `no-store`, so the back/forward cache works.
+         *
+         * Since every route became request-rendered (TRACER SL-T2), Next's
+         * default for a dynamic response is
+         * `private, no-cache, no-store, max-age=0, must-revalidate`. The
+         * `no-store` in there disqualifies the page from Chrome's back/forward
+         * cache outright: Lighthouse reported `MainResourceHasCacheControlNoStore`
+         * and `JsNetworkRequestReceivedCacheControlNoStoreResource`, and pressing
+         * Back re-fetched and re-rendered the whole page.
+         *
+         * That matters most on the qualification flow, where Back is a normal
+         * thing to press.
+         *
+         * `no-cache` stays: the browser may keep a copy but must revalidate
+         * before reusing it, so nobody is served a stale page. It is safe here
+         * because dynamic responses carry no `ETag` — there is no 304 path that
+         * could pair a stored body with a freshly minted CSP nonce, which would
+         * have reintroduced the SL-T2 bug through the cache.
+         *
+         * `_next/static` is excluded deliberately: those files are
+         * content-hashed and must keep `public, max-age=31536000, immutable`.
+         * Applying this header to `/:path*` silently downgraded them, which is a
+         * far worse regression than the one being fixed.
+         */
+        source: "/((?!_next/static|_next/image).*)",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "private, no-cache, max-age=0, must-revalidate",
+          },
+        ],
+      },
+      {
         source: "/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },

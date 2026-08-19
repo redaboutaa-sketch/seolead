@@ -457,3 +457,122 @@ already-encoded response.
 A browser-like `Accept-Encoding` must return `content-encoding: br` on every
 document route; the homepage must be under 14 kB on the wire; `/preview` must be
 compressed behind its auth; and the three indexing refusals must be untouched.
+
+
+---
+
+## TRACER SL-T4 — What Lighthouse measured, and what it was hiding
+
+**Owning requirement:** `NFR-PERF-WIRE` in `doc/prd.md`, extended in practice to
+what the browser does with what it downloads, not only how much of it there is.
+
+### Baseline, before anything was changed
+
+Lighthouse against production, mobile preset (4G throttle, 4× CPU slowdown):
+
+| | |
+|---|---|
+| Performance | **97** |
+| Accessibility | **100** |
+| Best practices | **100** |
+| SEO | **54** |
+| LCP | 1.3 s (score 1.0) |
+| FCP | 1.0 s · Speed Index 1.0 s · CLS 0 · TTI 1.7 s |
+| TBT | 200 ms (score 0.9) |
+
+Desktop was 96 / 100 / 100 / 54 with LCP 0.6 s.
+
+**The site was already fast.** That is the finding the tracer opens with, because
+it changes what the work should be: not chasing a score, but reading what the
+score was covering for.
+
+### What the score was covering for
+
+Two real defects were invisible because a deliberate one sat next to them.
+
+**1 — SEO 54 was two problems, not one.** `is-crawlable` fails because the site
+refuses indexing; that is an owner decision and correct. `meta-description` was
+failing too — the homepage, `/confidentialite` and `/conditions` had none, because
+`seo.default_meta_description` is `null`. One red category, two causes, and the
+real one would have shipped on the day indexing was switched on.
+
+**2 — bf-cache scored 0, caused by `SL-T2`.** Making every route dynamic gave every
+document Next's default `private, no-cache, no-store, max-age=0, must-revalidate`.
+The `no-store` in there disqualifies a page from Chrome's back/forward cache
+outright — Lighthouse named it exactly: `MainResourceHasCacheControlNoStore` and
+`JsNetworkRequestReceivedCacheControlNoStoreResource`. Pressing Back re-fetched and
+re-rendered the whole page. That is worst precisely on the qualification flow,
+where Back is a normal thing to press.
+
+**3 — a 404 in the primary navigation**, found by reading the request list
+Lighthouse recorded rather than any audit. The header linked to
+`/prix-panneaux-solaires`; the published price page is at
+`prix-panneaux-solaires-belgique`. The route list declares which paths the site MAY
+link to, and the header treated that as which paths exist — true for `TOOL` and
+`CONVERSION` routes, which are application routes, false for `LANDING_PAGE` routes,
+whose existence depends on publication. The module whose stated purpose is that "a
+link cannot ship pointing at a page that does not exist" was shipping one, in the
+nav, and spending an RSC prefetch on it with every page load. The footer had the
+same link, so fixing only the header would have fixed half a 404.
+
+### Fixed
+
+1. `Cache-Control: private, no-cache, max-age=0, must-revalidate` on documents and
+   RSC payloads, via `next.config.ts` — `no-store` dropped, everything else kept.
+   Lighthouse `bf-cache` **0 → 1**.
+2. `seo.default_meta_description` supplied, derived from copy already on the page
+   so it asserts nothing new.
+3. Header and footer render a landing-page route only when something is actually
+   published at that path. Nothing invented: the label still comes from
+   `NAV_LABELS`, publication from `listPublished()` — the same source the sitemap
+   and the homepage's published-pages section already use. The day the owner
+   publishes at that path, the link returns by itself.
+
+The scoping of (1) is load-bearing. Applied to `/:path*`, the new header
+downgraded `/_next/static` from `public, max-age=31536000, immutable` to
+revalidate-every-time — a far worse regression than the one being fixed, caught
+only because it was measured. The source excludes `_next/static` and `_next/image`,
+and a test now asserts the assets stay immutable.
+
+### Declined, with the measurement that justifies declining
+
+| Finding | Measured | Why not |
+|---|---|---|
+| Render-blocking stylesheet | 4.5 kB, est. 150 ms | Needs `experimental.optimizeCss` and a new critical-CSS dependency, on a page whose LCP already scores 1.0 |
+| Legacy JavaScript | est. 10 kB *uncompressed* (~3 kB brotli), inside Next's vendor chunk | Governed by browserslist. Dropping it narrows the supported browser matrix — a product decision, not a build tweak, for ~3 kB |
+| Total Blocking Time 200 ms | score 0.9 | React hydration of a page with no interactive component. Reducing it means not hydrating, which is an architecture change |
+| `polyfills-*.js`, 38 kB brotli | **0 bytes** | Checked and cleared: it carries `noModule`, and the Lighthouse network log confirms a modern browser never requests it |
+
+### Regression matrix
+
+| Mutation | Bites |
+|---|---|
+| Restore `no-store` on documents | Yes — the bfcache assertions |
+| Apply the cache header to `/:path*` | Yes — the immutable-asset assertion |
+| Remove the meta description | Yes — three browser assertions and two Python ones |
+| Re-link an unpublished landing page in the nav or footer | Yes — the link-integrity test walks every internal `href` |
+| Ship a web font, a raster hero or a new client library | Yes — the transfer budget |
+
+### A note on instruments
+
+The first bfcache measurement was a Playwright harness that navigated away, went
+back, and read `event.persisted`. It reported `false` before the fix and `false`
+after it, including with `--enable-back-forward-cache`. It was not measuring the
+server at all. Lighthouse can, because it asks Chrome for the blocking reasons over
+CDP, and that is what recorded 0 → 1. The harness was dropped rather than tuned:
+an instrument that cannot distinguish the two states is not a slow instrument, it
+is the wrong one. Third measurement error in this series, and the same shape as the
+other two.
+
+### Deployment note
+
+This is the first tracer to require **both** containers. `config/sites/*.yaml` is
+baked into `seolead/api` by `COPY config /app/config`, so the meta description does
+not reach the site until the API image is rebuilt. `seolead_web` must be deployed
+after it, or the browser assertions fail against a stale config.
+
+### Rollback
+
+`docker tag seolead/web:rollback-pre-lighthouse seolead/web:0.1.0` and
+`docker tag seolead/api:rollback-pre-lighthouse seolead/api:0.2.0`, then
+`docker compose up -d --no-deps seolead_api seolead_web`.

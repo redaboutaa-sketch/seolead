@@ -563,3 +563,29 @@ class TestSiteConfiguration:
         blob = str(generic.model_dump()).lower()
         for term in ("panneau", "solaire", "kwc", "belgique"):
             assert term not in blob
+
+
+class TestSeoMetadataCompleteness:
+    """Lighthouse SEO findings that were invisible behind the deliberate noindex.
+
+    The category was already failing on `is-crawlable`, which is an owner
+    decision and correct. A second, real failure in the same category —
+    no meta description on the homepage or the legal pages — therefore looked
+    like the same one problem, and would have shipped on launch day.
+    """
+
+    def test_the_solar_site_supplies_a_default_meta_description(self):
+        site = load_site("solar_be")
+        description = site.seo.default_meta_description
+        assert description, "no default meta description; every page inherits none"
+        assert len(description) > 40, "a meta description this short is not one"
+        assert len(description) < 320, "far past what any engine will show"
+
+    def test_the_description_claims_nothing_the_site_cannot_support(self):
+        # The site's whole position is that it does not assert what it cannot
+        # source. A meta description is still copy, so it is held to the rule.
+        description = load_site("solar_be").seo.default_meta_description or ""
+        for forbidden in ("gratuit garanti", "meilleur prix", "économisez", "%"):
+            assert forbidden.lower() not in description.lower(), (
+                f"meta description asserts {forbidden!r}, which nothing supports"
+            )
