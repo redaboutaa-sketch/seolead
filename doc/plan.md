@@ -261,6 +261,83 @@ framework-required scripts — **without** any directive being relaxed. Asserted
 splicing an un-nonced inline script into the served HTML and requiring the
 browser to refuse it.
 
+### La CSS bloquante, reprise et mesurée — 2026-08-19
+
+Le tableau ci-dessus déclinait cette optimisation sur un raisonnement de coût :
+mécanisme expérimental, dépendance supplémentaire, page déjà rapide. Reprise
+avec des instruments plutôt qu'un argument.
+
+**Ce que le navigateur reçoit.** `/_next/static/css/20acb8d7a347b761.css` —
+**4 395 octets** brotli, 21 241 non compressés, servi
+`public, max-age=31536000, immutable`. Un `<link rel="stylesheet">`, même
+origine, découvert à l'analyse du HTML.
+
+**Couverture, aux trois largeurs** (CDP `CSSCoverage`) :
+
+| Largeur | Utilisé | Inutilisé |
+|---|---|---|
+| 390 | 11 719 B (55,2 %) | 9 518 B |
+| 1024 | 11 934 B (56,2 %) | 9 303 B |
+| 1440 | 11 934 B (56,2 %) | 9 303 B |
+
+Stable d'une largeur à l'autre : l'inutilisé n'est pas du hors-écran, ce sont
+les regles des AUTRES routes. En transfert, ces 44 % pesent ~1,9 kB brotli.
+
+**Le fait qui decide.** Cinq mesures mobiles (4G emulee, CPU x4) sur la
+production, puis l'ordre d'achevement des ressources avant la premiere
+peinture :
+
+```
+417 ms  webpack.js
+429 ms  la feuille de style        <- elle finit ICI
+437 ms  page.js
+446 ms  main-app.js
+501 ms  619.js                     <- derniere ressource avant peinture
+724 ms  FCP
+```
+
+La CSS termine **72 ms avant** le dernier JavaScript bloquant et **295 ms
+avant** la peinture. L'intervalle 501 -> 724 ms n'est pas du reseau : c'est le
+fil principal sous throttling x4. **La feuille de style n'est pas la contrainte
+qui retient la peinture** ; supprimer son aller-retour ne deplacerait pas le
+FCP, parce que ce n'est pas elle qu'on attend.
+
+Baseline, 5 executions : TTFB median 103 ms (86-174), FCP median 764 ms
+(684-1060), LCP median identique au FCP -- l'element LCP est le paragraphe
+d'accroche, deja note en tete de ce tracer.
+
+**Une experience invalide, et ce qu'elle a appris.** Un premier candidat
+inlinait la CSS dans le HTML et mesurait -4 ms. Le compteur de requetes integre
+a la mesure a montre `cssRequests=5` : le candidat **telechargeait encore la
+feuille**. React App Router la reinjecte depuis la charge RSC -- l'URL apparait
+trois fois dans le HTML, dont `:HL[...,"style"]` et
+`{"rel":"stylesheet","precedence":"next"}`. Retirer le `<link>` ne retire donc
+pas la requete. Le -4 ms ne mesurait rien, et c'est le compteur qui l'a dit.
+
+Cinquieme erreur de mesure de la serie, et la premiere attrapee par
+l'instrument lui-meme plutot qu'apres coup.
+
+**Sur la CSP, une objection qui n'existe pas.** `style-src` vaut deja
+`'self' 'unsafe-inline'` ; seul `script-src` est en nonce + `strict-dynamic`.
+Inliner du style n'exigerait donc aucun affaiblissement. L'objection est
+ailleurs.
+
+**Ou elle est vraiment.** Next 15.5.23 n'expose `optimizeCss` que sous
+`experimental`, et son implementation fait `require('critters')` -- paquet
+absent de l'installation, et predecesseur deprecie de `beasties`. Le cout reste
+entier : drapeau experimental plus dependance non maintenue, pour retirer un
+aller-retour dont on vient de prouver qu'il ne retient rien.
+
+**Decision : aucune action.** `RENDER_BLOCKING_CSS_NO_ACTION_JUSTIFIED`.
+Le seuil pose avant l'experience -- une amelioration FCP ou LCP repetable --
+n'est pas atteignable, puisque la ressource visee n'est pas sur le chemin
+critique effectif. Les ~1,9 kB de regles d'autres routes seraient recuperables
+par decoupage, mais cela ne changerait pas la peinture et ajouterait de la
+complexite de build a une page notee 99.
+
+Si ce sujet revient : la contrainte a mesurer est l'execution JavaScript entre
+501 et 724 ms, pas la feuille de style.
+
 ### Regression matrix
 
 | Mutation | Bites |
@@ -549,7 +626,7 @@ and a test now asserts the assets stay immutable.
 
 | Finding | Measured | Why not |
 |---|---|---|
-| Render-blocking stylesheet | 4.5 kB, est. 150 ms | Needs `experimental.optimizeCss` and a new critical-CSS dependency, on a page whose LCP already scores 1.0 |
+| Render-blocking stylesheet | 4 395 B brotli, est. 150 ms | Repris et **mesuré** le 2026-08-19 — voir plus bas. L'estimation est théorique : la feuille n'est pas la contrainte qui retient la peinture |
 | Legacy JavaScript | est. 10 kB *uncompressed* (~3 kB brotli), inside Next's vendor chunk | Governed by browserslist. Dropping it narrows the supported browser matrix — a product decision, not a build tweak, for ~3 kB |
 | Total Blocking Time 200 ms | score 0.9 | React hydration of a page with no interactive component. Reducing it means not hydrating, which is an architecture change |
 | `polyfills-*.js`, 38 kB brotli | **0 bytes** | Checked and cleared: it carries `noModule`, and the Lighthouse network log confirms a modern browser never requests it |
