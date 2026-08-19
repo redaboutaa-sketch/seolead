@@ -225,7 +225,11 @@ conversion:
 # so a link cannot ship pointing at a page that does not exist.
 routes:
   - {path: /, type: HOME, locales: [fr, nl]}
-  - {path: /prix-panneaux-solaires, type: LANDING_PAGE, locales: [fr]}
+  # The published page's own canonical is /prix-panneaux-solaires-belgique. This
+  # entry said /prix-panneaux-solaires, so the declared route and the canonical
+  # disagreed and the navigation linked to a 404. The configuration is what was
+  # stale here — the content has been published at the longer slug since Phase 4.
+  - {path: /prix-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
   - {path: /demande-etude, type: CONVERSION, locales: [fr]}
   - {path: /confidentialite, type: LEGAL, locales: [fr]}
