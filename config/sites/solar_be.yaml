@@ -120,7 +120,10 @@ conversion:
     - key: consumption
       title: "Votre consommation"
       description: "Facultatif — utile pour affiner l'estimation."
-      fields: [annual_consumption_kwh, monthly_bill_eur, battery_interest]
+      # `monthly_bill_eur` retiré — DEC-P5A-QUAL-06 : « not collected and later
+      # discarded: NOT COLLECTED ». Le contrat ne le porte pas, et une donnée
+      # collectée pour être jetée est une promesse implicite non tenue.
+      fields: [annual_consumption_kwh, battery_interest]
       i18n:
         nl:
           title: "[NL — À TRADUIRE PAR UN NATIF] Votre consommation"
@@ -231,14 +234,6 @@ conversion:
       max: 100000
       i18n:
         nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Consommation annuelle (kWh)"}
-    - key: monthly_bill_eur
-      type: number
-      label: "Facture mensuelle moyenne (€)"
-      required: false
-      min: 0
-      max: 10000
-      i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Facture mensuelle moyenne (€)"}
     - key: battery_interest
       type: choice
       label: "Une batterie domestique vous intéresse-t-elle ?"
