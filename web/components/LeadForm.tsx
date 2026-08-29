@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { localizedText } from "@/lib/site";
 import type { FormField, FormStep, SiteConfigDTO } from "@/lib/types";
 
 /**
@@ -19,6 +20,83 @@ import type { FormField, FormStep, SiteConfigDTO } from "@/lib/types";
  */
 
 type Values = Record<string, string | boolean>;
+
+/**
+ * The form's own chrome, per locale. Field labels come from the site config
+ * (with their own `i18n` blocks); these are the strings the component itself
+ * owns. `fr` is the fallback for any locale absent here.
+ *
+ * The `nl` entries are PLACEHOLDERS, deliberately not translated: every one is
+ * marked « À TRADUIRE PAR UN NATIF » and shows the French text after the
+ * marker. Machine translation is refused on principle — an approximate label on
+ * a qualification form costs leads and trust, and nobody proofreads a machine.
+ */
+interface UiStrings {
+  consentRequired: string;
+  fieldRequired: string;
+  emailInvalid: string;
+  postcodeInvalid: string;
+  numberExpected: string;
+  minValue: (bound: number) => string;
+  maxValue: (bound: number) => string;
+  stepLabel: (current: number, total: number) => string;
+  defaultHeading: string;
+  back: string;
+  next: string;
+  sending: string;
+  optionalSuffix: string;
+  doneTitle: string;
+  doneMessage: string;
+  failMessage: string;
+  unreadableMessage: string;
+}
+
+const NL_TODO = "[NL — À TRADUIRE PAR UN NATIF] ";
+
+const FR_STRINGS: UiStrings = {
+  consentRequired: "Cette autorisation est nécessaire pour continuer.",
+  fieldRequired: "Ce champ est nécessaire.",
+  emailInvalid: "Cette adresse e-mail ne semble pas valide.",
+  postcodeInvalid: "Code postal belge attendu (4 chiffres).",
+  numberExpected: "Un nombre est attendu.",
+  minValue: (bound) => `Valeur minimale : ${bound}.`,
+  maxValue: (bound) => `Valeur maximale : ${bound}.`,
+  stepLabel: (current, total) => `Étape ${current} sur ${total}`,
+  defaultHeading: "Votre demande",
+  back: "Retour",
+  next: "Continuer",
+  sending: "Envoi…",
+  optionalSuffix: " (facultatif)",
+  doneTitle: "Demande enregistrée",
+  doneMessage:
+    "Merci — votre demande est enregistrée. Nous revenons vers vous avec une estimation adaptée à votre situation.",
+  failMessage:
+    "Votre demande n'a pas pu être enregistrée. Vérifiez vos réponses et réessayez.",
+  unreadableMessage: "Votre demande n'a pas pu être enregistrée.",
+};
+
+const UI_STRINGS: Record<string, UiStrings> = {
+  fr: FR_STRINGS,
+  nl: {
+    consentRequired: `${NL_TODO}Cette autorisation est nécessaire pour continuer.`,
+    fieldRequired: `${NL_TODO}Ce champ est nécessaire.`,
+    emailInvalid: `${NL_TODO}Cette adresse e-mail ne semble pas valide.`,
+    postcodeInvalid: `${NL_TODO}Code postal belge attendu (4 chiffres).`,
+    numberExpected: `${NL_TODO}Un nombre est attendu.`,
+    minValue: (bound) => `${NL_TODO}Valeur minimale : ${bound}.`,
+    maxValue: (bound) => `${NL_TODO}Valeur maximale : ${bound}.`,
+    stepLabel: (current, total) => `${NL_TODO}Étape ${current} sur ${total}`,
+    defaultHeading: `${NL_TODO}Votre demande`,
+    back: `${NL_TODO}Retour`,
+    next: `${NL_TODO}Continuer`,
+    sending: `${NL_TODO}Envoi…`,
+    optionalSuffix: ` ${NL_TODO.trim()}(facultatif)`,
+    doneTitle: `${NL_TODO}Demande enregistrée`,
+    doneMessage: `${NL_TODO}Merci — votre demande est enregistrée. Nous revenons vers vous avec une estimation adaptée à votre situation.`,
+    failMessage: `${NL_TODO}Votre demande n'a pas pu être enregistrée. Vérifiez vos réponses et réessayez.`,
+    unreadableMessage: `${NL_TODO}Votre demande n'a pas pu être enregistrée.`,
+  },
+};
 
 interface Props {
   config: SiteConfigDTO;
@@ -49,6 +127,8 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
   const startedAt = useRef<number>(Date.now());
   const startedReported = useRef(false);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
+
+  const t = UI_STRINGS[locale] ?? FR_STRINGS;
 
   const step = steps[stepIndex];
   const stepFields = useMemo(
@@ -99,29 +179,29 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
       const value = values[field.key];
       if (field.type === "consent") {
         if (field.required && value !== true) {
-          found[field.key] = "Cette autorisation est nécessaire pour continuer.";
+          found[field.key] = t.consentRequired;
         }
         continue;
       }
       const text = typeof value === "string" ? value.trim() : "";
       if (field.required && !text) {
-        found[field.key] = "Ce champ est nécessaire.";
+        found[field.key] = t.fieldRequired;
         continue;
       }
       if (!text) continue;
       if (field.type === "email" && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(text)) {
-        found[field.key] = "Cette adresse e-mail ne semble pas valide.";
+        found[field.key] = t.emailInvalid;
       }
       if (field.type === "postcode" && field.pattern && !new RegExp(field.pattern).test(text)) {
-        found[field.key] = "Code postal belge attendu (4 chiffres).";
+        found[field.key] = t.postcodeInvalid;
       }
       if (field.type === "number") {
         const numeric = Number(text);
-        if (Number.isNaN(numeric)) found[field.key] = "Un nombre est attendu.";
+        if (Number.isNaN(numeric)) found[field.key] = t.numberExpected;
         else if (field.min !== undefined && numeric < field.min)
-          found[field.key] = `Valeur minimale : ${field.min}.`;
+          found[field.key] = t.minValue(field.min);
         else if (field.max !== undefined && numeric > field.max)
-          found[field.key] = `Valeur maximale : ${field.max}.`;
+          found[field.key] = t.maxValue(field.max);
       }
     }
     setErrors(found);
@@ -206,24 +286,19 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
 
     if (response && response.ok) {
       setStatus("done");
-      setMessage(
-        "Merci — votre demande est enregistrée. Nous revenons vers vous avec une estimation adaptée à votre situation.",
-      );
+      setMessage(t.doneMessage);
       track("LEAD_CREATED", { form: config.conversion.form_id });
       return;
     }
     setStatus("error");
     const body = response ? await response.json().catch(() => ({})) : {};
-    setMessage(
-      (body as { message?: string }).message ??
-        "Votre demande n'a pas pu être enregistrée. Vérifiez vos réponses et réessayez.",
-    );
+    setMessage((body as { message?: string }).message ?? t.failMessage);
   }
 
   if (status === "done") {
     return (
       <div className="lead-form" role="status" aria-live="polite">
-        <h2>Demande enregistrée</h2>
+        <h2>{t.doneTitle}</h2>
         <p>{message}</p>
       </div>
     );
@@ -239,20 +314,24 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
           <div className="form-progress__fill" style={{ width: `${progress}%` }} />
         </div>
         <p className="form-progress__label" aria-live="polite">
-          Étape {stepIndex + 1} sur {steps.length}
-          {step?.title ? ` — ${step.title}` : ""}
+          {t.stepLabel(stepIndex + 1, steps.length)}
+          {step ? ` — ${localizedText(step, locale, "title")}` : ""}
         </p>
       </div>
 
       <h2 tabIndex={-1} ref={headingRef}>
-        {step?.title ?? "Votre demande"}
+        {(step && localizedText(step, locale, "title")) ?? t.defaultHeading}
       </h2>
-      {step?.description ? <p>{step.description}</p> : null}
+      {step && localizedText(step, locale, "description") ? (
+        <p>{localizedText(step, locale, "description")}</p>
+      ) : null}
 
       {stepFields.map((field) => (
         <Field
           key={field.key}
           field={field}
+          locale={locale}
+          strings={t}
           value={values[field.key]}
           error={errors[field.key]}
           onChange={setValue}
@@ -279,7 +358,7 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
             className="button button--ghost"
             onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
           >
-            Retour
+            {t.back}
           </button>
         ) : null}
         {isLast ? (
@@ -289,11 +368,11 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
             className="button button--large"
             disabled={status === "sending"}
           >
-            {status === "sending" ? "Envoi…" : config.conversion.primary_cta_label}
+            {status === "sending" ? t.sending : config.conversion.primary_cta_label}
           </button>
         ) : (
           <button key="next" type="button" className="button button--large" onClick={next}>
-            Continuer
+            {t.next}
           </button>
         )}
       </div>
@@ -309,11 +388,15 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
 
 function Field({
   field,
+  locale,
+  strings,
   value,
   error,
   onChange,
 }: {
   field: FormField;
+  locale: string;
+  strings: UiStrings;
   value: string | boolean | undefined;
   error?: string;
   onChange: (key: string, value: string | boolean) => void;
@@ -321,7 +404,9 @@ function Field({
   const id = `field-${field.key}`;
   const errorId = `${id}-error`;
   const helpId = `${id}-help`;
-  const describedBy = [field.help ? helpId : null, error ? errorId : null]
+  const label = localizedText(field, locale, "label") ?? field.label;
+  const help = localizedText(field, locale, "help");
+  const describedBy = [help ? helpId : null, error ? errorId : null]
     .filter(Boolean)
     .join(" ");
 
@@ -338,8 +423,8 @@ function Field({
             onChange={(event) => onChange(field.key, event.target.checked)}
           />
           <span>
-            {field.label}
-            {field.required ? "" : " (facultatif)"}
+            {label}
+            {field.required ? "" : strings.optionalSuffix}
           </span>
         </label>
         {error ? (
@@ -356,8 +441,8 @@ function Field({
       <div className="field">
         <fieldset aria-describedby={describedBy || undefined}>
           <legend>
-            {field.label}
-            {field.required ? "" : " (facultatif)"}
+            {label}
+            {field.required ? "" : strings.optionalSuffix}
           </legend>
           <div className="choice-list">
             {(field.options ?? []).map((option) => (
@@ -369,14 +454,14 @@ function Field({
                   checked={value === option.value}
                   onChange={() => onChange(field.key, option.value)}
                 />
-                <span>{option.label}</span>
+                <span>{localizedText(option, locale, "label") ?? option.label}</span>
               </label>
             ))}
           </div>
         </fieldset>
-        {field.help ? (
+        {help ? (
           <p className="field__help" id={helpId}>
-            {field.help}
+            {help}
           </p>
         ) : null}
         {error ? (
@@ -394,8 +479,8 @@ function Field({
   return (
     <div className="field">
       <label htmlFor={id}>
-        {field.label}
-        {field.required ? "" : " (facultatif)"}
+        {label}
+        {field.required ? "" : strings.optionalSuffix}
       </label>
       <input
         id={id}
@@ -420,9 +505,9 @@ function Field({
         aria-required={field.required || undefined}
         onChange={(event) => onChange(field.key, event.target.value)}
       />
-      {field.help ? (
+      {help ? (
         <p className="field__help" id={helpId}>
-          {field.help}
+          {help}
         </p>
       ) : null}
       {error ? (

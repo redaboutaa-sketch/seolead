@@ -98,9 +98,20 @@ export interface PublishedContentDTO {
   preview?: boolean;
 }
 
+/**
+ * Per-locale text overrides, keyed by locale then by text key. The base fields
+ * (label, help, title, description) are the default locale's text AND the
+ * fallback: a missing i18n key must render the base text, never a blank.
+ */
+export type I18nOverrides = Record<
+  string,
+  { label?: string; help?: string; title?: string; description?: string }
+>;
+
 export interface FormFieldOption {
   value: string;
   label: string;
+  i18n?: I18nOverrides;
 }
 
 export interface FormField {
@@ -121,6 +132,7 @@ export interface FormField {
   consent_channel?: string;
   consent_version?: string;
   pending_legal_review?: boolean;
+  i18n?: I18nOverrides;
 }
 
 export interface FormStep {
@@ -128,6 +140,7 @@ export interface FormStep {
   title: string;
   description?: string;
   fields: string[];
+  i18n?: I18nOverrides;
 }
 
 export interface SiteConfigDTO {
