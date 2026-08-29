@@ -318,3 +318,32 @@ class ConversionType(StrEnum):
     CALLBACK_REQUEST = "CALLBACK_REQUEST"
     CONTACT = "CONTACT"
     TOOL_COMPLETION = "TOOL_COMPLETION"
+
+
+class ConsentPurpose(StrEnum):
+    """What a consent checkbox authorises. One purpose per case, never bundled.
+
+    The vocabulary is ours; the mapping onto a destination's vocabulary (e.g.
+    Prospect 360's `consent_records.type`) belongs to the export contract, not
+    here. `PROCESSING` is the only purpose a site may require — the others are
+    real choices, and a required choice is not one.
+    """
+
+    PROCESSING = "PROCESSING"            # traiter la demande elle-même
+    FOLLOWUP_CONTACT = "FOLLOWUP_CONTACT"  # recontact au sujet de LA demande, par canal
+    MARKETING = "MARKETING"              # communications commerciales
+    PARTNER_TRANSFER = "PARTNER_TRANSFER"  # transmission à un partenaire nommé
+
+
+class ConsentChannel(StrEnum):
+    """The channel a FOLLOWUP_CONTACT or MARKETING consent names.
+
+    A channel-less marketing consent exists (the current live checkbox) and is
+    represented by the ABSENCE of a channel, never by inventing one — writing
+    `EMAIL` for a text that names no channel would manufacture consent.
+    """
+
+    PHONE = "PHONE"
+    WHATSAPP = "WHATSAPP"
+    EMAIL = "EMAIL"
+    SMS = "SMS"

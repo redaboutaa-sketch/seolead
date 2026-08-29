@@ -488,6 +488,16 @@ class TestContentSanitization:
 
 # ─── Site configuration ──────────────────────────────────────────────────────
 
+def _with_validated_consents(base: dict) -> dict:
+    """Leaving staging also requires no consent case still marked
+    `pending_legal_review`; tests that model a launch must model that step."""
+    fields = [
+        {k: v for k, v in field.items() if k != "pending_legal_review"}
+        for field in base["conversion"]["fields"]
+    ]
+    return {**base, "conversion": {**base["conversion"], "fields": fields}}
+
+
 class TestSiteConfiguration:
     def test_solar_be_has_its_domain_and_is_still_not_indexable(self):
         """The domain arriving must not, on its own, make the site indexable.
@@ -509,7 +519,7 @@ class TestSiteConfiguration:
             SiteConfig(**raw)
 
     def test_a_site_with_no_domain_may_not_leave_staging(self):
-        raw = load_site("solar_be").model_dump()
+        raw = _with_validated_consents(load_site("solar_be").model_dump())
         raw["domain"] = None
         raw["staging"] = False
         raw["seo"] = {**raw["seo"], "canonical_origin": None,
@@ -518,7 +528,7 @@ class TestSiteConfiguration:
             SiteConfig(**raw)
 
     def test_indexability_needs_all_three_conditions(self):
-        base = load_site("solar_be").model_dump()
+        base = _with_validated_consents(load_site("solar_be").model_dump())
         base.update(staging=False)
         base["seo"] = {**base["seo"], "allow_indexing": True}
         assert SiteConfig(**base).is_indexable is True

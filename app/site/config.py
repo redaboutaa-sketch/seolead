@@ -21,9 +21,18 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.enums import ConsentChannel, ConsentPurpose
 from app.core.errors import SeoLeadError
 
 SITE_DIR = Path(__file__).resolve().parents[2] / "config" / "sites"
+
+# Purposes the two historical checkbox keys have always meant. Inference exists
+# for THEM only, so existing site files stay valid; any other consent field must
+# declare `consent_purpose` explicitly or the loader refuses the file.
+_LEGACY_CONSENT_PURPOSES = {
+    "consent_processing": ConsentPurpose.PROCESSING.value,
+    "consent_marketing": ConsentPurpose.MARKETING.value,
+}
 
 
 class InvalidSite(SeoLeadError):
@@ -151,6 +160,45 @@ class SiteConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _check_consent_definitions(self) -> "SiteConfig":
+        """Every consent case must be resolvable, and unvalidated text must not
+        be able to leave staging.
+
+        The second rule is the same shape as the indexing gate: a consent field
+        marked `pending_legal_review: true` may exist only while the site is
+        staging. The day someone flips `staging: false` with a placeholder
+        consent text still in the form, the loader refuses the configuration
+        instead of letting a non-validated legal text collect real consent.
+        """
+        for field in self.conversion.fields:
+            if field.get("type") != "consent" or not field.get("key"):
+                continue
+            key = str(field["key"])
+            purpose = field.get("consent_purpose") or \
+                _LEGACY_CONSENT_PURPOSES.get(key)
+            if purpose not in {p.value for p in ConsentPurpose}:
+                raise ValueError(
+                    f"consent field {key!r} has no resolvable purpose: declare "
+                    f"consent_purpose as one of "
+                    f"{sorted(p.value for p in ConsentPurpose)}")
+            channel = field.get("consent_channel")
+            if channel is not None and \
+                    channel not in {c.value for c in ConsentChannel}:
+                raise ValueError(
+                    f"consent field {key!r} names unknown channel {channel!r}")
+            if field.get("required") and purpose != ConsentPurpose.PROCESSING.value:
+                raise ValueError(
+                    f"consent field {key!r} ({purpose}) may not be required: "
+                    f"only PROCESSING consent may condition the submission — a "
+                    f"forced choice is not consent")
+            if field.get("pending_legal_review") and not self.staging:
+                raise ValueError(
+                    f"consent field {key!r} carries pending_legal_review and "
+                    f"the site is not staging: a non-validated consent text "
+                    f"must never collect real consent")
+        return self
+
+    @model_validator(mode="after")
     def _check_publication_safety(self) -> "SiteConfig":
         if not self.domain and not self.staging:
             raise ValueError(
@@ -212,6 +260,33 @@ class SiteConfig(BaseModel):
 
     def field_definitions(self) -> dict[str, dict]:
         return {f["key"]: f for f in self.conversion.fields if f.get("key")}
+
+    def consent_definitions(self) -> list[dict]:
+        """Every consent case the form offers, fully resolved.
+
+        The version rule is the point: `consent_version` on the field wins, and
+        `legal.consent_version` is the fallback — which is exactly what the two
+        historical checkboxes have always recorded. The day a validated text
+        lands, the change is one YAML edit (label + version + drop
+        `pending_legal_review`), and every new capture records the new version
+        with no code change.
+        """
+        cases: list[dict] = []
+        for field in self.conversion.fields:
+            if field.get("type") != "consent" or not field.get("key"):
+                continue
+            key = str(field["key"])
+            cases.append({
+                "key": key,
+                "purpose": field.get("consent_purpose")
+                or _LEGACY_CONSENT_PURPOSES[key],
+                "channel": field.get("consent_channel"),
+                "version": str(field.get("consent_version")
+                               or self.legal.consent_version),
+                "required": bool(field.get("required")),
+                "pending_legal_review": bool(field.get("pending_legal_review")),
+            })
+        return cases
 
 
 def _load(path: Path) -> SiteConfig:

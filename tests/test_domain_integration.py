@@ -13,6 +13,20 @@ import yaml
 
 from app.site.config import SiteConfig, available_sites, load_site
 
+
+def _with_validated_consents(base: dict) -> dict:
+    """Simulate the day counsel-validated consent texts land.
+
+    Leaving staging now ALSO requires that no consent case is still marked
+    `pending_legal_review` — a launch with placeholder consent text is refused
+    by the loader. Tests that model a launch must model that step too.
+    """
+    fields = [
+        {k: v for k, v in field.items() if k != "pending_legal_review"}
+        for field in base["conversion"]["fields"]
+    ]
+    return {**base, "conversion": {**base["conversion"], "fields": fields}}
+
 DOMAIN = "monprojetsolaire.be"
 ORIGIN = "https://monprojetsolaire.be"
 OVERLAY = Path("infra/traefik/docker-compose.public.yml")
@@ -88,7 +102,7 @@ class TestDomainDoesNotEnableIndexing:
 
     def test_launching_needs_two_deliberate_changes_not_one(self):
         """`staging: false` AND `allow_indexing: true`, together."""
-        base = load_site("solar_be").model_dump()
+        base = _with_validated_consents(load_site("solar_be").model_dump())
 
         only_staging_off = {**base, "staging": False}
         assert SiteConfig(**only_staging_off).is_indexable is False
@@ -119,7 +133,7 @@ class TestPublicationAndIndexingAreSeparateGates:
 
     def test_indexing_still_requires_leaving_staging(self):
         """The stricter gate did not move."""
-        base = load_site("solar_be").model_dump()
+        base = _with_validated_consents(load_site("solar_be").model_dump())
         base["seo"] = {**base["seo"], "allow_indexing": True}
         with pytest.raises(ValueError, match="may not allow indexing"):
             SiteConfig(**base)
@@ -129,7 +143,7 @@ class TestPublicationAndIndexingAreSeparateGates:
 
     def test_indexing_cannot_be_enabled_without_publication(self):
         """Indexing a page nobody can fetch is incoherent."""
-        base = load_site("solar_be").model_dump()
+        base = _with_validated_consents(load_site("solar_be").model_dump())
         base["staging"] = False
         base["seo"] = {**base["seo"], "allow_publication": False,
                        "allow_indexing": True}

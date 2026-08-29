@@ -24,9 +24,9 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import ConversionType, LeadState
+from app.core.enums import ConsentPurpose, ConversionType, LeadState
 from app.core.errors import SeoLeadError
-from app.models import CapturedLead, LeadAttribution, Site
+from app.models import CapturedLead, LeadAttribution, LeadConsent, Site
 from app.site.config import SiteConfig
 from app.site.spam_protection import (HeuristicSpamProtection,
                                       SpamProtectionProvider, SubmissionSignals)
@@ -64,6 +64,11 @@ class LeadSubmission:
     qualification: dict = field(default_factory=dict)
     consent_processing: bool = False
     consent_marketing: bool = False
+    # Per-case answers, keyed by the consent field key. The two booleans above
+    # remain the legacy spelling of the two historical cases; when a key appears
+    # here it wins, so a form that only speaks the new vocabulary works, and a
+    # form that only speaks the old one keeps working.
+    consents: dict = field(default_factory=dict)
     attribution: dict = field(default_factory=dict)
     signals: SubmissionSignals = field(default_factory=SubmissionSignals)
 
@@ -197,6 +202,45 @@ def _attribution_value(raw: dict, key: str, limit: int = 255) -> str | None:
     return _clean(raw.get(key), limit=limit)
 
 
+def _resolve_consents(submission: LeadSubmission, config: SiteConfig) -> list[dict]:
+    """Every consent case the form defines, with the answer this submission gave.
+
+    The site configuration is the authority on WHAT was asked (purpose, channel,
+    text version); the submission only supplies the answers. A key the client
+    sends that no configuration defines is dropped, exactly like an unknown
+    qualification key — the browser does not get to invent a consent case.
+
+    An unanswered case resolves to False: the checkbox was rendered and left
+    unticked, and that refusal is a fact worth a row. This holds because every
+    defined case is on the form; a case defined but not rendered would need a
+    different rule.
+    """
+    given = {str(k): bool(v) for k, v in (submission.consents or {}).items()}
+    legacy = {"consent_processing": submission.consent_processing,
+              "consent_marketing": submission.consent_marketing}
+    resolved: list[dict] = []
+    for case in config.consent_definitions():
+        key = case["key"]
+        granted = given[key] if key in given else bool(legacy.get(key, False))
+        resolved.append({**case, "granted": granted})
+    return resolved
+
+
+def _processing_granted(consentements: list[dict],
+                        submission: LeadSubmission) -> bool:
+    """Whether processing consent was given, whichever vocabulary carried it.
+
+    Falls back to the legacy boolean when no PROCESSING case is defined, so a
+    site whose YAML predates per-case definitions keeps its guarantee.
+    """
+    cases = [c for c in consentements
+             if c["purpose"] == ConsentPurpose.PROCESSING.value]
+    if cases:
+        return all(c["granted"] for c in cases if c["required"]) and \
+            any(c["granted"] for c in cases)
+    return bool(submission.consent_processing)
+
+
 async def capture_lead(
     session: AsyncSession, *, submission: LeadSubmission, site: Site,
     config: SiteConfig, vertical_code: str,
@@ -218,7 +262,9 @@ async def capture_lead(
         raise LeadRejected(
             f"unknown conversion type {submission.conversion_type!r}") from exc
 
-    if config.conversion.consent_required and not submission.consent_processing:
+    consentements = _resolve_consents(submission, config)
+    if config.conversion.consent_required and \
+            not _processing_granted(consentements, submission):
         raise LeadRejected("consent to process the request is required")
 
     email = normalize_email(submission.email)
@@ -233,6 +279,14 @@ async def capture_lead(
         language = config.default_language
 
     now = datetime.now(timezone.utc)
+    source_consentement = _clean((submission.attribution or {}).get("page_path"),
+                                 limit=255)
+    # The legacy marketing boolean mirrors the `consent_marketing` case when the
+    # configuration defines one, so the two spellings can never disagree on the
+    # row that export contract v1 reads.
+    marketing = next((c["granted"] for c in consentements
+                      if c["key"] == "consent_marketing"),
+                     bool(submission.consent_marketing))
     lead = CapturedLead(
         site_id=site.id, vertical_code=vertical_code,
         state=LeadState.NEW.value, conversion_type=conversion.value,
@@ -244,15 +298,25 @@ async def capture_lead(
                                     or qualification.get("postcode")),
         language=language,
         qualification=qualification,
-        consent_marketing=bool(submission.consent_marketing),
+        consent_marketing=marketing,
         consent_version=config.legal.consent_version,
         consent_timestamp=now,
-        consent_source=_clean((submission.attribution or {}).get("page_path"),
-                              limit=255),
+        consent_source=source_consentement,
         export_destination=(destination or LocalLeadDestination()).code,
     )
     session.add(lead)
     await session.flush()
+
+    # One row per case the form offered, granted or refused alike. The text
+    # version comes from the configuration at THIS instant — the same instant
+    # the legacy pair records — so each case stays answerable a year later:
+    # which text, what answer, when, from where.
+    for cas in consentements:
+        session.add(LeadConsent(
+            captured_lead_id=lead.id, consent_key=cas["key"],
+            purpose=cas["purpose"], channel=cas["channel"],
+            granted=cas["granted"], text_version=cas["version"],
+            granted_at=now, source=source_consentement))
 
     raw = submission.attribution or {}
     session.add(LeadAttribution(

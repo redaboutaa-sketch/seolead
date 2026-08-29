@@ -11,8 +11,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from app.core.enums import ConversionType, LeadState
-from app.models import CapturedLead, LeadAttribution, Site, SiteEvent, Vertical
+from app.core.enums import ConsentPurpose, ConversionType, LeadState
+from app.models import (CapturedLead, LeadAttribution, LeadConsent, Site,
+                        SiteEvent, Vertical)
 from app.site.config import load_site
 from app.site.lead_capture import (LeadRejected, LeadSubmission,
                                    LocalLeadDestination, capture_lead,
@@ -158,6 +159,139 @@ class TestLeadValidation:
         assert "annual_consumption_kwh" not in lead.qualification
 
 
+
+
+@pytest.mark.asyncio
+class TestPerCaseConsent:
+    """N independent consent cases, each with its own state, version and instant.
+
+    The legacy pair on `captured_lead` is untouched — export contract v1 reads
+    it — and these rows are what a v2 contract will read.
+    """
+
+    async def test_every_defined_case_gets_a_row_with_its_own_version(
+            self, session, solar_site):
+        await _capture(session, solar_site, consents={
+            "consent_processing": True, "consent_followup_phone": True})
+        rows = {r.consent_key: r
+                for r in (await session.execute(select(LeadConsent))).scalars()}
+
+        defined = {c["key"]: c for c in load_site("solar_be").consent_definitions()}
+        assert set(rows) == set(defined), \
+            "every case the form offers is recorded, granted or refused alike"
+        for key, row in rows.items():
+            assert row.text_version == defined[key]["version"]
+            assert row.purpose == defined[key]["purpose"]
+            assert row.channel == defined[key]["channel"]
+            assert row.granted_at is not None
+            assert row.source == "/demande-etude"
+
+        assert rows["consent_followup_phone"].granted is True
+        assert rows["consent_followup_phone"].channel == "PHONE"
+        assert rows["consent_followup_whatsapp"].granted is False, \
+            "an unticked case is a recorded refusal, not an absence"
+        assert rows["consent_partner_transfer"].granted is False
+        assert rows["consent_partner_transfer"].purpose == \
+            ConsentPurpose.PARTNER_TRANSFER.value
+
+    async def test_each_case_records_its_own_version_not_a_shared_one(
+            self, session, solar_site):
+        await _capture(session, solar_site)
+        versions = {r.consent_key: r.text_version
+                    for r in (await session.execute(select(LeadConsent))).scalars()}
+        assert versions["consent_processing"] == \
+            load_site("solar_be").legal.consent_version
+        assert versions["consent_partner_transfer"] == \
+            "solar-be-consent-partner-v0.0-NON-VALIDE"
+        assert len(set(versions.values())) > 1, \
+            "the whole point: versions differ per case"
+
+    async def test_the_new_vocabulary_alone_satisfies_processing_consent(
+            self, session, solar_site):
+        """A form speaking only `consents` works; the legacy boolean is not
+        secretly required."""
+        result = await _capture(session, solar_site, consent_processing=False,
+                                consents={"consent_processing": True})
+        assert result.state == LeadState.PENDING_EXPORT.value
+
+    async def test_the_new_vocabulary_can_refuse_what_the_old_one_granted(
+            self, session, solar_site):
+        """When both spellings are present, the per-case answer wins."""
+        with pytest.raises(LeadRejected, match="consent"):
+            await _capture(session, solar_site, consent_processing=True,
+                           consents={"consent_processing": False})
+
+    async def test_an_unknown_consent_key_is_dropped_not_stored(
+            self, session, solar_site):
+        await _capture(session, solar_site,
+                       consents={"consent_processing": True,
+                                 "consent_invented_by_a_bot": True})
+        keys = {r.consent_key
+                for r in (await session.execute(select(LeadConsent))).scalars()}
+        assert "consent_invented_by_a_bot" not in keys, \
+            "the browser does not get to invent a consent case"
+
+    async def test_the_legacy_marketing_column_mirrors_the_case_row(
+            self, session, solar_site):
+        await _capture(session, solar_site, consent_marketing=False,
+                       consents={"consent_processing": True,
+                                 "consent_marketing": True})
+        lead = (await session.execute(select(CapturedLead))).scalar_one()
+        row = (await session.execute(select(LeadConsent).where(
+            LeadConsent.consent_key == "consent_marketing"))).scalar_one()
+        assert lead.consent_marketing is True
+        assert row.granted is True, \
+            "the two spellings of marketing consent can never disagree"
+
+    async def test_changing_a_version_in_config_is_the_whole_change(
+            self, session, solar_site):
+        """THE acceptance criterion: the day a validated text lands, editing the
+        YAML version is sufficient for every new capture to record it."""
+        config = load_site("solar_be").model_copy(deep=True)
+        for field in config.conversion.fields:
+            if field.get("key") == "consent_partner_transfer":
+                field["consent_version"] = "solar-be-consent-partner-v1.0-2026-09-01"
+                field["pending_legal_review"] = False
+        await capture_lead(session, submission=_submission(
+            consents={"consent_processing": True,
+                      "consent_partner_transfer": True}),
+            site=solar_site, config=config, vertical_code="SOLAR_BE",
+            spam=AcceptAllSpamProtection())
+        row = (await session.execute(select(LeadConsent).where(
+            LeadConsent.consent_key == "consent_partner_transfer"))).scalar_one()
+        assert row.text_version == "solar-be-consent-partner-v1.0-2026-09-01"
+        assert row.granted is True
+
+    async def test_a_placeholder_consent_cannot_leave_staging(self):
+        """The loader is the gate: unvalidated consent text may exist only while
+        the site is staging — same shape as the indexing gate."""
+        from app.site.config import SiteConfig
+
+        raw = load_site("solar_be").model_dump()
+        raw["staging"] = False
+        raw["domain"] = "monprojetsolaire.be"
+        with pytest.raises(Exception, match="pending_legal_review"):
+            SiteConfig(**raw)
+
+    async def test_a_non_processing_consent_may_not_be_required(self):
+        from app.site.config import SiteConfig
+
+        raw = load_site("solar_be").model_dump()
+        for field in raw["conversion"]["fields"]:
+            if field.get("key") == "consent_marketing":
+                field["required"] = True
+        with pytest.raises(Exception, match="may not be required"):
+            SiteConfig(**raw)
+
+    async def test_a_consent_field_without_a_purpose_is_refused(self):
+        from app.site.config import SiteConfig
+
+        raw = load_site("solar_be").model_dump()
+        raw["conversion"]["fields"].append(
+            {"key": "consent_mystery", "type": "consent",
+             "label": "x", "required": False})
+        with pytest.raises(Exception, match="resolvable purpose"):
+            SiteConfig(**raw)
 
 
 @pytest.mark.asyncio

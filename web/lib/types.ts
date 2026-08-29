@@ -114,6 +114,13 @@ export interface FormField {
   min?: number;
   max?: number;
   max_length?: number;
+  // Consent-case metadata (type "consent" only). The server resolves purpose,
+  // channel and text version itself from the site config; these exist here so
+  // the form can mark a pending case visually and never has to hard-code keys.
+  consent_purpose?: string;
+  consent_channel?: string;
+  consent_version?: string;
+  pending_legal_review?: boolean;
 }
 
 export interface FormStep {

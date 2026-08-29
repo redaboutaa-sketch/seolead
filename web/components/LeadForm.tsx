@@ -163,15 +163,25 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
     track("FORM_SUBMITTED", { form: config.conversion.form_id });
 
     const contactKeys = new Set([
-      "first_name", "last_name", "email", "phone", "postcode",
-      "consent_processing", "consent_marketing", "honeypot",
+      "first_name", "last_name", "email", "phone", "postcode", "honeypot",
     ]);
+    // Consent cases are excluded from qualification by their TYPE, not by a
+    // hard-coded key list: a new case added in YAML must not leak into the
+    // qualification blob because nobody updated a set here.
+    const consentKeys = new Set(
+      fields.filter((field) => field.type === "consent").map((field) => field.key),
+    );
     const qualification: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(values)) {
-      if (contactKeys.has(key)) continue;
+      if (contactKeys.has(key) || consentKeys.has(key)) continue;
       if (value === "" || value === false) continue;
       qualification[key] = value;
     }
+
+    // Every consent case the form defines, answered true or false. An untouched
+    // checkbox is a refusal, and the server records it as one.
+    const consents: Record<string, boolean> = {};
+    for (const key of consentKeys) consents[key] = values[key] === true;
 
     const response = await fetch("/api/leads", {
       method: "POST",
@@ -187,6 +197,7 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
         qualification,
         consent_processing: values.consent_processing === true,
         consent_marketing: values.consent_marketing === true,
+        consents,
         attribution,
         honeypot: (values.honeypot as string) || "",
         elapsed_ms: Date.now() - startedAt.current,

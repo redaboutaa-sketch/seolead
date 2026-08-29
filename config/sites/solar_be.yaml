@@ -114,7 +114,8 @@ conversion:
       title: "Vos coordonnées"
       description: "Pour vous transmettre l'estimation."
       fields: [first_name, last_name, email, phone, consent_processing,
-               consent_marketing]
+               consent_followup_phone, consent_followup_whatsapp,
+               consent_marketing, consent_partner_transfer]
 
   fields:
     - key: owner_status
@@ -205,10 +206,19 @@ conversion:
       label: "Téléphone"
       required: false
       help: "Uniquement si vous souhaitez être rappelé."
-    # Two separate consents. Bundling them would make the necessary processing
-    # conditional on accepting marketing, which is not a real choice.
+    # Separate consents, one purpose per case. Bundling them would make the
+    # necessary processing conditional on accepting the rest, which is not a
+    # real choice.
+    #
+    # The two historical cases below keep their approved text UNCHANGED (version
+    # solar-be-consent-v1.0-2026-08-17, via legal.consent_version). The three
+    # cases marked `pending_legal_review: true` are MECHANICS ONLY: their labels
+    # are placeholders awaiting counsel-validated wording, the loader refuses to
+    # let them leave staging, and the day the texts land the whole change is
+    # label + consent_version + dropping the flag — per case, in this file.
     - key: consent_processing
       type: consent
+      consent_purpose: PROCESSING
       label: >-
         J'accepte que mes données personnelles soient traitées par BEAVER DATA
         GROUP, responsable du traitement de Solar Belgium, afin d'analyser ma
@@ -216,9 +226,41 @@ conversion:
         assurer le suivi de ma demande. J'ai pris connaissance de la Politique
         de confidentialité et je peux retirer mon consentement à tout moment.
       required: true
+    - key: consent_followup_phone
+      type: consent
+      consent_purpose: FOLLOWUP_CONTACT
+      consent_channel: PHONE
+      consent_version: "solar-be-consent-followup-phone-v0.0-NON-VALIDE"
+      pending_legal_review: true
+      label: >-
+        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
+        déployer] Consentement au suivi de la demande par TÉLÉPHONE.
+      required: false
+    - key: consent_followup_whatsapp
+      type: consent
+      consent_purpose: FOLLOWUP_CONTACT
+      consent_channel: WHATSAPP
+      consent_version: "solar-be-consent-followup-whatsapp-v0.0-NON-VALIDE"
+      pending_legal_review: true
+      label: >-
+        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
+        déployer] Consentement au suivi de la demande par WHATSAPP.
+      required: false
     - key: consent_marketing
       type: consent
+      consent_purpose: MARKETING
       label: "J'accepte de recevoir des informations sur les offres et conseils."
+      required: false
+    - key: consent_partner_transfer
+      type: consent
+      consent_purpose: PARTNER_TRANSFER
+      consent_version: "solar-be-consent-partner-v0.0-NON-VALIDE"
+      pending_legal_review: true
+      label: >-
+        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
+        déployer] Consentement à la transmission de la demande au partenaire
+        chargé de l'étude. La politique de confidentialité doit être mise à
+        jour AVANT toute activation.
       required: false
 
 # Routes the site knows about. Internal links may only target a path listed here,
