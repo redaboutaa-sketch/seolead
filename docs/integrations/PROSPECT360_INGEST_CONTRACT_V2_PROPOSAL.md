@@ -175,3 +175,71 @@ frappée ne change jamais de version.
    d'un texte traduit (une version par locale, ou une version couvrant ses
    traductions validées — la table `lead_consent` porte les deux sans
    migration).
+
+---
+
+## Addendum du 2026-08-30 — arbitrages rendus par techformanord
+
+Quatre des questions ouvertes ci-dessus sont tranchées. Elles sont consignées
+ici comme **décisions**, pas comme propositions. Le contrat n'est pas figé pour
+autant : rien n'est implémenté tant que le digest golden v2 n'existe pas.
+
+### 1. `consents[]` retenu
+
+Structure de liste, avec **unicité sur le couple `(purpose, channel)`** au
+niveau du DTO — un doublon est un 422, pas un dernier-gagne silencieux.
+
+L'ordre est déterministe et fait partie de la charge canonique : la règle
+« null avant valeur » devient une **clé de tri explicite**, pas un effet de bord
+du tri de Python sur des types mixtes. Concrètement, la clé est
+`(purpose, channel is not None, channel or "")` : une entrée sans canal précède
+les entrées canalisées de la même finalité, et celles-ci s'ordonnent par nom de
+canal. Une finalité sans canal (`PROCESSING`, `PARTNER_TRANSFER`) et une
+finalité canalisée (`FOLLOWUP_CONTACT:PHONE`) ne peuvent donc jamais permuter
+d'une exécution à l'autre.
+
+Sans cela, l'ordre d'affichage du formulaire changerait l'empreinte — la
+défaillance exacte que la règle de tri des clés de qualification v1 évite déjà.
+
+### 2. Un `PARTNER_TRANSFER` refusé n'est jamais un rejet
+
+Le lead est **ACCEPTÉ**. Le refus est **enregistré**, et le lead est **marqué
+non transmissible** côté plateforme.
+
+C'est la bonne décision et elle mérite d'être dite : rejeter en 4xx un
+visiteur qui a consenti au traitement mais pas à la transmission ferait
+disparaître de la base un lead parfaitement légitime, et transformerait un choix
+de l'utilisateur en erreur d'intégration. Le producteur n'a rien à faire de
+particulier : il envoie ce qui a été coché, y compris les refus.
+
+### 3. Route distincte, aucun champ de version dans le corps
+
+`POST /api/v2/lead-ingest`. Le discriminant est l'URL.
+
+La raison est structurelle : ajouter un `contract_version` au corps obligerait
+chaque DTO à l'accepter, donc à percer `extra: "forbid"` des deux côtés. Une
+charge v2 postée sur la route v1 doit rester un 422 franc, pas une négociation.
+Le `fingerprint_version` **reste dans la charge canonique** — il y est une
+identité de condensé, pas un champ de protocole, et il continue de garantir
+qu'un digest v1 et un digest v2 ne peuvent pas se confondre même à contenu
+identique.
+
+### 4. Les refus voyagent
+
+`granted: false` est transmis. La plateforme étend son statut avec **`refused`**,
+distinct de **`revoked`**.
+
+Cette distinction est celle que la table `lead_consent` porte déjà : une ligne
+`granted=false` est un refus au moment de la collecte ; une révocation est un
+retrait ultérieur d'un consentement qui avait été donné. Les confondre rendrait
+impossible de répondre à « cette personne a-t-elle jamais consenti ? », qui est
+la question qu'un régulateur pose.
+
+### Ce qui reste ouvert
+
+- Le registre des identifiants de campagne.
+- La sémantique de version d'un texte traduit (une version par locale, ou une
+  version couvrant ses traductions validées). Le NL n'étant pas encore traduit,
+  la question n'est pas urgente — mais elle doit être tranchée **avant** la
+  première charge portant une locale `nl`.
+- Le digest golden v2 et son arming record.
