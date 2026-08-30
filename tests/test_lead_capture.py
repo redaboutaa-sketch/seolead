@@ -550,8 +550,25 @@ class TestLeadLogging:
 
         caplog.set_level(logging.INFO)
         await _capture(session, solar_site)
-        logged = " ".join(record.getMessage() for record in caplog.records)
-        logged += " " + str([record.__dict__ for record in caplog.records])
+
+        # The message AND everything passed through `extra` — that is where a
+        # leak would actually land, and `extra` is invisible in `getMessage()`.
+        #
+        # LogRecord's OWN attributes are excluded, and that exclusion is the
+        # point: they carry no submitted data, but they do carry numbers.
+        # `relativeCreated` counts milliseconds since logging started, so in a
+        # full-suite run it reaches values like 21000.9 — which contains "1000",
+        # the postcode this test forbids. The haystack was failing the test at
+        # random, on evidence that was never a leak. `process` and `thread` are
+        # the same trap.
+        reserved = set(logging.LogRecord("x", logging.INFO, "p", 1, "m",
+                                         None, None).__dict__)
+        fragments = []
+        for record in caplog.records:
+            fragments.append(record.getMessage())
+            fragments += [f"{k}={v!r}" for k, v in record.__dict__.items()
+                          if k not in reserved]
+        logged = " ".join(fragments)
 
         for secret in ("test.person@example.be", "+32470123456", "Test", "Person",
                        "1000"):

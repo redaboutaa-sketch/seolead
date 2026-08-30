@@ -24,6 +24,14 @@ _BASE_RULES = """You are writing a page for a real business. Follow every rule.
 
 EVIDENCE
 - Use ONLY the supplied research facts. They are the only things you may state as fact.
+- They are also the SUBSTANCE of the page, not merely a permitted vocabulary. Build
+  the article on them: every supplied fact that belongs somewhere in the outline
+  must appear, stated faithfully and in its own words. A page that states three of
+  twelve researched facts tells the reader far less than was actually established,
+  and padding the gap with generalities is exactly what makes a page worthless.
+- Leave a fact out only when it genuinely fits nowhere in the outline. Never force
+  one in, never restate the same fact in several sections to look thorough, and
+  never turn a fact into a heading with no content under it.
 - If something is not in the supplied facts, either omit it or mark it explicitly as
   something the reader should verify.
 - Never invent a statistic, price, percentage, date, subsidy, tax rate, regulation,
@@ -119,7 +127,7 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
         "working_title": brief["recommended_title"],
         "outline": brief["outline"],
         "questions_to_answer": brief["key_questions"],
-        "facts_you_may_state": brief["required_facts"],
+        "facts_you_must_build_on": brief["required_facts"],
         "sources": brief["required_sources"],
         "limitations_you_must_respect": brief["missing_information"],
         "call_to_action": brief["cta_strategy"],
