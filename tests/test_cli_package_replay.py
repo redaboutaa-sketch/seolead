@@ -140,6 +140,37 @@ class TestPackageReplay:
         assert "supported" not in report
         assert "needs the full passage corpus" in report["note"]
 
+    async def test_a_claim_naming_no_region_is_not_reported_as_a_change(
+            self, session, replay):
+        """The defect the first live run exposed, pinned.
+
+        The builder stamps a region-less claim with the market
+        (`detect_region(text, default=region_for_market(market))`). Reading it
+        back with a bare `detect_region` returned UNKNOWN for every one of them
+        and reported a change on nearly all 139 claims — burying the three real
+        region corrections under a hundred artefacts.
+        """
+        facts = [{"claim": "Le rendement des panneaux solaires est en moyenne "
+                           "de 10 %.",
+                  "category": "GENERAL", "claim_risk": "LOW", "region": "BE",
+                  "evidence_status": "SUPPORTED"}]
+        package = await _sealed_package(session, facts)
+        report = await replay(str(package.id))
+        assert report["reclassified"] == 0
+
+    async def test_a_multi_region_claim_is_reported_as_national(self, session,
+                                                                 replay):
+        """And the correction that motivated the fix still shows up."""
+        facts = [{"claim": "En Wallonie, comme en Flandre, les primes directes "
+                           "ont été supprimées.",
+                  "category": "SUBSIDY", "claim_risk": "HIGH",
+                  "region": "BE-WAL", "evidence_status": "UNSUPPORTED"}]
+        package = await _sealed_package(session, facts)
+        report = await replay(str(package.id))
+        assert report["reclassified"] == 1
+        assert report["changed"][0]["region"] == {"before": "BE-WAL",
+                                                  "after": "BE"}
+
     async def test_an_unknown_package_is_an_error_not_a_crash(self, replay):
         report = await replay(str(uuid.uuid4()))
         assert report == {"error": "not found"}
