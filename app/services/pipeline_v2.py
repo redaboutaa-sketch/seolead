@@ -445,19 +445,7 @@ async def run_pipeline_v2(
 
             decisions[ref] = decision
 
-    eligible = sum(1 for d in decisions.values() if d.status.is_eligible)
-    rejected = len(decisions) - eligible
-    result.relevance_summary = {
-        "evaluated": len(decisions),
-        "eligible": eligible,
-        "rejected": rejected,
-        "by_status": {
-            status.value: sum(1 for d in decisions.values() if d.status is status)
-            for status in RelevanceStatus
-        },
-        "semantic_reviews": sum(1 for d in decisions.values()
-                                if d.stage == "semantic"),
-    }
+    result.relevance_summary = _relevance_summary(decisions)
 
     for provider_result in research_results:
         run = await _persist_research(session, keyword=keyword,
@@ -530,6 +518,13 @@ async def run_pipeline_v2(
                         decisions=decisions, correlation_id=correlation_id)
                     result.research_run_ids.append(run_row.id)
                     await session.commit()
+
+                    # The summary was taken before the official pass existed, so
+                    # a run that retrieved 50 sources and rejected 22 reported
+                    # "evaluated 10, rejected 0" — reading as a clean sweep while
+                    # the gate was in fact discarding the sources that matter
+                    # most. It is retaken over every decision now made.
+                    result.relevance_summary = _relevance_summary(decisions)
 
                     # Rebuild rather than patch: the enriched package supersedes
                     # the first, and its version records what it replaced.
@@ -869,6 +864,28 @@ def _price_answer_missing(query: str, claims: list[dict], profile) -> bool:
         if context is not None and context.is_usable:
             return False
     return True
+
+
+def _relevance_summary(decisions: dict[str, RelevanceDecision]) -> dict:
+    """Counts over every source judged so far.
+
+    Called twice: once after the general web pass, once more after the targeted
+    authoritative pass adds its own sources. Taking it only the first time made
+    the run report describe a fraction of the evidence set as if it were all of
+    it.
+    """
+    eligible = sum(1 for d in decisions.values() if d.status.is_eligible)
+    return {
+        "evaluated": len(decisions),
+        "eligible": eligible,
+        "rejected": len(decisions) - eligible,
+        "by_status": {
+            status.value: sum(1 for d in decisions.values() if d.status is status)
+            for status in RelevanceStatus
+        },
+        "semantic_reviews": sum(1 for d in decisions.values()
+                                if d.stage == "semantic"),
+    }
 
 
 def _as_evaluated(claims: list[dict], profile, *, price_gap: bool = False) -> list:

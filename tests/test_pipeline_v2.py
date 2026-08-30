@@ -17,7 +17,8 @@ from app.providers.llm.base import LLMResponse, LLMUsage
 from app.schemas.research import (NormalizedFact, NormalizedSource,
                                   ResearchProviderResult, SourceOutcome)
 from app.schemas.serp import OrganicResult, SerpQuestion, SerpSnapshot
-from app.services.pipeline_v2 import run_pipeline_v2
+from app.services.relevance import RelevanceDecision, RelevanceStatus
+from app.services.pipeline_v2 import _relevance_summary, run_pipeline_v2
 from tests.test_qa import BODY
 
 QUERY = "prix panneaux solaires Belgique"
@@ -426,3 +427,49 @@ class TestFullRun:
         unpriced = [r for r in rows if r.cost_usd is None]
         assert unpriced and all(r.cost_is_actual is False for r in unpriced)
         assert result.usage_summary["total_cost_usd"] is None
+
+
+class TestRelevanceSummaryCoversEverySource:
+    """The run report described a fraction of the evidence set as if it were all.
+
+    The summary was taken at the end of the general web pass and never retaken.
+    A run that retrieved 50 sources and rejected 22 reported "evaluated 10,
+    eligible 10, rejected 0" — reading as a clean sweep while the gate was in
+    fact discarding the official pages the HIGH-risk claims depend on. The
+    package block held the truth; nobody reads two blocks to check one number.
+    """
+
+    def _decision(self, status):
+        return RelevanceDecision(status=status, score=1.0, reason="t")
+
+    def test_it_counts_every_decision_it_is_given(self):
+        decisions = {
+            "web-000": self._decision(RelevanceStatus.RELEVANT),
+            "web-001": self._decision(RelevanceStatus.RELEVANT),
+            "official-000": self._decision(RelevanceStatus.LOW_RELEVANCE),
+            "official-001": self._decision(RelevanceStatus.IRRELEVANT),
+        }
+        summary = _relevance_summary(decisions)
+        assert summary["evaluated"] == 4
+        assert summary["eligible"] == 2
+        assert summary["rejected"] == 2
+        assert summary["by_status"]["LOW_RELEVANCE"] == 1
+        assert summary["by_status"]["IRRELEVANT"] == 1
+
+    def test_retaking_it_after_the_official_pass_changes_the_verdict(self):
+        """The exact shape of the live run of 2026-08-30."""
+        web = {f"web-{i:03d}": self._decision(RelevanceStatus.RELEVANT)
+               for i in range(10)}
+        first = _relevance_summary(web)
+        assert first == {"evaluated": 10, "eligible": 10, "rejected": 0,
+                         "by_status": {"RELEVANT": 10, "LOW_RELEVANCE": 0,
+                                       "IRRELEVANT": 0, "UNKNOWN": 0},
+                         "semantic_reviews": 0}
+
+        official = {f"official-{i:03d}": self._decision(
+            RelevanceStatus.RELEVANT if i < 18 else RelevanceStatus.LOW_RELEVANCE)
+            for i in range(40)}
+        second = _relevance_summary({**web, **official})
+        assert second["evaluated"] == 50
+        assert second["eligible"] == 28
+        assert second["rejected"] == 22
