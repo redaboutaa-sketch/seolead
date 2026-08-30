@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.enums import (ApprovalState, ContentStatus, Observability,
-                            SourceState)
+                            QALayer, SourceState)
 from app.core.errors import ErrorCode, ResearchUnavailable
 from app.models import (Approval, ContentDraft, ProviderUsage, QAReview,
                         ResearchPackage, ResearchSource, SeoOpportunity,
@@ -345,6 +345,52 @@ class TestFullRun:
         approval = await seeded_session.get(Approval, result.approval_id)
         assert approval.state == ApprovalState.PENDING.value
         assert approval.decided_by is None
+
+    async def test_a_rejected_draft_does_not_block_its_replacement(
+            self, seeded_session, settings_all_providers):
+        """The deadlock this fix exists for.
+
+        A rejected draft is TERMINAL — `approval_service` allows no transition
+        out of `REJECTED` — so it can never be published and can never compete
+        for a query. Counting its title made every rerun of the same query
+        permanently unpublishable, because the writer is seeded with the
+        brief's `working_title` and converges on the same title.
+        """
+        first = await _run(seeded_session, settings_all_providers)
+        draft = await seeded_session.get(ContentDraft, first.content_draft_id)
+        titre = draft.title
+        draft.status = ContentStatus.REJECTED.value
+        await seeded_session.commit()
+
+        second = await _run(seeded_session, settings_all_providers)
+        replacement = await seeded_session.get(ContentDraft,
+                                               second.content_draft_id)
+        assert replacement.title == titre, \
+            "the rerun must produce the same title for this test to mean anything"
+        seo = (await seeded_session.execute(
+            select(QAReview).where(
+                QAReview.content_draft_id == second.content_draft_id,
+                QAReview.layer == QALayer.SEO.value))).scalars().one()
+        codes = {f.get("code") for f in seo.findings}
+        assert "DUPLICATE_TITLE" not in codes
+
+    async def test_an_undecided_draft_still_blocks_its_replacement(
+            self, seeded_session, settings_all_providers):
+        """The other half, kept deliberately.
+
+        A draft that merely failed QA is undecided. Letting a replacement
+        appear silently beside it is how a queue fills with identical drafts,
+        so the title stays taken until an operator disposes of it.
+        """
+        first = await _run(seeded_session, settings_all_providers)
+        second = await _run(seeded_session, settings_all_providers)
+        seo = (await seeded_session.execute(
+            select(QAReview).where(
+                QAReview.content_draft_id == second.content_draft_id,
+                QAReview.layer == QALayer.SEO.value))).scalars().one()
+        codes = {f.get("code") for f in seo.findings}
+        assert "DUPLICATE_TITLE" in codes
+        assert first.content_draft_id != second.content_draft_id
 
     async def test_no_llm_stops_after_the_brief(self, seeded_session,
                                                 settings_all_providers):
