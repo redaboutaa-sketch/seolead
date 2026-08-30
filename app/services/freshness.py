@@ -17,6 +17,7 @@ missing.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -108,6 +109,60 @@ class FreshnessAssessment:
         }
 
 
+# ── The year in the URL path ─────────────────────────────────────────────────
+# Measured on 2026-08-30, over the 20 sources two probes returned and the 40 the
+# authoritative pass returned:
+#
+#   provider_published_at   0 / 20      the field is dead, on every domain
+#   bare year in body      12 / 20      and NOT a publication date — `2008` is a
+#                                       price comparison, `2030` the end of a
+#                                       scheme, `2001…2005` cited legal acts
+#   year in URL path        6 / 9       at brugel, environnement.brussels, cwape
+#                                       0 / 10 at energie.wallonie.be
+#
+# So the date that exists is in the path, and position decides its meaning. In
+# `/decisions/2023/fr/DECISION-252-Methodologie-tarifaire-2025-2029.pdf` the
+# segment `2023` is when the decision issued; `2025-2029` inside the filename is
+# the period it covers. `…-territoire-belge-2030.pdf` is an analysis horizon.
+#
+# Hence: a segment that IS a year, or that OPENS with a full date — CWaPE names
+# documents `2024.02.22-0054-…`. Nothing else. A year glued into words is not a
+# date, and treating it as one is how you date a page to its price table.
+_URL_PATH_YEAR = re.compile(
+    # The segment IS a year — `/news/2025/`, `/decisions/2023/`.
+    r"^(20[0-2]\d)$"
+    # …or it OPENS with a full date and continues: CWaPE names its documents
+    # `2024.02.22-0054-Projet lignes directrices…`. The date is the reference,
+    # what follows is the title. Requiring the whole segment to be the date
+    # missed six of these, which is how the canary caught the first attempt.
+    r"|^(20[0-2]\d)[.\-][01]\d[.\-][0-3]\d(?:\D|$)")
+
+# This year and last. Belgian premiums and grid tariffs change annually — the
+# very reason SUBSIDY and GRID_RULE require freshness — so a two-year window is
+# the widest that can still be called current. A knob, and openly arbitrary.
+_URL_YEAR_CURRENT_WITHIN = 1
+
+
+def url_path_year(url: str | None) -> int | None:
+    """The publication year a URL states in its path, if it states one.
+
+    A signal of PUBLICATION, never of validity: it says when a document issued,
+    not whether the scheme it describes is still in force. That is what the
+    textual markers say, and this never overrides them.
+    """
+    if not url:
+        return None
+    try:
+        path = urlparse(url).path or ""
+    except ValueError:
+        return None
+    for segment in path.split("/"):
+        match = _URL_PATH_YEAR.match(segment.strip())
+        if match:
+            return int(match.group(1) or match.group(2))
+    return None
+
+
 def _contains(text: str, markers: tuple[str, ...]) -> str | None:
     normalized = normalize_query(text)
     for marker in markers:
@@ -123,12 +178,19 @@ def _first(pattern: re.Pattern[str], text: str) -> str | None:
 
 def assess(text: str, *, published_at: datetime | None = None,
            retrieved_at: datetime | None = None,
-           now: datetime | None = None) -> FreshnessAssessment:
+           now: datetime | None = None,
+           url: str | None = None) -> FreshnessAssessment:
     """Classify the freshness of one retrieved page.
 
     Never invents a date. `effective_from` / `effective_until` are kept as the
     raw strings the page used — parsing every European date format would add
-    failure modes without adding truth, and a human reviewer can read them.
+    failure modes without adding truth, and a human reviewer can read them. The
+    URL year is kept as an int and NEVER written to `published_at`: a year is
+    not a date, and turning `2025` into `2025-01-01` would be an invention.
+
+    The URL year can raise a page's standing only when it is recent, and it can
+    never lower a page that says it is in force. A 2023 page marked « en
+    vigueur » is worth more than a mute 2025 one, and this ordering says so.
     """
     now = now or datetime.now(timezone.utc)
     text = text or ""
@@ -143,6 +205,7 @@ def assess(text: str, *, published_at: datetime | None = None,
             break
     effective_from = _first(_EFFECTIVE_FROM, text)
     effective_until = _first(_EFFECTIVE_UNTIL, text)
+    url_year = url_path_year(url)
 
     if historical:
         signals.append(f"historical_marker:{historical}")
@@ -154,6 +217,8 @@ def assess(text: str, *, published_at: datetime | None = None,
         signals.append(f"effective_from:{effective_from}")
     if effective_until:
         signals.append(f"effective_until:{effective_until}")
+    if url_year:
+        signals.append(f"url_year:{url_year}")
 
     # An explicitly archived page never supports a present-tense claim, whatever
     # else it carries.
@@ -178,6 +243,14 @@ def assess(text: str, *, published_at: datetime | None = None,
             effective_until, signals,
             "Carries a publication or update date.")
 
+    # A recent URL year is a real publication date that was simply never read.
+    # `published_at` stays None: the page states a year, not a day.
+    if url_year and url_year >= now.year - _URL_YEAR_CURRENT_WITHIN:
+        return FreshnessAssessment(
+            FreshnessStatus.DATED_CURRENT, None, None, effective_from,
+            effective_until, signals,
+            f"URL path dates this to {url_year}.")
+
     if current:
         # The distinction the mission asks for: clearly current but undated is not
         # the same as undated with no signal at all.
@@ -185,6 +258,19 @@ def assess(text: str, *, published_at: datetime | None = None,
             FreshnessStatus.UNDATED_CURRENT, None, None, effective_from,
             effective_until, signals,
             f"No date, but the page presents as in force ({current}).")
+
+    # An old URL year hardens nothing mechanically — UNDATED already cannot
+    # support a present-tense claim — but it turns "we know nothing" into "this
+    # issued in 2019", which is what an operator needs to see. Deliberately NOT
+    # a new status: `FreshnessStatus` sits under a database CHECK constraint,
+    # and a value added without its migration is the drift that cost a
+    # production outage on 2026-08-30.
+    if url_year:
+        return FreshnessAssessment(
+            FreshnessStatus.UNDATED, None, None, effective_from, effective_until,
+            signals,
+            f"URL path dates this to {url_year}, too old to support a claim "
+            f"about the present, and the page states no currency.")
 
     return FreshnessAssessment(
         FreshnessStatus.UNDATED, None, None, effective_from, effective_until,

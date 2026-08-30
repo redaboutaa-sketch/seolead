@@ -14,7 +14,7 @@ from app.services.authoritative_research import execute_plan
 from app.services.claim_extraction import AtomicClaim
 from app.services.conflict import ConflictKind, classify as classify_conflict
 from app.services.evidence_model import EvidenceRef, evaluate_claim
-from app.services.freshness import FreshnessStatus, assess
+from app.services.freshness import FreshnessStatus, assess, url_path_year
 from app.services.provider_usage import UsageRecorder
 from app.services.region import Region, detect_region, scope_is_compatible
 from app.services.relevance import RESEARCH_QUERY_KEY, query_that_fetched
@@ -595,3 +595,130 @@ class TestRegionalQueryVariants:
                                            unresolved=unresolved,
                                            profile=solar_profile)
         assert len(plan.queries) <= solar_profile.official_source_policy["max_queries"]
+
+
+class TestUrlPathYearCanary:
+    """The date signal, held to the measurement that justified it.
+
+    Measured on 2026-08-30 over 20 probe sources and 40 from the authoritative
+    pass: the provider's `published_at` was null on every one, the bare year in
+    the body was never a publication date, and the year that DID exist sat in
+    the URL path — at the Brussels and Walloon regulators, and nowhere at
+    energie.wallonie.be.
+
+    Both halves are load-bearing. A mechanism that dates fewer than the six is
+    not reading what is there; one that dates an energie.wallonie.be page is
+    inventing, because none of the ten carries a year.
+    """
+
+    REGULATORS = [
+        "https://environnement.brussels/citoyen/news/2025/panneaux-photovoltaiques-nouvelles-mesures-en-2026",
+        "https://environnement.brussels/pro/news/2025/panneaux-photovoltaiques-nouvelles-mesures-en-2026",
+        "https://brugel.brussels/publication/document/notype/2020/fr/Reponse-014.pdf",
+        "https://brugel.brussels/publication/document/notype/2019/fr/Methodo-tarif-Motivations-Elec.pdf",
+        "https://brugel.brussels/publication/document/decisions/2023/fr/DECISION-252-Methodologie-tarifaire-2025-2029-partie-2.pdf",
+        "https://www.cwape.be/sites/default/files/cwape-documents/2024.02.22-0054-Projet%20lignes%20directrices%20structure%20tarifaire%20BT%202026-2029.pdf",
+        "https://www.cwape.be/sites/default/files/cwape-documents/RAS%20SRME%202023_0.pdf",
+        "https://www.cwape.be/node/151",
+        "https://www.cwape.be/taxonomy/term/234",
+    ]
+
+    WALLONIE = [
+        "https://energie.wallonie.be/home/energies-vertes/solaire-photovoltaique/10kw-particuliers/les-panneaux-solaires-un-investissement-rentable.html",
+        "https://energie.wallonie.be/home/strategies-et-chiffres/conventions-carbone-2024-2032/bonnes-pratiques/bonnes-pratiques-pour-les-etudes-de-faisabilite-amureba.html",
+        "https://energie.wallonie.be/home/energies-vertes/solaire-photovoltaique/10kw-particuliers/installation-photovoltaique-mobile-plug-play.html",
+        "https://energie.wallonie.be/home/soutiens-financiers/soutien-a-la-production-d-electricite-verte/procedure-de-demande-de-soutien/la-reservation/modalites-et-procedure.html",
+        "https://energie.wallonie.be/home/actualites/actualites/panneaux-photovoltaiques-plug-play-une-nouvelle-opportunite.html",
+        "https://energie.wallonie.be/home/performance-energetique-des-batiments/batiments-residentiels/renovation-walloreno/conseils-pratiques/energies-renouvelables.html",
+        "https://energie.wallonie.be/home/soutiens-financiers/filiere-solaire-photovoltaique/installer-un-systeme-photovoltaique-fixe-les-etapes-a-suivre.html",
+        "https://energie.wallonie.be/home/soutiens-financiers/filiere-solaire-photovoltaique/location-d-un-immeuble-equipe-de-panneaux-photovoltaiques.html",
+        "https://energie.wallonie.be/home/soutiens-financiers/filiere-solaire-photovoltaique/le-respect-de-la-norme-iec-pour-les-panneaux-photovoltaiques.html",
+        "https://energie.wallonie.be/home/soutiens-financiers/filiere-solaire-photovoltaique/tous-les-formulaires-lies-aux-installations-photovoltaiques-solwatt.html",
+    ]
+
+    def test_it_dates_at_least_the_six_regulator_urls_measured(self):
+        dated = [u for u in self.REGULATORS if url_path_year(u)]
+        assert len(dated) >= 6, dated
+
+    def test_it_dates_no_energie_wallonie_page(self):
+        """Zero of ten carries a year. Dating one would be an invention."""
+        invented = {u: url_path_year(u) for u in self.WALLONIE if url_path_year(u)}
+        assert invented == {}
+
+    @pytest.mark.parametrize("url,reason", [
+        ("https://x.be/a/analyse-territoire-belge-2030.pdf",
+         "2030 is an analysis horizon, not a publication year"),
+        ("https://www.creg.be/fr/publications/rapport-annuel-ar2024",
+         "a year glued into a word is not a path segment"),
+        ("https://x.be/conventions-carbone-2024-2032/page.html",
+         "a segment naming a period is not a date"),
+        ("https://x.be/DECISION-252-Methodologie-tarifaire-2025-2029.pdf",
+         "the filename states the period it covers, not when it issued"),
+        ("https://x.be/2024-2032/page.html",
+         "a bare year range is a period"),
+        ("https://x.be/1999/page.html", "outside the plausible window"),
+        (None, "no url"),
+        ("", "empty url"),
+    ])
+    def test_what_must_never_be_read_as_a_date(self, url, reason):
+        assert url_path_year(url) is None, reason
+
+    @pytest.mark.parametrize("url,year", [
+        ("https://x.be/news/2025/article", 2025),
+        ("https://x.be/decisions/2023/fr/doc.pdf", 2023),
+        ("https://x.be/docs/2024.02.22-0054-Projet-lignes.pdf", 2024),
+        ("https://x.be/docs/2024-02-22-note.pdf", 2024),
+    ])
+    def test_what_must_be_read_as_a_date(self, url, year):
+        assert url_path_year(url) == year
+
+
+class TestTheUrlYearNeverOutranksThePage:
+    """« Une page 2023 portant "en vigueur" vaut mieux qu'une page 2025 muette »."""
+
+    NOW = datetime(2026, 8, 30, tzinfo=timezone.utc)
+
+    def test_a_recent_url_year_reads_a_date_that_was_always_there(self):
+        result = assess("Texte sans date.", url="https://x.be/news/2025/a",
+                        now=self.NOW)
+        assert result.status is FreshnessStatus.DATED_CURRENT
+        assert "url_year:2025" in result.signals
+
+    def test_it_never_writes_an_invented_published_at(self):
+        """A year is not a date. `2025` must not become `2025-01-01`."""
+        result = assess("Texte.", url="https://x.be/news/2025/a", now=self.NOW)
+        assert result.published_at is None
+
+    def test_an_old_url_year_does_not_demote_a_page_that_says_it_is_in_force(self):
+        result = assess("Ce régime est actuellement en vigueur.",
+                        url="https://x.be/decisions/2023/fr/d.pdf", now=self.NOW)
+        assert result.status is FreshnessStatus.UNDATED_CURRENT
+        assert result.status.can_support_current_claim is True
+        assert "url_year:2023" in result.signals
+
+    def test_an_old_url_year_with_no_marker_still_cannot_support(self):
+        result = assess("Texte sans marqueur.",
+                        url="https://x.be/notype/2019/fr/d.pdf", now=self.NOW)
+        assert result.status is FreshnessStatus.UNDATED
+        assert result.status.can_support_current_claim is False
+        assert "2019" in result.note
+
+    def test_an_archived_page_stays_archived_whatever_its_url_says(self):
+        """The historical marker dominates everything, as before."""
+        result = assess("Cette prime est supprimée, la page est archivée.",
+                        url="https://x.be/news/2026/a", now=self.NOW)
+        assert result.status is FreshnessStatus.HISTORICAL
+
+    def test_an_expired_validity_stays_expired_whatever_its_url_says(self):
+        result = assess("Valable jusqu'au 31 décembre 2021.",
+                        url="https://x.be/news/2026/a", now=self.NOW)
+        assert result.status is FreshnessStatus.DATED_EXPIRED
+
+    def test_no_url_leaves_every_verdict_exactly_as_before(self):
+        """The whole change is inert on a source with no URL."""
+        for text, expected in (
+            ("Texte neutre.", FreshnessStatus.UNDATED),
+            ("Actuellement en vigueur.", FreshnessStatus.UNDATED_CURRENT),
+            ("Page archivée.", FreshnessStatus.HISTORICAL),
+        ):
+            assert assess(text, now=self.NOW).status is expected

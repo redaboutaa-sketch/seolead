@@ -67,7 +67,8 @@ def date_forensics(source) -> dict:
             found[label] = seen[:5]
 
     freshness = assess_freshness(text, published_at=source.published_at,
-                                 retrieved_at=source.retrieved_at)
+                                 retrieved_at=source.retrieved_at,
+                                 url=source.url)
     return {
         # The provider's own field. Null on every official page of the live run.
         "provider_published_at": (source.published_at.isoformat()
