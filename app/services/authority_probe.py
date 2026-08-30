@@ -23,6 +23,7 @@ modified — a probe that changed what it measured would measure nothing.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 
 from app.core.enums import ClaimCategory
 from app.services.authority_registry import AuthorityRegistry, build_registry
@@ -78,6 +79,27 @@ def date_forensics(source) -> dict:
     }
 
 
+def host_of(url: str | None) -> str:
+    """The site that actually answered, whatever the registry knows of it.
+
+    The probe reported one domain per row, taken from the registry entry — and
+    that is None for a site the registry does not carry, which is precisely the
+    case the probe exists to examine: a candidate excluded because it awaits
+    ratification, or a domain named with `--domain` that was never registered.
+    Grouping on it crashed on `sorted({None, "apere.org"})` and threw away a
+    paid provider call along with the answer.
+
+    The host is always available and never null, so the report can always say
+    who answered. Whether that host is trusted is a separate field.
+    """
+    if not url:
+        return "(sans url)"
+    try:
+        return (urlparse(url).hostname or "(sans hôte)").lower()
+    except ValueError:
+        return "(url invalide)"
+
+
 def registry_for_probe(profile: VerticalProfile, *,
                        include_pending: bool) -> AuthorityRegistry:
     return build_registry(profile, include_pending=include_pending)
@@ -109,8 +131,12 @@ def summarize(rows: list[dict]) -> dict:
             for status in sorted({r["dates"].get("freshness_status")
                                   for r in rows} - {None})
         },
-        "by_domain": {
-            domain: sum(1 for r in rows if r["domain"] == domain)
-            for domain in sorted({r["domain"] for r in rows})
+        # Keyed on the host that answered, not on the registry entry: an
+        # unregistered domain has no entry and must still be counted.
+        "by_host": {
+            host: sum(1 for r in rows if r.get("host") == host)
+            for host in sorted({r.get("host") or "(sans hôte)" for r in rows})
         },
+        "unregistered_hosts": sorted({r.get("host") or "(sans hôte)"
+                                      for r in rows if not r.get("in_registry")}),
     }

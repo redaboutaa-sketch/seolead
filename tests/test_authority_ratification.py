@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 
 from app.core.enums import ClaimCategory
-from app.services.authority_probe import date_forensics, domains_for, summarize
+from app.services.authority_probe import (date_forensics, domains_for,
+                                          host_of, summarize)
 from app.services.authority_registry import build_registry
 from app.services.region import Region
 from app.schemas.research import NormalizedSource
@@ -107,9 +108,9 @@ class TestDateForensics:
 
     def test_the_summary_counts_what_decides_the_mechanism(self):
         rows = [
-            {"domain": "a.be", "dates": date_forensics(
+            {"host": "a.be", "in_registry": True, "dates": date_forensics(
                 _source(summary="Mis à jour le 2025-01-05."))},
-            {"domain": "b.be", "dates": date_forensics(
+            {"host": "b.be", "in_registry": True, "dates": date_forensics(
                 _source(summary="Aucune date ici."))},
         ]
         counts = summarize(rows)
@@ -117,7 +118,47 @@ class TestDateForensics:
         assert counts["with_provider_date"] == 0
         assert counts["with_date_in_text"] == 1
         assert counts["by_text_date_kind"]["iso"] == 1
-        assert counts["by_domain"] == {"a.be": 1, "b.be": 1}
+        assert counts["by_host"] == {"a.be": 1, "b.be": 1}
+
+
+class TestAnUnregisteredHostIsCountedNotFatal:
+    """The crash of 2026-08-30, which threw away a paid provider call.
+
+    `--domain plan.be` without `--include-pending` names a domain the registry
+    does not carry, so the lookup returns None. Grouping the report on the
+    registry entry then ran `sorted({None, "apere.org"})` and raised — losing
+    the seven sources the probe had just paid for, and the answer with them.
+
+    The probe exists to examine domains the registry does NOT trust yet. A
+    report that cannot describe one is useless exactly where it is needed.
+    """
+
+    def _row(self, url, *, in_registry):
+        return {"host": host_of(url), "in_registry": in_registry,
+                "dates": date_forensics(_source())}
+
+    def test_a_mix_of_registered_and_unregistered_hosts_summarizes(self):
+        counts = summarize([
+            self._row("https://www.apere.org/etude", in_registry=True),
+            self._row("https://www.plan.be/publication", in_registry=False),
+        ])
+        assert counts["by_host"] == {"www.apere.org": 1, "www.plan.be": 1}
+        assert counts["unregistered_hosts"] == ["www.plan.be"]
+
+    def test_every_host_is_named_even_with_no_url(self):
+        """A source with no url is a real provider outcome, not a crash."""
+        counts = summarize([self._row(None, in_registry=False)])
+        assert counts["sources"] == 1
+        assert list(counts["by_host"]) == ["(sans url)"]
+
+    @pytest.mark.parametrize("url,expected", [
+        ("https://WWW.Plan.BE/x", "www.plan.be"),
+        ("https://energie.wallonie.be/a/b.html", "energie.wallonie.be"),
+        (None, "(sans url)"),
+        ("", "(sans url)"),
+    ])
+    def test_the_host_is_read_from_the_url_and_normalised(self, url, expected):
+        assert host_of(url) == expected
 
 
 class TestProbeTargeting:

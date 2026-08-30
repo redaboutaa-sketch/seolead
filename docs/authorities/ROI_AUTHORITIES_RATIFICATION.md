@@ -212,3 +212,107 @@ affirmations ROI re-jugées viendra d'une exécution complète du pipeline.
 condition nécessaire. Il faudra encore que les pages retournées portent une date
 — et à l'exécution du 2026-08-30, **aucune des 28 sources éligibles n'en portait
 une**. C'est le chantier suivant, et la même sonde le mesure.
+
+---
+
+# Addendum du 2026-08-30 — résultat des sondes
+
+**Verdict : ne ratifier aucune des quatre propositions.** Les sondes ont
+contredit la proposition qui les avait motivées, ce qui est exactement leur
+raison d'être.
+
+## Sonde 1 — candidats ROI
+
+```
+domaines interrogés : energie.wallonie.be, energiesparen.be, plan.be, apere.org
+by_domain           : { energie.wallonie.be: 10 }
+```
+
+Dix résultats sur dix viennent d'un seul domaine. **`plan.be` : rien.
+`apere.org` : rien. `energiesparen.be` : rien.**
+
+- **`plan.be` — ne pas inscrire.** Il ne ramène rien à la question ROI.
+  L'inscrire ajouterait un domaine qui ne contribue jamais.
+- **`apere.org`** — déjà inscrit, et il ne remonte pas davantage. Régler
+  l'arithmétique n'aurait donc rien réglé : la seconde source aurait été un
+  domaine qui ne fait jamais surface.
+
+## Sonde 2 — élargir creg.be et economie.fgov.be à ROI
+
+Les deux répondent, cinq documents chacun. Mais ce sont des documents de
+sécurité d'approvisionnement, de capacité et de régulation nationale, dont
+plusieurs très anciens :
+
+| document | ancienneté visible |
+|---|---|
+| « Programme indicatif » (CREG) | cite 2001, 2002, 2004, 2005 |
+| « Plan d'action national énergies renouvelables » | 7/10/2008 |
+| « Étude prospective électricité » | décembre 2019 |
+| « Note de la DG Énergie » | 21 juillet 2016 |
+
+**Aucun ne porte sur la rentabilité d'une installation résidentielle.**
+
+- **`creg.be` — ne pas élargir à ROI.** Un « Programme indicatif » de 2005
+  pourrait venir corroborer une affirmation d'amortissement. C'est le pire des
+  résultats : une affirmation *apparemment* corroborée.
+- **`economie.fgov.be` — ne pas élargir à ROI** non plus, pour la même raison.
+  `statbel.fgov.be` reste sans objet tant que ROI n'est pas le sujet.
+
+## Réserve méthodologique
+
+La sonde mesure ce que la **recherche retourne**, pas ce que le domaine
+**contient**. `energie.wallonie.be` est massivement indexé et a occupé les dix
+places. Une sonde sans concurrence (`--domain apere.org --domain plan.be`) est
+la vérification qui rend le verdict ferme.
+
+## Ce que cela établit
+
+Vingt sources officielles interrogées avec la vraie question ROI, et **pas une
+seule ne porte sur le temps de retour d'une installation résidentielle**. La
+conclusion du § 5 devient l'hypothèse principale :
+
+> La rentabilité solaire belge n'est pas une grandeur nationale. Ce sont les
+> régions qui publient des chiffres de rentabilité, parce que ce sont elles qui
+> en fixent les termes — tarif prosumer, certificats verts, primes,
+> compensation.
+
+Ajouter des domaines fédéraux ne réglera donc pas les 17 affirmations ROI. La
+question qui reste est celle du § 5, et elle appartient au propriétaire :
+**deux sources régionales concordantes, de régions différentes, peuvent-elles
+établir une affirmation de rentabilité de portée belge ?**
+
+## Ce que les sondes ont établi sur les dates
+
+| mesure | résultat |
+|---|---|
+| `with_provider_date` | **0 sur 20** |
+| `with_date_in_text` | 12 sur 20 |
+| forme dominante | **année nue — 12 occurrences** |
+| `fr_long` | 3 · `numeric` 1 · `iso` 0 · `nl_long` 0 |
+| `UNDATED_CURRENT` | 2 sur 20, **correct les deux fois** |
+
+Le champ du fournisseur est mort. Et l'année nue du corps **n'est pas une date
+de publication** :
+
+- page « investissement rentable » → `2008` (comparaison de prix), `2030` (fin
+  de régime)
+- page formulaires → `2022, 2024, 2021, 2013` (versions de formulaires)
+- « Programme indicatif » → `2001…2005` (actes juridiques cités)
+
+Dater sur elle daterait la page rentabilité de 2008 et pourrait dater une page
+courante de 2030.
+
+Le signal que rien ne lit aujourd'hui est ailleurs — **l'année en segment de
+chemin d'URL** : 6 URL sur 9 de la passe officielle en portent une
+(`/news/2025/`, `/decisions/2023/`, `/notype/2020/`), et **0 sur 10** chez
+`energie.wallonie.be`. La position compte :
+`/decisions/2023/fr/DECISION-252-Methodologie-tarifaire-2025-2029.pdf` — le
+segment `/2023/` est la date de décision, `2025-2029` dans le nom est la période
+couverte, et `…-territoire-belge-2030.pdf` est un horizon d'analyse.
+
+Mécanisme proposé, non écrit : lire l'année **en segment de chemin**, continuer
+d'ignorer les années nues du corps, garder l'extraction de validité existante.
+Il ne peut que **durcir** la fraîcheur : ces pages sont aujourd'hui `UNDATED`,
+donc déjà incapables d'étayer une affirmation courante. Les dater rend une page
+2025 utilisable et une page 2019 explicitement périmée, au lieu d'également
+inconnues.
