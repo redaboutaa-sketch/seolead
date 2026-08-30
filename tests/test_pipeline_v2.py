@@ -18,6 +18,7 @@ from app.schemas.research import (NormalizedFact, NormalizedSource,
                                   ResearchProviderResult, SourceOutcome)
 from app.schemas.serp import OrganicResult, SerpQuestion, SerpSnapshot
 from app.services.relevance import RelevanceDecision, RelevanceStatus
+from app.services import title_registry
 from app.services.pipeline_v2 import _relevance_summary, run_pipeline_v2
 from tests.test_qa import BODY
 
@@ -375,23 +376,61 @@ class TestFullRun:
         codes = {f.get("code") for f in seo.findings}
         assert "DUPLICATE_TITLE" not in codes
 
-    async def test_an_undecided_draft_still_blocks_its_replacement(
+    async def test_a_rerun_of_the_same_keyword_no_longer_blocks_itself(
             self, seeded_session, settings_all_providers):
-        """The other half, kept deliberately.
+        """What replaced the old half of this pair, and why.
 
-        A draft that merely failed QA is undecided. Letting a replacement
-        appear silently beside it is how a queue fills with identical drafts,
-        so the title stays taken until an operator disposes of it.
+        This test used to assert that an undecided draft blocks its
+        replacement. It was written from the same intent as the one above —
+        a queue must not fill with identical drafts — but it guarded the wrong
+        thing, and the live run of 2026-08-30 showed the cost: three drafts for
+        `rentabilité panneaux solaires Belgique`, identical titles, all
+        undecided, each blocking the next, and two paid pipeline runs spent
+        discovering it.
+
+        Cannibalisation needs two URLs. Every draft of one keyword resolves to
+        one slug, so a replacement does not compete with its predecessor — it
+        supersedes it. The guard that matters is the one below.
         """
         first = await _run(seeded_session, settings_all_providers)
         second = await _run(seeded_session, settings_all_providers)
+        replacement = await seeded_session.get(ContentDraft,
+                                               second.content_draft_id)
+        original = await seeded_session.get(ContentDraft, first.content_draft_id)
+        assert replacement.title == original.title, \
+            "the rerun must produce the same title for this test to mean anything"
+        assert original.status != ContentStatus.REJECTED.value, \
+            "the predecessor must be undecided for this test to mean anything"
         seo = (await seeded_session.execute(
             select(QAReview).where(
                 QAReview.content_draft_id == second.content_draft_id,
                 QAReview.layer == QALayer.SEO.value))).scalars().one()
         codes = {f.get("code") for f in seo.findings}
-        assert "DUPLICATE_TITLE" in codes
-        assert first.content_draft_id != second.content_draft_id
+        assert "DUPLICATE_TITLE" not in codes
+
+    async def test_an_undecided_draft_of_another_keyword_still_blocks(
+            self, seeded_session, settings_all_providers):
+        """The half that is kept, moved to where it belongs.
+
+        Two different queries converging on one title is the cannibalisation the
+        guard exists for, and being undecided is no excuse: that draft can still
+        reach publication.
+        """
+        first = await _run(seeded_session, settings_all_providers)
+        original = await seeded_session.get(ContentDraft, first.content_draft_id)
+        assert original.status != ContentStatus.REJECTED.value
+
+        second = await _run(seeded_session, settings_all_providers,
+                            query="prix installation solaire Belgique")
+        replacement = await seeded_session.get(ContentDraft,
+                                               second.content_draft_id)
+        # The stub writer titles from the brief, so force the collision the
+        # test is about rather than depending on two queries agreeing.
+        replacement.title = original.title
+        await seeded_session.commit()
+        titles = await title_registry.competing_titles(seeded_session,
+                                                       replacement)
+        assert original.title in titles
 
     async def test_no_llm_stops_after_the_brief(self, seeded_session,
                                                 settings_all_providers):
