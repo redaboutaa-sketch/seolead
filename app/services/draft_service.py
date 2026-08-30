@@ -100,7 +100,9 @@ Reply with JSON only:
 """
 
 
-def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
+def build_generation_prompt(brief: dict, package: dict, *,
+                            previous_findings: list[dict] | None = None
+                            ) -> tuple[str, str]:
     """Return (system, user) messages. Pure — unit-testable without a provider."""
     forbidden = [
         c["topic"] for c in brief.get("cautionary_claims", [])
@@ -135,6 +137,20 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
             "or a promise): " + ", ".join(forbidden) + "\n"
         )
 
+    # A re-emission. The writer is told exactly what the gate refused last time,
+    # in the gate's own words, and told that the evidence has not changed — so
+    # the only move available is to write differently, never to find new facts.
+    if previous_findings:
+        system += (
+            "\nA PREVIOUS ATTEMPT ON THIS BRIEF WAS REFUSED\n"
+            "The findings are listed in `refused_last_time`. The evidence is "
+            "unchanged: no new source was retrieved, and nothing you could not "
+            "state before has become available. Fix each finding by changing "
+            "what you write — drop an assertion the evidence does not carry, "
+            "name the region a figure holds for, use the supplied facts you "
+            "left unused. Do not restate a refused claim in softer words: an "
+            "unsourced figure is refused however it is phrased.\n")
+
     user = json.dumps({
         "language": package.get("language"),
         "market": package.get("market"),
@@ -156,6 +172,7 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
         "core_answer_status": brief.get("core_answer_status"),
         "price_evidence": core_evidence.get("answers") or [],
         "observed_price_range": core_evidence.get("observed_range"),
+        "refused_last_time": previous_findings or [],
     }, ensure_ascii=False)
 
     return system, user
@@ -196,9 +213,11 @@ def parse_draft_response(content: str) -> dict:
 
 async def generate_draft(
     brief: dict, package: dict, *, llm: LLMProvider, correlation_id: str,
+    previous_findings: list[dict] | None = None,
 ) -> tuple[dict, LLMResponse]:
     """Generate one draft. Raises LLMNotConfigured when no provider is available."""
-    system, user = build_generation_prompt(brief, package)
+    system, user = build_generation_prompt(brief, package,
+                                           previous_findings=previous_findings)
 
     response = await llm.generate(LLMRequest(
         capability=LLMCapability.LONG_FORM_WRITING,

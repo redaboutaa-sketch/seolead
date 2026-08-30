@@ -44,23 +44,35 @@ def _keyword_of(draft_id_column):
     )
 
 
-async def competing_titles(session: AsyncSession,
-                           draft: ContentDraft) -> list[str]:
-    """Titles this draft could actually cannibalise.
+async def competing_titles_for_keyword(session: AsyncSession, keyword_id,
+                                       *, exclude_draft_id=None) -> list[str]:
+    """Titles a draft of `keyword_id` could cannibalise.
+
+    Takes the keyword rather than the draft, because the gate now runs before
+    the draft is persisted: a candidate that is refused and re-emitted never
+    reaches the table, and a title check that needs a row could not see it.
 
     Excludes REJECTED drafts — that state is terminal, so such a draft can never
-    reach publication and can never compete — and excludes every draft of this
-    draft's own keyword, which shares its slug.
+    reach publication and can never compete — and every draft of this keyword,
+    which shares its slug.
     """
-    own_keyword = _keyword_of(draft.id).scalar_subquery()
-
-    rows = await session.execute(
+    stmt = (
         select(ContentDraft.title)
         .join(ContentBrief, ContentBrief.id == ContentDraft.content_brief_id)
         .join(ResearchPackage,
               ResearchPackage.id == ContentBrief.research_package_id)
-        .where(ContentDraft.id != draft.id)
         .where(ContentDraft.status != ContentStatus.REJECTED.value)
-        .where(ResearchPackage.keyword_id != own_keyword)
+        .where(ResearchPackage.keyword_id != keyword_id)
     )
+    if exclude_draft_id is not None:
+        stmt = stmt.where(ContentDraft.id != exclude_draft_id)
+    rows = await session.execute(stmt)
     return [t for t in rows.scalars().all() if t]
+
+
+async def competing_titles(session: AsyncSession,
+                           draft: ContentDraft) -> list[str]:
+    """The same question asked of an already-persisted draft."""
+    return await competing_titles_for_keyword(
+        session, _keyword_of(draft.id).scalar_subquery(),
+        exclude_draft_id=draft.id)

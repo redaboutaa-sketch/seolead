@@ -15,6 +15,7 @@ Now the package already carries evaluated atomic claims, so QA does two things:
        HIGH-risk + insufficient authority   → BLOCK
        CONFLICTING evidence                 → BLOCK (policy default)
        numeric claim absent from evidence   → BLOCK
+       undecidable between the two          → BLOCK, as AMBIGUOUS_MATCH
 
 Everything else is reported for the reviewer to weigh. A wrong sentence about
 panel orientation is a quality problem; a wrong sentence about a subsidy is a
@@ -37,6 +38,9 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _NUMBER = re.compile(r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,})")
 
 _TOPIC_MATCH_MIN = 2
+# Two readings of one sentence count as equally strong within this margin. Below
+# it the difference is not evidence of anything, and the verdict is a tie.
+_MATCH_MARGIN = 0.05
 # Conflicting evidence blocks by default; a vertical may downgrade it to an
 # explicit unresolved note instead.
 _CONFLICT_POLICY_BLOCK = True
@@ -98,6 +102,106 @@ def _matches_claim(sentence: str, claim: dict) -> bool:
     return bool(sentence_numbers & _numbers(claim_text))
 
 
+# ── Which claim is a sentence actually stating? ──────────────────────────────
+# `_matches_claim` answers "could this sentence be that claim", and a sentence
+# can answer yes for several claims at once. The blocking checks below read that
+# as "the draft asserts this claim", which is a different sentence entirely.
+#
+# Measured on draft 8a1f6e46: factual score 100 — every factual sentence matched
+# a SUPPORTED claim — while five of those same sentences were blocked for
+# asserting UNSUPPORTED ones. Both readings were true of the same text, and the
+# draft was rejected for the ledger claim it happened to also resemble.
+#
+# So when a sentence matches both a blockable claim and a supported one, the two
+# readings are compared and only the stronger is acted on. The comparison is
+# deliberately shallow — shared vocabulary and reproduced figures — because a
+# deeper one would be a second matcher with its own failure modes.
+#
+# Ties are BLOCKED, not waved through: the arbitration exists to stop mistaken
+# blame, never to launder an unsupported assertion past the gate. Preferring the
+# supported reading on principle is exactly the failure this must not become. An
+# undecidable case therefore blocks under its own code, so an operator reads it
+# as a matcher case rather than a drafting fault.
+_ASSERTED = "ASSERTED"      # the blockable claim is the better reading
+_RIVAL = "RIVAL"            # a supported claim is the better reading
+_AMBIGUOUS = "AMBIGUOUS"    # neither wins; block and say so
+
+
+def _match_strength(sentence: str, claim: dict) -> float:
+    """How strongly a sentence corresponds to a claim; 0.0 when it does not.
+
+    Only ever read as a comparison between two readings of the SAME sentence, so
+    the absolute value means nothing on its own.
+    """
+    if not _matches_claim(sentence, claim):
+        return 0.0
+    claim_text = str(claim.get("claim", ""))
+    sentence_words, claim_words = _content_words(sentence), _content_words(claim_text)
+    union = sentence_words | claim_words
+    topic = len(sentence_words & claim_words) / len(union) if union else 0.0
+    sentence_numbers = _numbers(sentence)
+    if sentence_numbers:
+        figures = (len(sentence_numbers & _numbers(claim_text))
+                   / len(sentence_numbers))
+    else:
+        # No figure to arbitrate on. The same constant for every rival reading of
+        # this sentence, so it cancels out of the comparison it feeds.
+        figures = 0.5
+    return 0.6 * topic + 0.4 * figures
+
+
+def _arbitrate(sentence: str, claim: dict,
+               supported: list[dict]) -> tuple[str, dict | None]:
+    """Compare this sentence read as `claim` against its best supported reading."""
+    this = _match_strength(sentence, claim)
+    best, rival = 0.0, None
+    for candidate in supported:
+        if candidate is claim:
+            continue
+        strength = _match_strength(sentence, candidate)
+        if strength > best:
+            best, rival = strength, candidate
+    if this - best > _MATCH_MARGIN:
+        return _ASSERTED, rival
+    if best - this > _MATCH_MARGIN:
+        return _RIVAL, rival
+    return _AMBIGUOUS, rival
+
+
+def _reading(sentences: list[str], claim: dict,
+             supported: list[dict]) -> tuple[str, str, dict | None]:
+    """The strongest verdict the whole draft carries about one claim.
+
+    One asserting sentence is enough to block, so `_ASSERTED` wins over a tie
+    found earlier in the body.
+    """
+    ambiguous: tuple[str, str, dict | None] | None = None
+    for sentence in sentences:
+        if not _matches_claim(sentence, claim):
+            continue
+        verdict, rival = _arbitrate(sentence, claim, supported)
+        if verdict == _ASSERTED:
+            return _ASSERTED, sentence, rival
+        if verdict == _AMBIGUOUS and ambiguous is None:
+            ambiguous = (_AMBIGUOUS, sentence, rival)
+    return ambiguous or (_RIVAL, "", None)
+
+
+def _ambiguous_finding(sentence: str, claim: dict, rival: dict | None,
+                       withheld_code: str) -> dict:
+    return _finding(
+        "AMBIGUOUS_MATCH",
+        f"A sentence matches the {claim.get('category')} claim {withheld_code} "
+        f"would block and a SUPPORTED claim equally well. The matcher cannot say "
+        f"which one the draft states, so it blocks — but this is an ambiguity of "
+        f"matching, not a drafting fault. Read the two candidates below before "
+        f"asking for a rewrite.",
+        blocking=True,
+        detail=(f"sentence: {sentence[:110]} :: contested: "
+                f"{str(claim.get('claim'))[:80]} :: supported: "
+                f"{str((rival or {}).get('claim') or '(none)')[:80]}"))
+
+
 def run_factual_qa_v2(draft: dict, package: dict,
                       profile: VerticalProfile) -> dict:
     """Evaluate a draft against the package's atomic claim ledger."""
@@ -114,6 +218,8 @@ def run_factual_qa_v2(draft: dict, package: dict,
         if finding["blocking"]:
             blocking.append(finding)
 
+    draft_sentences = extract_draft_claims(body) if body else []
+
     # ── 1. Ledger-level policy, independent of what the draft says ───────────
     for claim in claims:
         status = claim.get("evidence_status")
@@ -122,14 +228,17 @@ def run_factual_qa_v2(draft: dict, package: dict,
         if risk == ClaimRisk.HIGH and status != EvidenceStatus.SUPPORTED.value:
             # Only blocks if the draft actually asserts it — an unresolved claim
             # sitting unused in the ledger is a research gap, not a draft defect.
-            if body and any(_matches_claim(s, claim)
-                            for s in extract_draft_claims(body)):
+            verdict, sentence, rival = _reading(draft_sentences, claim, supported)
+            if verdict == _ASSERTED:
                 add(_finding(
                     "HIGH_RISK_CLAIM_ASSERTED",
                     f"The draft asserts a HIGH-risk {claim.get('category')} claim "
                     f"that the evidence set could not establish "
                     f"({status}): {claim.get('reason', '')[:160]}",
                     blocking=True, detail=str(claim.get("claim"))[:280]))
+            elif verdict == _AMBIGUOUS:
+                add(_ambiguous_finding(sentence, claim, rival,
+                                       "HIGH_RISK_CLAIM_ASSERTED"))
 
         # ── A regional figure stated as the country's ────────────────────
         # This check exists because of a change made beside it: a claim naming
@@ -145,34 +254,47 @@ def run_factual_qa_v2(draft: dict, package: dict,
         claim_region = _region_of(claim)
         if (claim.get("regionally_determined") and claim_region.is_subnational
                 and body):
-            for sentence in extract_draft_claims(body):
+            for sentence in draft_sentences:
                 if not _matches_claim(sentence, claim):
                     continue
-                if not names_region(sentence, claim_region):
-                    add(_finding(
-                        "REGIONAL_SCOPE_NOT_STATED",
-                        f"The draft states a {claim.get('category')} figure that "
-                        f"holds for {claim_region.value} without naming the "
-                        f"region. Written flat it reads as country-wide, and no "
-                        f"source establishes it for the country.",
-                        blocking=True, detail=sentence[:280]))
+                if names_region(sentence, claim_region):
+                    break
+                verdict, rival = _arbitrate(sentence, claim, supported)
+                if verdict == _RIVAL:
+                    # The sentence is really stating another supported claim; the
+                    # scope of this one is not what it failed to name.
+                    break
+                if verdict == _AMBIGUOUS:
+                    add(_ambiguous_finding(sentence, claim, rival,
+                                           "REGIONAL_SCOPE_NOT_STATED"))
+                    break
+                add(_finding(
+                    "REGIONAL_SCOPE_NOT_STATED",
+                    f"The draft states a {claim.get('category')} figure that "
+                    f"holds for {claim_region.value} without naming the "
+                    f"region. Written flat it reads as country-wide, and no "
+                    f"source establishes it for the country.",
+                    blocking=True, detail=sentence[:280]))
                 break
 
         if status == EvidenceStatus.CONFLICTING.value:
-            if body and any(_matches_claim(s, claim)
-                            for s in extract_draft_claims(body)):
+            verdict, sentence, rival = _reading(draft_sentences, claim, supported)
+            if verdict == _ASSERTED:
                 add(_finding(
                     "CONFLICTING_EVIDENCE_ASSERTED",
                     f"The draft asserts a claim whose evidence conflicts: "
                     f"{claim.get('reason', '')[:160]}",
                     blocking=_CONFLICT_POLICY_BLOCK,
                     detail=str(claim.get("claim"))[:280]))
+            elif verdict == _AMBIGUOUS and _CONFLICT_POLICY_BLOCK:
+                add(_ambiguous_finding(sentence, claim, rival,
+                                       "CONFLICTING_EVIDENCE_ASSERTED"))
 
     if not body:
         return _verdict(findings, blocking, claims, 0)
 
     # ── 2. Every factual sentence must trace to a SUPPORTED claim ────────────
-    draft_claims = extract_draft_claims(body)
+    draft_claims = draft_sentences
     unmatched: list[str] = []
     for sentence in draft_claims:
         if any(_matches_claim(sentence, claim) for claim in supported):

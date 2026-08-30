@@ -9,6 +9,7 @@ box where the API is not exposed at all — which is the intended deployment.
     seolead package show <id>
     seolead brief show <id>
     seolead draft show <id>
+    seolead draft rejudge <id>
     seolead content pending
     seolead content approve <draft-id> --by "name" [--note "..."]
     seolead content reject <draft-id> --by "name"
@@ -36,7 +37,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.enums import ApprovalState, ClaimCategory
+from app.core.enums import ApprovalState, ClaimCategory, EvidenceStatus, QAType
 from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
@@ -54,7 +55,8 @@ from app.services import approval_service
 from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
 from app.services.pipeline import run_pipeline
-from app.services import authority_probe
+from app.services import (authority_probe, factual_qa_v2, qa_service,
+                          title_registry)
 from app.services.claim_policy import requirements_for
 from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
 from app.services.provider_usage import UsageRecorder
@@ -488,6 +490,128 @@ async def cmd_brief_show(args: argparse.Namespace) -> int:
             "generated_by": brief.generated_by, "status": brief.status,
         })
     return EXIT_OK
+
+
+def _package_payload(package: ResearchPackage) -> dict:
+    """The package body as the gates expect it, rebuilt from its stored columns.
+
+    `facts` is the claim ledger — V3 writes the same list under both names — and
+    `supported_claims` is derived rather than stored, exactly as the builder
+    derives it.
+    """
+    claims = package.facts or []
+    supported = [c for c in claims
+                 if c.get("evidence_status") == EvidenceStatus.SUPPORTED.value]
+    return {
+        "query": package.query, "market": package.market,
+        "language": package.language, "intent": package.intent,
+        "summary": package.summary,
+        "claims": claims, "facts": claims, "supported_claims": supported,
+        "sources": package.sources or [],
+        "eligible_evidence": package.eligible_evidence or [],
+        "rejected_evidence": package.rejected_evidence or [],
+        "competitor_pages": package.competitor_pages or [],
+        "serp_observations": package.serp_observations or [],
+        "serp_features": package.serp_features or [],
+        "content_gap": package.content_gap or [],
+        "user_questions": package.user_questions or [],
+        "related_searches": package.related_searches or [],
+        "keyword_metrics": package.keyword_metrics or [],
+        "unresolved_questions": package.unresolved_questions or [],
+        "confidence_summary": package.confidence_summary or {},
+    }
+
+
+_BRIEF_NON_PAYLOAD = {"id", "research_package_id", "status", "generated_by",
+                      "created_at"}
+
+
+def _brief_payload(brief: ContentBrief) -> dict:
+    """Every brief column the QA gates read, straight off the row."""
+    return {c.name: getattr(brief, c.name)
+            for c in ContentBrief.__table__.columns
+            if c.name not in _BRIEF_NON_PAYLOAD}
+
+
+async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
+    """Re-run the deterministic gates on a stored draft. Read-only and free.
+
+    No provider is called, no model is asked anything, nothing is written: the
+    draft, its brief and its package are read as they were sealed and passed
+    back through factual and SEO QA as the code stands now. It answers one
+    question — what does this same draft cost at the gate today — without
+    re-buying the research that produced it.
+
+    The advisory LLM review is deliberately absent. It spends money and it never
+    blocks, so it has no place in a count of blocking findings.
+    """
+    async with get_sessionmaker()() as session:
+        draft = await session.get(ContentDraft, uuid.UUID(args.id))
+        if draft is None:
+            _emit({"error": "not found"})
+            return EXIT_ERROR
+        brief = await session.get(ContentBrief, draft.content_brief_id)
+        package = await session.get(ResearchPackage, brief.research_package_id)
+        keyword = await session.get(SeedKeyword, package.keyword_id)
+        profile = load_profile(
+            (await session.get(Vertical, keyword.vertical_id)).code)
+
+        draft_payload = {"title": draft.title, "body": draft.body,
+                         "meta_title": draft.meta_title,
+                         "meta_description": draft.meta_description}
+        payload = _package_payload(package)
+        brief_payload = _brief_payload(brief)
+        existing_titles = await title_registry.competing_titles(session, draft)
+
+        factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
+        seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload,
+                                       profile, existing_titles=existing_titles)
+
+        # What the gates said when the draft was produced, for the comparison
+        # that is the point of the command.
+        stored = (await session.execute(
+            select(QAReview).where(QAReview.content_draft_id == draft.id))
+        ).scalars().all()
+
+        def codes(findings) -> dict[str, int]:
+            counted: dict[str, int] = {}
+            for finding in findings or []:
+                code = str(finding.get("code"))
+                counted[code] = counted.get(code, 0) + 1
+            return counted
+
+        def gate(name, result) -> dict:
+            return {
+                "gate": name, "status": result["status"],
+                "score": result["score"],
+                "blocking": len(result["blocking_issues"]),
+                "blocking_codes": codes(result["blocking_issues"]),
+                "all_codes": codes(result["findings"]),
+            }
+
+        _emit({
+            "draft_id": str(draft.id), "title": draft.title,
+            "package_id": str(package.id), "query": package.query,
+            "when_sealed": [
+                {"gate": r.layer, "status": r.status, "score": r.score,
+                 "blocking": len(r.blocking_issues or []),
+                 "blocking_codes": codes(r.blocking_issues)}
+                for r in stored if r.qa_type == QAType.DETERMINISTIC.value
+            ],
+            "now": [gate("FACTUAL", factual), gate("SEO", seo)],
+            "blocking_total": (len(factual["blocking_issues"])
+                               + len(seo["blocking_issues"])),
+            "claim_ledger": factual["claim_ledger"],
+            "blocking_detail": [
+                {"gate": name, **{k: v for k, v in f.items() if k != "blocking"}}
+                for name, result in (("FACTUAL", factual), ("SEO", seo))
+                for f in result["blocking_issues"]
+            ],
+            "note": ("Gates only. The research, the brief and the draft are the "
+                     "sealed ones; nothing was bought and nothing was written."),
+        })
+    blocking = len(factual["blocking_issues"]) + len(seo["blocking_issues"])
+    return EXIT_BLOCKED if blocking else EXIT_OK
 
 
 async def cmd_draft_show(args: argparse.Namespace) -> int:
@@ -1008,6 +1132,11 @@ def build_parser() -> argparse.ArgumentParser:
     draft_show.add_argument("id")
     draft_show.add_argument("--body", action="store_true", help="include the body")
     draft_show.set_defaults(func=cmd_draft_show)
+    draft_rejudge = draft_sub.add_parser(
+        "rejudge", help="re-run the deterministic QA gates on a stored draft — "
+                        "read-only, no provider call")
+    draft_rejudge.add_argument("id")
+    draft_rejudge.set_defaults(func=cmd_qa_rejudge)
 
     content = sub.add_parser("content", help="approval workflow")
     content_sub = content.add_subparsers(dest="action", required=True)

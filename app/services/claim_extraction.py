@@ -125,6 +125,33 @@ def _is_flattened_list(text: str) -> bool:
     return plus + len(_DASH_JOINER.findall(text)) >= 2
 
 
+# ── A worked example is not a proposition either ─────────────────────────────
+# The same markdown flattening turns a cost simulator's table into one line:
+#
+#   "Puissance: 4 kWc Coût: 6.000 € Production annuelle: 3.800 kWh Économie
+#    annuelle: 950 € Retour: 6,3 ans"
+#
+# Every figure in it is real, and none of it asserts anything: it is one row of
+# an example the page invites the reader to change. Extracted as a claim it
+# becomes a HIGH-risk ROI statement no source can establish — because no source
+# states it, the page merely computes it — and then the QA matcher hands it to
+# any draft sentence that mentions a payback period.
+#
+# The signal is label/value density: a colon immediately followed by a figure,
+# three times or more in one text. Measured on the blocking material of
+# 2026-08-30, the scraped calculation block scored 6; the six real prose claims
+# it was competing with — including "En Wallonie : le retour sur investissement
+# atteint 8 ans." — scored 0. A single "Retour : 8 ans" inside a sentence is
+# ordinary French punctuation, which is why one is not enough and three is.
+_LABEL_VALUE = re.compile(r":\s*\(?\d")
+_LABEL_VALUE_MIN = 3
+
+
+def _is_worked_example(text: str) -> bool:
+    """Whether this is a table of labelled values rather than a proposition."""
+    return len(_LABEL_VALUE.findall(text)) >= _LABEL_VALUE_MIN
+
+
 @dataclass(frozen=True)
 class AtomicClaim:
     """One materially testable proposition, bound to the passage it came from."""
@@ -167,7 +194,7 @@ def _is_assertion(text: str) -> bool:
     # Needs at least a handful of real words.
     if len([w for w in stripped.split() if len(w) > 2]) < 5:
         return False
-    if _is_flattened_list(stripped):
+    if _is_flattened_list(stripped) or _is_worked_example(stripped):
         return False
     return not _is_title_fragment(stripped)
 

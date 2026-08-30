@@ -39,9 +39,9 @@ from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
 from app.services.research_planner import plan_authoritative_research
 from app.schemas.serp import KeywordMetric, SerpSnapshot
-from app.services import (brief_service, draft_service, factual_qa_v2,
-                          opportunity_score, package_builder_v3, qa_service,
-                          serp_analysis)
+from app.services import (brief_service, draft_retry, draft_service,
+                          factual_qa_v2, opportunity_score,
+                          package_builder_v3, qa_service, serp_analysis)
 from app.services.intent import classify_intent, normalize_query
 from app.services.provider_usage import JobBudget, UsageRecorder
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
@@ -76,6 +76,9 @@ class PipelineV2Result:
     opportunity_summary: dict = field(default_factory=dict)
     factual_qa: dict = field(default_factory=dict)
     seo_qa: dict = field(default_factory=dict)
+    # One entry per draft call: what the gate said, and whether it was worth
+    # another attempt. Empty until the writer runs.
+    draft_attempts: list[dict] = field(default_factory=list)
     usage_summary: dict = field(default_factory=dict)
     approval_state: str | None = None
     stopped_at: str | None = None
@@ -107,6 +110,7 @@ class PipelineV2Result:
             "opportunity": self.opportunity_summary,
             "factual_qa": self.factual_qa,
             "seo_qa": self.seo_qa,
+            "draft_attempts": self.draft_attempts,
             "provider_usage": self.usage_summary,
             "approval_state": self.approval_state,
             "stopped_at": self.stopped_at,
@@ -637,23 +641,52 @@ async def run_pipeline_v2(
     # never a rejected source and never a raw page excerpt.
     writer_view = package_builder_v3.writer_payload(payload, allow_partial=False)
 
-    try:
-        draft_payload, llm_response = await draft_service.generate_draft(
-            brief_payload, {**payload, "writer_view": writer_view},
-            llm=llm, correlation_id=correlation_id)
-    except (LLMNotConfigured, SeoLeadError) as exc:
-        result.stopped_at = "draft"
-        result.error_code = exc.code or ErrorCode.CONTENT_GENERATION_FAILED
-        result.error_detail = exc.detail
-        result.usage_summary = usage.summary()
-        await _persist_usage(session, usage, correlation_id)
-        return result
+    # ── Stage 8+9: draft, judged, and re-emitted at most twice ───────────────
+    # The gates run here, in memory, before anything is persisted. A refused
+    # draft is not a refused run: everything expensive is already bought and
+    # unchanged, so what gets re-emitted is the writer's call alone, carrying
+    # the findings that refused it. See `draft_retry` for what may not be
+    # retried and why.
+    existing_titles = await title_registry.competing_titles_for_keyword(
+        session, keyword.id)
+    attempts: list[dict] = []
+    previous_findings: list[dict] | None = None
+    draft_payload = llm_response = factual = seo = None
 
-    usage.record(provider=llm_response.provider, operation="draft",
-                 correlation_id=correlation_id, requests=1,
-                 units=llm_response.usage.total_tokens,
-                 cost_usd=None, cost_is_actual=False,
-                 duration_ms=llm_response.latency_ms)
+    for attempt in range(1, draft_retry.MAX_ATTEMPTS + 1):
+        try:
+            draft_payload, llm_response = await draft_service.generate_draft(
+                brief_payload, {**payload, "writer_view": writer_view},
+                llm=llm, correlation_id=correlation_id,
+                previous_findings=previous_findings)
+        except (LLMNotConfigured, SeoLeadError) as exc:
+            result.stopped_at = "draft"
+            result.error_code = exc.code or ErrorCode.CONTENT_GENERATION_FAILED
+            result.error_detail = exc.detail
+            result.usage_summary = usage.summary()
+            await _persist_usage(session, usage, correlation_id)
+            return result
+
+        usage.record(provider=llm_response.provider, operation="draft",
+                     correlation_id=correlation_id, requests=1,
+                     units=llm_response.usage.total_tokens,
+                     cost_usd=None, cost_is_actual=False,
+                     duration_ms=llm_response.latency_ms)
+
+        factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
+        seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload,
+                                       profile, existing_titles=existing_titles)
+        blocking_now = factual["blocking_issues"] + seo["blocking_issues"]
+        decision = draft_retry.decide(blocking_now, attempt=attempt)
+        attempts.append({**decision.as_dict(),
+                         "factual_score": factual["score"],
+                         "seo_score": seo["score"],
+                         "provider": llm_response.provider})
+        if not decision.retry:
+            break
+        previous_findings = draft_retry.carried(blocking_now)
+
+    result.draft_attempts = attempts
 
     draft = ContentDraft(
         content_brief_id=brief.id, provider=llm_response.provider,
@@ -669,12 +702,8 @@ async def run_pipeline_v2(
     result.content_draft_id = draft.id
 
     # ── Stage 9: QA ──────────────────────────────────────────────────────────
-    # Titles this draft could actually cannibalise. See `title_registry` for why
-    # its own keyword is excluded: those drafts share its slug, so they compete
-    # for nothing.
-    existing_titles = await title_registry.competing_titles(session, draft)
-
-    factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
+    # Already judged above, once per attempt. What is persisted is the verdict on
+    # the draft that was kept, plus the history of what was discarded.
     factual_row = QAReview(content_draft_id=draft.id,
                            qa_type=QAType.DETERMINISTIC.value,
                            layer=QALayer.FACTUAL.value,
@@ -683,7 +712,16 @@ async def run_pipeline_v2(
                                {"code": "CLAIM_LEDGER",
                                 "message": "atomic claim ledger",
                                 "blocking": False, "detail": "",
-                                "ledger": factual["claim_ledger"]}],
+                                "ledger": factual["claim_ledger"]},
+                               # The discarded attempts leave no row of their
+                               # own, so the count and the reason live here.
+                               # Without it a re-emitted run is indistinguishable
+                               # from a first-time pass.
+                               {"code": "DRAFT_ATTEMPTS",
+                                "message": (f"{len(attempts)} draft call(s); "
+                                            f"{attempts[-1]['reason']}"),
+                                "blocking": False, "detail": "",
+                                "attempts": attempts}],
                            blocking_issues=factual["blocking_issues"])
     session.add(factual_row)
     await session.flush()
@@ -692,8 +730,6 @@ async def run_pipeline_v2(
                          "claim_ledger": factual["claim_ledger"],
                          "blocking": len(factual["blocking_issues"])}
 
-    seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload, profile,
-                                   existing_titles=existing_titles)
     seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
                        layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
                        findings=seo["findings"],
