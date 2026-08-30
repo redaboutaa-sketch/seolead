@@ -59,7 +59,7 @@ from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
 from app.services.provider_usage import UsageRecorder
 from app.services.research_planner import plan_authoritative_research
 from app.services.research_cache import freshness_policy
-from app.services.region import detect_region
+from app.services.region import detect_region, region_for_market
 from app.verticals.profile import available_profiles, load_profile
 
 EXIT_OK = 0
@@ -252,6 +252,7 @@ async def cmd_package_replay(args: argparse.Namespace) -> int:
         keyword = await session.get(SeedKeyword, package.keyword_id)
         profile = load_profile(
             (await session.get(Vertical, keyword.vertical_id)).code)
+        default_region = region_for_market(package.market)
 
         def label(value) -> str:
             """`ClaimRequirements` mixes enum members and plain strings."""
@@ -272,7 +273,14 @@ async def cmd_package_replay(args: argparse.Namespace) -> int:
             stored_region = fact.get("claim_region") or fact.get("region")
 
             requirements = requirements_for(text, profile)
-            region = detect_region(text).region
+            # `default=` matters, and its absence made the first version of this
+            # command lie. The builder resolves a claim's scope with
+            # `detect_region(text, default=region_for_market(market))`, so a
+            # claim naming no region is stamped with the market — BE here.
+            # Calling `detect_region(text)` bare returned UNKNOWN for those same
+            # claims and reported a change on nearly every one of them, drowning
+            # the three genuine region corrections in a hundred artefacts.
+            region = detect_region(text, default=default_region).region
             category, risk = label(requirements.category), label(requirements.risk)
 
             before_risk[str(stored_risk)] = before_risk.get(str(stored_risk), 0) + 1

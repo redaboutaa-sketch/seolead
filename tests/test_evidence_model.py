@@ -11,7 +11,10 @@ import pytest
 
 from app.core.enums import (AuthorityRequirement, ClaimCategory, EvidenceStatus,
                             FreshnessRequirement, ObservationStatus)
-from app.services.claim_extraction import extract_claim_set, extract_claims
+from app.services.claim_extraction import (_VERB_MARKER, _is_assertion,
+                                           _is_flattened_list,
+                                           _is_title_fragment,
+                                           extract_claim_set, extract_claims)
 from app.services.claim_policy import (ClaimRisk, authority_is_sufficient,
                                        classify_category, requirements_for)
 from app.services.evidence_model import (EvidenceRef, build_candidates,
@@ -164,6 +167,96 @@ class TestClaimExtraction:
         result = extract_claim_set(passages)
         assert len(result.claims) == 1
         assert result.skipped == 1
+
+
+class TestFlattenedNavigationIsNotAClaim:
+    """The single blocking finding of the run of 2026-08-30.
+
+    A markdown extractor renders a site menu as one line. The result carries the
+    vocabulary of a subsidy page, so it was classified SUBSIDY at HIGH risk, went
+    UNSUPPORTED for want of a national source, and the QA matcher — which
+    compares content words — then believed the draft asserted it. Nothing in a
+    menu is true or false; it had no business in the ledger.
+    """
+
+    BLOCKING_CLAIM = (
+        "Prime pour son habitation 2019 (jusqu’au 30/06/2023) Prime chauffage "
+        "et eau chaude sanitaire (du 1er juillet 2023 au 13 février 2025) Prime "
+        "Toiture et petits travaux sans audit (jusqu'au 13/02/2025) - Soutien "
+        "à la production d'électricité verte + Entreprises - Audits et "
+        "études AM")
+
+    # The ledger stores `proposition[:320]`, so the string above is a TRUNCATION.
+    # The full menu is what the extractor judged, and it is the full menu that
+    # got through: somewhere in it, "Quelles compétences techniques sont
+    # requises" supplies a finite verb, `_VERB_MARKER` fires, the heading test
+    # concludes "not a title", and a menu becomes an assertion. Truncating it
+    # afterwards cut the verb away — which is why the stored form looks refusable
+    # and the real input was not.
+    FULL_MENU = BLOCKING_CLAIM.replace("études AM", "études AMUREBA") + (
+        " pour les auditeurs + Quels audits et études + Quel auditeur pour quel "
+        "audit + Quelles compétences techniques sont requises + Contacts")
+
+    def test_the_full_menu_carries_a_verb_and_so_is_not_a_heading(self):
+        """The reason the old filters let it through, stated as a fact."""
+        assert _VERB_MARKER.search(self.FULL_MENU) is not None
+        assert _is_title_fragment(self.FULL_MENU) is False
+
+    def test_the_full_menu_is_refused_anyway(self):
+        assert _is_flattened_list(self.FULL_MENU) is True
+        assert _is_assertion(self.FULL_MENU) is False
+
+    def test_it_never_reaches_the_claim_set(self):
+        """Not just the predicate — the extractor's own output."""
+        passage = Passage(text=self.FULL_MENU, offset=0, source_ref="s1")
+        assert extract_claims(passage) == []
+
+    def test_the_truncated_form_is_refused_too(self):
+        """Refused by the heading test, not by the new one. Kept as a record:
+        it is what the ledger showed, and it is not what was judged."""
+        assert _is_assertion(self.BLOCKING_CLAIM) is False
+
+    @pytest.mark.parametrize("menu", [
+        "Nouvelle Directive PEB (UE) 2024/1275 + Étude cost-optimum (COZEB) + "
+        "Rapport du projet SUD - Contacts Posez vos questions relatives à la PEB",
+        "Calculez la rentabilité de votre installation photovoltaïque pagecontent "
+        "+ Installations photovoltaïques de puissance supérieure à 10 KW - Nouveau "
+        "projet Réservation",
+        "AMUREBA pour les auditeurs + Quels audits et études + Quel auditeur pour "
+        "quel audit + Quelles compétences techniques",
+    ])
+    def test_other_menus_from_the_same_run_are_refused(self, menu):
+        assert _is_assertion(menu) is False
+
+    def test_a_french_aside_between_dashes_is_still_a_claim(self):
+        """The counter-proof that decides the rule's shape.
+
+        Dashes alone are not enough. This is an ordinary French incise with two
+        of them, and it is a genuine grid-rule assertion — rejecting it to catch
+        menus would cost more than it saves. A " + " joining words is what
+        separates the two, because prose almost never contains one.
+        """
+        assert _is_assertion(
+            "Le tarif prosumer - qui fait contribuer les utilisateurs du réseau "
+            "- est appliqué depuis 2020.") is True
+
+    @pytest.mark.parametrize("claim", [
+        "Le prix moyen est désormais d'environ 1 €/Wc hors TVA, soit environ "
+        "5.000 € pour une installation moyenne de 5.000 Wc",
+        "Les installations de moins de 5 kWc reçoivent 2,055 Certificats Verts "
+        "par 1000 kWh produits et cela pendant 10 ans.",
+        "La production d'électricité qui peut varier entre 200 et 1038 kWh/an "
+        "pour 1 kWc installé, selon l'orientation, l'inclinaison et l'ombrage.",
+        "Comptez entre 1€ et 1,2€ par watt crête installé.",
+    ])
+    def test_real_claims_from_the_same_package_are_untouched(self, claim):
+        assert _is_assertion(claim) is True
+
+    def test_a_lone_plus_inside_a_sentence_is_not_a_menu(self):
+        """One joiner is a product pairing, not a flattened list."""
+        assert _is_assertion(
+            "Une installation panneaux + batterie revient à 12 000 € en "
+            "Belgique.") is True
 
 
 # ─── Category, authority, freshness ──────────────────────────────────────────
