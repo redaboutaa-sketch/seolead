@@ -243,3 +243,71 @@ Aucun de ces quatre points n'attend seolead.
 
 Aucun secret ne figure dans ce document : seuls des **noms** de variables
 d'environnement sont cités, jamais leurs valeurs.
+
+---
+
+# Addendum du 2026-08-31 — campagne FR uniquement
+
+**Décision du propriétaire.** Cette campagne est francophone. Le néerlandais
+servira une future campagne énergie aux Pays-Bas, pas celle-ci.
+
+## Ce qui change
+
+`config/sites/solar_be.yaml` ne déclare plus que `supported_languages: [fr]`.
+Les routes `/` et `/demande-etude` ne déclarent plus que la locale française, et
+`/nl/demande-etude` cesse d'être servie — elle répond 404.
+
+## Conséquence assumée, écrite pour ne pas être oubliée
+
+**Le marché flamand n'est pas adressé par cette campagne.** Un visiteur
+néerlandophone en Belgique voit le site en français ; aucune page ne lui est
+servie dans sa langue, et aucun lead flamand n'est capté par ce site. Un
+formulaire soumis avec `language: nl` — page en cache, signet, robot — est
+étiqueté `fr` plutôt que transmis tel quel : la charge ne prétend pas adresser
+un marché qu'elle n'adresse pas.
+
+C'est un choix commercial, et le genre de choix qu'on oublie et qu'on prend six
+mois plus tard pour un oubli technique.
+
+## Rien de la mécanique néerlandaise n'est supprimé
+
+Routes, chaîne i18n, libellés placeholders « À TRADUIRE PAR UN NATIF » : tout
+reste. Le fichier de route existe encore et refuse simplement de servir une
+locale que le site ne déclare pas — le supprimer jetterait une plomberie qui
+fonctionne et qu'une campagne néerlandaise redemandera.
+
+Remettre `nl` dans `supported_languages` rallume l'ensemble. Et la garde
+`pending_legal_review` se remet aussitôt à bloquer la sortie de staging, parce
+que les textes NL sont toujours des placeholders. C'est le comportement voulu,
+pas un reliquat — un test l'épingle.
+
+## Le verdict qui compte
+
+```
+locales supportées : ['fr']
+staging            : True
+allow_indexing     : False
+
+La configuration accepte-t-elle staging: false ?
+  ACCEPTÉE — la garde pending_legal_review ne bloque plus.
+    is_publishable = True
+    is_indexable   = False   (allow_indexing encore false)
+
+Et si on remettait nl sans textes validés ?
+  REFUSÉE, comme voulu.
+```
+
+**La garde de sortie de staging est verte.** Ce n'est pas un affaiblissement :
+la règle interdit qu'une locale SERVIE collecte un consentement sur un texte non
+validé, et la locale qu'elle protégeait n'est plus servie.
+
+Deux décisions restent distinctes, et la seconde n'est pas prise :
+`staging: false` rend le site public ; `allow_indexing: true` le rend
+indexable. Le bandeau de préproduction et `noindex,nofollow` sont toujours en
+place.
+
+## Ce qui reste suspendu au juridique
+
+La traduction NL des quatre textes de consentement **n'est plus bloquante pour
+cette campagne**. Elle redevient un prérequis le jour où une campagne
+néerlandophone démarre, et la garde l'imposera d'elle-même.

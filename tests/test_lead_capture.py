@@ -269,6 +269,11 @@ class TestPerCaseConsent:
         raw = load_site("solar_be").model_dump()
         raw["staging"] = False
         raw["domain"] = "monprojetsolaire.be"
+        # La locale est déclarée ici : depuis le 2026-08-31 la campagne est
+        # francophone, et une locale non servie ne collecte aucun consentement.
+        # Le garde protège les locales OFFERTES — c'est le jour où le
+        # néerlandais revient qu'il doit mordre, et ce test le vérifie.
+        raw["supported_languages"] = ["fr", "nl"]
         with pytest.raises(Exception, match="pending_legal_review"):
             SiteConfig(**raw)
 
@@ -401,6 +406,7 @@ class TestValidatedConsentTexts:
 
         raw = load_site("solar_be").model_dump()
         raw["staging"] = False
+        raw["supported_languages"] = ["fr", "nl"]
         with pytest.raises(Exception, match="'nl'.*pending_legal_review"):
             SiteConfig(**raw)
 

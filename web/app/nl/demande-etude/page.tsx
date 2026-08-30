@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 
 import { RequestStudyPage } from "@/components/RequestStudyPage";
+import { getSiteConfig } from "@/lib/api";
 
 /**
  * The Dutch conversion route — MECHANICS ONLY.
@@ -15,6 +17,17 @@ import { RequestStudyPage } from "@/components/RequestStudyPage";
  * `language` field, is validated server-side against `supported_languages`, and
  * lands in `lead_attribution.language` and the export payload's
  * `attribution.locale`.
+ *
+ * SERVED ONLY WHEN THE SITE DECLARES THE LOCALE. The owner decided on
+ * 2026-08-31 that this campaign is French only, so `supported_languages` no
+ * longer lists `nl` and this route 404s. The file stays: deleting it would
+ * throw away working plumbing that a Dutch campaign will want back, and the
+ * server would refuse a `language: "nl"` submission anyway — a page that can
+ * only collect a rejection has no business being reachable.
+ *
+ * Re-declaring the locale in `config/sites/solar_be.yaml` turns it back on, and
+ * the `pending_legal_review` guard resumes blocking until the Dutch consent
+ * texts are validated. That is the intended behaviour, not a leftover.
  */
 export const metadata: Metadata = {
   title: "[NL — À TRADUIRE PAR UN NATIF] Demander une estimation",
@@ -26,5 +39,9 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function RequestPageNl() {
+  const config = await getSiteConfig();
+  if (!config?.supported_languages?.includes("nl")) {
+    notFound();
+  }
   return <RequestStudyPage locale="nl" />;
 }
