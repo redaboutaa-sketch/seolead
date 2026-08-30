@@ -82,6 +82,10 @@ class VerticalProfile(BaseModel):
     # empty. Nothing in the code knows that — it is configuration, like every
     # other statement about a market.
     regionally_determined_claims: list[str] = Field(default_factory=list)
+    # The substance floor: how many supported facts an article must actually
+    # use. Ratified by the owner, because it is an editorial judgement about
+    # what counts as a page worth publishing, not a technical threshold.
+    minimum_supported_facts_used: int = 0
     # Where to look when a HIGH-risk claim is unresolved. A placeholder here is
     # deliberate: it can be populated without touching orchestration code.
     official_source_policy: dict = Field(default_factory=dict)

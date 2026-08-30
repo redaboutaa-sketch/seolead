@@ -186,16 +186,40 @@ class TestResearchPersistence:
 
 class TestFullPipeline:
     async def test_reaches_pending_approval(self, seeded_session, envelope):
+        """The guarantee this test guards: the pipeline stops at a person.
+
+        It used to also assert QA PASSED. It no longer can, and the reason is
+        the point of the next test rather than a regression: SOLAR_BE ratified a
+        substance floor of eight supported facts, and this envelope carries five
+        community results. Five is not eight, and a page built on it would be
+        padding. The pipeline still runs to the end and still parks the draft in
+        front of a human, which is what this test exists to protect.
+        """
         result = await _run(seeded_session, envelope, StubLLM())
 
         assert result.content_draft_id is not None
-        assert result.qa_status == "PASSED", result.error_code
         assert result.approval_state == ApprovalState.PENDING.value
         assert result.stopped_at == "approval"
 
         draft = await seeded_session.get(ContentDraft, result.content_draft_id)
-        assert draft.status == ContentStatus.PENDING_APPROVAL.value
         assert draft.usage["total_tokens"] == 30
+        # Never APPROVED without a person, whatever QA said.
+        assert draft.status != ContentStatus.APPROVED.value
+
+    async def test_a_thin_research_envelope_cannot_produce_a_publishable_page(
+            self, seeded_session, envelope):
+        """And the floor names the real gap: the research, not the draft.
+
+        Blaming the writer for a page it could not have written better would
+        send an operator to fix the wrong thing.
+        """
+        result = await _run(seeded_session, envelope, StubLLM())
+        reviews = (await seeded_session.execute(
+            select(QAReview).where(
+                QAReview.content_draft_id == result.content_draft_id)
+        )).scalars().all()
+        codes = {f.get("code") for r in reviews for f in (r.blocking_issues or [])}
+        assert "INSUFFICIENT_SUPPORTED_EVIDENCE" in codes
 
     async def test_both_qa_layers_are_recorded(self, seeded_session, envelope):
         result = await _run(seeded_session, envelope, StubLLM())
