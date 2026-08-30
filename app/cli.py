@@ -244,6 +244,7 @@ async def cmd_authority_probe(args: argparse.Namespace) -> int:
         rows.append({
             "url": source.url,
             "title": source.title,
+            "host": authority_probe.host_of(source.url),
             "domain": entry.domain if entry else None,
             "in_registry": entry is not None,
             "pending_ratification": bool(entry and entry.pending_ratification),
