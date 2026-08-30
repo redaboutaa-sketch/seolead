@@ -119,6 +119,34 @@ class TestRegionalScope:
             "En Belgique, la prime wallonne s'élève à 1 750 €.").region \
             is Region.BE_WAL
 
+    def test_a_text_naming_several_regions_is_national_not_the_first_one(self):
+        """The defect that emptied the evidence set for BE-wide claims.
+
+        Detection returned whichever sub-region came first in the iteration
+        order — always BE-WAL. A page comparing the three regional schemes is
+        exactly the Belgium-wide source a Belgium-wide claim needs, and it was
+        stamped Walloon, then rejected for "regional scope mismatch".
+        """
+        match = detect_region(
+            "Comparatif des primes en Wallonie, à Bruxelles et en Flandre.")
+        assert match.region is Region.BE
+        # And the reason is legible: all three are named in the evidence.
+        assert "wallonie" in match.evidence
+        assert "bruxelles" in match.evidence
+        assert "flandre" in match.evidence
+
+    def test_two_regions_are_already_enough_to_be_national(self):
+        assert detect_region(
+            "La prime diffère entre la Wallonie et la Flandre.").region \
+            is Region.BE
+
+    def test_a_multi_region_source_can_now_support_a_belgian_claim(self):
+        """The consequence, stated as the rule it restores."""
+        evidence = detect_region(
+            "En Wallonie comme en Flandre, le compteur ne tourne plus à "
+            "l'envers.").region
+        assert scope_is_compatible(evidence, Region.BE) is True
+
     def test_national_evidence_covers_a_regional_claim(self):
         assert scope_is_compatible(Region.BE, Region.BE_WAL) is True
 

@@ -88,8 +88,17 @@ _UNIVERSAL_CATEGORY_HINTS: dict[ClaimCategory, tuple[str, ...]] = {
                                        "gegarandeerd"),
     ClaimCategory.ROI: ("retour sur investissement", "amortissement", "rentabilite",
                         "payback", "roi", "terugverdientijd"),
+    # `kwh` alone used to sit in this list, among three phrases that all name a
+    # PRICE. It is a unit, not a price: every statement of a QUANTITY of energy
+    # ("la production était de 16,8 kWh/jour", "un ménage consomme 3 500 kWh par
+    # an") became an electricity-tariff claim — HIGH risk, institutional source
+    # required, dated. Those are the ordinary, useful sentences an article about
+    # solar output is made of, and the requirement they inherited was
+    # unmeetable. A kWh becomes a price claim only when the text says so.
     ClaimCategory.ENERGY_PRICE: ("prix de l'electricite", "tarif electricite",
-                                 "kwh", "prix du kwh", "elektriciteitsprijs"),
+                                 "prix du kwh", "prix au kwh", "cout du kwh",
+                                 "tarif du kwh", "elektriciteitsprijs",
+                                 "prijs per kwh"),
 }
 
 # Category → (risk, authority, freshness, corroboration, why).
@@ -207,6 +216,20 @@ _MARKET_MARKERS = _AVERAGE_MARKERS + _RANGE_MARKERS
 _VENDOR_MARKERS = ("nos tarifs", "nos prix", "notre offre", "notre prix",
                    "chez nous", "our price", "our pricing", "onze prijs")
 
+# Money vocabulary, anchored at word boundaries for exactly the reason spelled
+# out on `_matches_term` — and violated three lines below it until now. The
+# fallback used substring matching, so "eur" matched *chaleur*, *onduleur*,
+# *meilleur*, *heures*, *capteur* and *valeur*. Ordinary sentences about how a
+# panel behaves ("les panneaux n'aiment pas les fortes chaleurs") became
+# market-price claims requiring three corroborating sources, and then failed for
+# want of pricing evidence that could never exist for them. The stems that do
+# take suffixes keep them; only the accidental collisions are gone. The euro
+# SYMBOL is deliberately absent: it is not a word, and `_has_currency` already
+# catches it in "7 000€" where a word boundary never could.
+_MONEY_WORD = re.compile(
+    r"(?<!\w)(?:euros?|prix|tarif(?:s|aires?)?|"
+    r"cout(?:s|e|ent|er|era|eront|eux|euses?)?|prijs|prijzen|kosten?)(?!\w)")
+
 
 def _matches_term(term: str, normalized_claim: str) -> bool:
     """Whole-word match.
@@ -253,9 +276,7 @@ def classify_category(claim: str, profile: VerticalProfile) -> ClaimCategory:
 
     # Price claims split by scope: a market average and a vendor's own price are
     # different assertions needing different evidence.
-    has_money = any(token in normalized for token in ("eur", "euro", "€", "prix",
-                                                      "cout", "tarif", "prijs"))
-    if has_money or _has_currency(claim):
+    if _MONEY_WORD.search(normalized) or _has_currency(claim):
         if any(marker in normalized for marker in _VENDOR_MARKERS):
             return ClaimCategory.VENDOR_PRICE
         # An explicit average outranks a range: "le prix moyen varie entre X et Y"
