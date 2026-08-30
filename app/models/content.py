@@ -138,6 +138,27 @@ class QAReview(Base):
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     findings: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     blocking_issues: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+
+    # ── A verdict is a dated fact ────────────────────────────────────────────
+    # The gates changed after draft 8a1f6e46 was judged, and the same draft now
+    # passes them. The row saying it failed is not thereby wrong: on
+    # 2026-08-30, under the matcher of that day, it did fail. Correcting it in
+    # place would destroy the only evidence that the matcher ever misattributed
+    # anything, and would leave the audit trail asserting something that was
+    # never true — that this draft always passed.
+    #
+    # So a re-judgement APPENDS. `revision` orders the verdicts of one layer,
+    # `engine_version` says what judged them, `verdict_reason` says why the
+    # judgement was made again, and every earlier row stays readable for good.
+    # The publication gate reads the highest revision; history reads all of them.
+    #
+    # `revision` rather than `created_at` alone, because two rows written in the
+    # same transaction share a timestamp and the ordering must never be a
+    # coin toss on which verdict governs publication.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1,
+                                          server_default="1")
+    engine_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verdict_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at = created_column()
 
     draft: Mapped[ContentDraft] = relationship(back_populates="qa_reviews")

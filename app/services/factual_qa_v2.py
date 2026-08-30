@@ -41,6 +41,12 @@ _TOPIC_MATCH_MIN = 2
 # Two readings of one sentence count as equally strong within this margin. Below
 # it the difference is not evidence of anything, and the verdict is a tie.
 _MATCH_MARGIN = 0.05
+
+# What judged a verdict, recorded on the row it produces. The margin is in the
+# string on purpose: it is the knob that decides every arbitration, and a
+# re-judgement under a different setting must read as a different engine rather
+# than as an unexplained reversal.
+ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}"
 # Conflicting evidence blocks by default; a vertical may downgrade it to an
 # explicit unresolved note instead.
 _CONFLICT_POLICY_BLOCK = True

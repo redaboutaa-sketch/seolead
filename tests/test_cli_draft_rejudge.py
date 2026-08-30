@@ -12,6 +12,7 @@ import argparse
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.cli import cmd_qa_rejudge
 from app.core.enums import QAType
@@ -101,9 +102,11 @@ def rejudge(monkeypatch, session):
     captured: list[dict] = []
     monkeypatch.setattr(cli, "_emit", lambda payload: captured.append(payload))
 
-    async def _run(draft_id: str, *, explain: bool = False) -> tuple[int, dict]:
-        code = await cmd_qa_rejudge(argparse.Namespace(id=draft_id,
-                                                       explain=explain))
+    async def _run(draft_id: str, *, explain: bool = False,
+                   apply: bool = False,
+                   reason: str | None = None) -> tuple[int, dict]:
+        code = await cmd_qa_rejudge(argparse.Namespace(
+            id=draft_id, explain=explain, apply=apply, reason=reason))
         return code, captured[-1]
 
     return _run
@@ -213,3 +216,91 @@ class TestExplain:
         _, explained = await rejudge(str(draft.id), explain=True)
         assert plain["now"] == explained["now"]
         assert plain["blocking_total"] == explained["blocking_total"]
+
+
+class TestApplyAppends:
+    """A verdict is a dated fact: it is added, never corrected.
+
+    The row saying draft 8a1f6e46 failed on 2026-08-30 is true of that day.
+    Editing it would destroy the only evidence that the matcher ever
+    misattributed anything, and would leave the trail asserting something that
+    was never true — that this draft always passed.
+    """
+
+    async def _rows(self, session, draft):
+        # `populate_existing`: the rows were expired by the commit inside the
+        # command, and reading an expired attribute outside the greenlet is an
+        # error rather than a lazy load.
+        result = await session.execute(
+            select(QAReview).where(QAReview.content_draft_id == draft.id)
+            .execution_options(populate_existing=True))
+        return result.scalars().all()
+
+    async def test_the_sealed_verdict_survives_untouched(self, session,
+                                                         rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        sealed = (await self._rows(session, draft))[0]
+        before = (sealed.id, sealed.status, list(sealed.blocking_issues),
+                  sealed.revision)
+
+        await rejudge(str(draft.id), apply=True)
+
+        kept = next(r for r in await self._rows(session, draft)
+                    if r.id == before[0])
+        assert (kept.id, kept.status, list(kept.blocking_issues),
+                kept.revision) == before
+
+    async def test_the_new_verdict_is_a_higher_revision(self, session,
+                                                        rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, report = await rejudge(str(draft.id), apply=True)
+
+        factual = next(a for a in report["applied"] if a["gate"] == "FACTUAL")
+        assert factual["revision"] == 2
+        assert factual["status"] == "PASSED"
+        assert factual["supersedes"], "it must name what it supersedes"
+
+        rows = [r for r in await self._rows(session, draft)
+                if r.layer == "FACTUAL"]
+        assert sorted(r.revision for r in rows) == [1, 2]
+
+    async def test_it_records_what_judged_it_and_why(self, session, rejudge):
+        """Provenance, or the new verdict is an unexplained reversal."""
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        await rejudge(str(draft.id), apply=True,
+                      reason="matcher arbitration shipped")
+
+        newest = max((r for r in await self._rows(session, draft)
+                      if r.layer == "FACTUAL"), key=lambda r: r.revision)
+        assert newest.engine_version.startswith("factual_qa_v2/arbitration-")
+        assert newest.verdict_reason == "matcher arbitration shipped"
+        assert newest.created_at is not None
+
+    async def test_nothing_is_written_without_the_flag(self, session, rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        await rejudge(str(draft.id))
+        assert len(await self._rows(session, draft)) == 1
+
+    async def test_a_refusal_is_recorded_too(self, session, rejudge):
+        """A verdict that still refuses is a fact with a date on it as well.
+
+        Recording only the passes would make the trail a record of successes.
+        """
+        draft, _ = await _sealed_draft(session, body=UNSUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, report = await rejudge(str(draft.id), apply=True)
+        factual = next(a for a in report["applied"] if a["gate"] == "FACTUAL")
+        assert factual["status"] == "FAILED"
+        assert factual["blocking"] >= 1
+
+    async def test_a_second_application_keeps_climbing(self, session, rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        await rejudge(str(draft.id), apply=True)
+        _, report = await rejudge(str(draft.id), apply=True)
+        assert next(a for a in report["applied"]
+                    if a["gate"] == "FACTUAL")["revision"] == 3

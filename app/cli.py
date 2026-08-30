@@ -9,7 +9,7 @@ box where the API is not exposed at all — which is the intended deployment.
     seolead package show <id>
     seolead brief show <id>
     seolead draft show <id>
-    seolead draft rejudge <id>
+    seolead draft rejudge <id> [--explain] [--apply --reason "..."]
     seolead content pending
     seolead content approve <draft-id> --by "name" [--note "..."]
     seolead content reject <draft-id> --by "name"
@@ -37,7 +37,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.enums import ApprovalState, ClaimCategory, EvidenceStatus, QAType
+from app.core.enums import (ApprovalState, ClaimCategory, EvidenceStatus,
+                            QALayer, QAType)
 from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
@@ -596,6 +597,44 @@ async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
                                                          profile)
                        if getattr(args, "explain", False) else None)
 
+        # ── --apply: a verdict is added, never corrected ─────────────────
+        # The row saying this draft failed on 2026-08-30 is true of that day and
+        # stays readable for good. What it must not do is govern publication
+        # after a later verdict superseded it, so the new judgement is appended
+        # with what produced it and why, and the gate reads the highest revision.
+        applied: list[dict] = []
+        if getattr(args, "apply", False):
+            for layer, result, engine in (
+                (QALayer.FACTUAL.value, factual, factual_qa_v2.ENGINE_VERSION),
+                (QALayer.SEO.value, seo, qa_service.ENGINE_VERSION),
+            ):
+                previous = [r for r in stored
+                            if r.qa_type == QAType.DETERMINISTIC.value
+                            and r.layer == layer]
+                next_revision = max((r.revision or 1 for r in previous),
+                                    default=0) + 1
+                row = QAReview(
+                    content_draft_id=draft.id,
+                    qa_type=QAType.DETERMINISTIC.value, layer=layer,
+                    status=result["status"], score=result["score"],
+                    findings=result["findings"],
+                    blocking_issues=result["blocking_issues"],
+                    revision=next_revision, engine_version=engine,
+                    verdict_reason=(getattr(args, "reason", None) or
+                                    "re-judged against the sealed package and "
+                                    "brief; no provider was called"),
+                )
+                session.add(row)
+                await session.flush()
+                applied.append({
+                    "gate": layer, "qa_review_id": str(row.id),
+                    "revision": next_revision, "engine_version": engine,
+                    "supersedes": [str(r.id) for r in previous],
+                    "status": result["status"],
+                    "blocking": len(result["blocking_issues"]),
+                })
+            await session.commit()
+
         _emit({
             "draft_id": str(draft.id), "title": draft.title,
             "package_id": str(package.id), "query": package.query,
@@ -621,8 +660,16 @@ async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
                 "narrow_gaps": [r for r in explanation if r["narrow"]],
                 "margin": factual_qa_v2._MATCH_MARGIN,
             }} if explanation is not None else {}),
+            **({"applied": applied,
+                "note_applied": (
+                    "New verdict rows appended. Every earlier verdict is "
+                    "unchanged and still readable; the publication gate now "
+                    "reads the highest revision of each layer.")}
+               if applied else {}),
             "note": ("Gates only. The research, the brief and the draft are the "
-                     "sealed ones; nothing was bought and nothing was written."),
+                     "sealed ones; nothing was bought" +
+                     (" and only new verdict rows were written."
+                      if applied else " and nothing was written.")),
         })
     blocking = len(factual["blocking_issues"]) + len(seo["blocking_issues"])
     return EXIT_BLOCKED if blocking else EXIT_OK
@@ -1150,6 +1197,14 @@ def build_parser() -> argparse.ArgumentParser:
         "rejudge", help="re-run the deterministic QA gates on a stored draft — "
                         "read-only, no provider call")
     draft_rejudge.add_argument("id")
+    draft_rejudge.add_argument(
+        "--apply", action="store_true",
+        help="append the new verdict as a fresh revision. Adds rows; corrects "
+             "none. The sealed verdicts stay readable and the publication gate "
+             "reads the newest")
+    draft_rejudge.add_argument(
+        "--reason", help="why this draft is being judged again; recorded on the "
+                         "new verdict rows")
     draft_rejudge.add_argument("--explain", action="store_true",
                                help="also show, for every claim the old "
                                     "unarbitrated check would have blocked, the "

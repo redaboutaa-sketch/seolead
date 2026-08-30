@@ -138,10 +138,25 @@ async def evaluate_gate(session: AsyncSession, draft: ContentDraft) -> GateResul
            if (r.layer or (QALayer.FACTUAL.value if _is_factual(r)
                            else QALayer.SEO.value)) == QALayer.SEO.value]
 
-    factual_ok = bool(factual) and all(r.status == QAStatus.PASSED.value
-                                       and not r.blocking_issues for r in factual)
-    seo_ok = bool(seo) and all(r.status == QAStatus.PASSED.value
-                               and not r.blocking_issues for r in seo)
+    # ── The verdict that governs is the latest one ───────────────────────────
+    # A draft can carry several verdicts for one layer, because a re-judgement
+    # appends rather than corrects: the row saying draft 8a1f6e46 failed on
+    # 2026-08-30 is true of that day and stays readable for good. What it must
+    # not do is govern publication after a later verdict superseded it.
+    #
+    # `revision` orders them; `created_at` breaks a tie only if two rows somehow
+    # share a revision. Requiring ALL of them to pass — which is what this did —
+    # meant the first refusal was permanent and the only way past it was to
+    # rewrite history or pay for the whole run again.
+    latest_factual = _governing(factual)
+    latest_seo = _governing(seo)
+
+    factual_ok = bool(latest_factual) and (
+        latest_factual.status == QAStatus.PASSED.value
+        and not latest_factual.blocking_issues)
+    seo_ok = bool(latest_seo) and (
+        latest_seo.status == QAStatus.PASSED.value
+        and not latest_seo.blocking_issues)
 
     approval = (await session.execute(
         select(Approval).where(Approval.content_draft_id == draft.id)
@@ -169,6 +184,14 @@ async def evaluate_gate(session: AsyncSession, draft: ContentDraft) -> GateResul
 
     return GateResult(factual_qa=factual_ok, seo_qa=seo_ok, approved=approved,
                       no_external_links=clean_links, reasons=reasons)
+
+
+def _governing(reviews: list[QAReview]) -> QAReview | None:
+    """The verdict of a layer that decides, out of every verdict it carries."""
+    if not reviews:
+        return None
+    return max(reviews, key=lambda r: (getattr(r, "revision", 1) or 1,
+                                       r.created_at))
 
 
 def _is_factual(review: QAReview) -> bool:

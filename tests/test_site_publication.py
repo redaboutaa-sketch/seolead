@@ -618,3 +618,130 @@ class TestSeoMetadataCompleteness:
             assert forbidden.lower() not in description.lower(), (
                 f"meta description asserts {forbidden!r}, which nothing supports"
             )
+
+
+# ─── A superseded refusal must not govern publication ────────────────────────
+
+@pytest.mark.asyncio
+class TestTheGoverningVerdict:
+    """A draft can carry several verdicts for one layer, and only one decides.
+
+    Draft 8a1f6e46 was refused on 2026-08-30 under a matcher that blamed a
+    sentence for the claim it merely resembled. That row is true of that day and
+    stays readable for good — but requiring EVERY verdict of a layer to pass, as
+    this gate did, made the first refusal permanent: the only ways past it were
+    to rewrite history or to buy the whole research run again.
+    """
+
+    async def _verdict(self, session, draft, *, layer, revision, passed,
+                       engine="test/1", created_at=None):
+        session.add(QAReview(
+            content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
+            layer=layer,
+            status=QAStatus.PASSED.value if passed else QAStatus.FAILED.value,
+            score=100 if passed else 60, findings=[],
+            blocking_issues=[] if passed else [
+                {"code": "HIGH_RISK_CLAIM_ASSERTED", "blocking": True}],
+            revision=revision, engine_version=engine,
+            verdict_reason=None if revision == 1 else "re-judged",
+            **({"created_at": created_at} if created_at else {})))
+        await session.flush()
+
+    async def test_a_later_pass_supersedes_an_earlier_refusal(self, session,
+                                                              solar_site):
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=1, passed=False)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=2, passed=True)
+        await self._verdict(session, draft, layer=QALayer.SEO.value,
+                            revision=1, passed=True)
+        await _approve(session, draft)
+
+        gate = await evaluate_gate(session, draft)
+        assert gate.factual_qa is True
+        assert gate.passed is True
+
+    async def test_a_later_refusal_supersedes_an_earlier_pass(self, session,
+                                                              solar_site):
+        """The same rule in the direction that costs something.
+
+        A gate that only ever moved towards "publishable" would be a ratchet,
+        and a re-judgement that finds a new defect must be able to stop a draft
+        that was previously cleared.
+        """
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=1, passed=True)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=2, passed=False)
+        await self._verdict(session, draft, layer=QALayer.SEO.value,
+                            revision=1, passed=True)
+        await _approve(session, draft)
+
+        gate = await evaluate_gate(session, draft)
+        assert gate.factual_qa is False
+        assert gate.passed is False
+        assert "factual QA did not pass" in gate.reasons
+
+    async def test_the_superseded_row_is_still_there_to_read(self, session,
+                                                             solar_site):
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=1, passed=False)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=2, passed=True)
+        rows = (await session.execute(
+            select(QAReview).where(QAReview.content_draft_id == draft.id)
+        )).scalars().all()
+        refused = [r for r in rows if r.status == QAStatus.FAILED.value]
+        assert len(refused) == 1
+        assert refused[0].blocking_issues, \
+            "the evidence that it once failed, and why, must survive"
+
+    async def test_one_verdict_per_layer_behaves_exactly_as_before(
+            self, session, solar_site):
+        """Every draft in the database today has exactly one. Nothing moves."""
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await _add_qa(session, draft, factual_pass=False)
+        await _approve(session, draft)
+        gate = await evaluate_gate(session, draft)
+        assert gate.factual_qa is False
+        assert gate.passed is False
+
+    async def test_rows_written_before_this_migration_still_govern(
+            self, session, solar_site):
+        """`revision` defaults to 1, so an untouched legacy row still decides."""
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await _add_qa(session, draft)
+        await _approve(session, draft)
+        rows = (await session.execute(
+            select(QAReview).where(QAReview.content_draft_id == draft.id)
+        )).scalars().all()
+        assert all(r.revision == 1 for r in rows)
+        assert (await evaluate_gate(session, draft)).passed is True
+
+    async def test_the_timestamp_alone_would_not_decide_this(self, session,
+                                                             solar_site):
+        """Why `revision` exists and `created_at` was not enough.
+
+        Two verdicts written in one transaction share a timestamp to the
+        microsecond. Ordering on the clock alone leaves which one governs
+        publication to insertion order — a coin toss, decided here in favour of
+        the refusal because it was inserted first.
+        """
+        from datetime import datetime, timezone
+
+        stamp = datetime(2026, 8, 30, 20, 0, 0, tzinfo=timezone.utc)
+        draft, _ = await _make_draft(session, solar_site, body=PRICE_BODY)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=1, passed=False, created_at=stamp)
+        await self._verdict(session, draft, layer=QALayer.FACTUAL.value,
+                            revision=2, passed=True, created_at=stamp)
+        await self._verdict(session, draft, layer=QALayer.SEO.value,
+                            revision=1, passed=True, created_at=stamp)
+        await _approve(session, draft)
+
+        gate = await evaluate_gate(session, draft)
+        assert gate.factual_qa is True, \
+            "the newest verdict must govern even when the clock cannot tell"
