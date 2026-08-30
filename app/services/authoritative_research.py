@@ -190,7 +190,8 @@ async def execute_plan(
 
             body = f"{source.title or ''}\n{source.summary or ''}"
             freshness = assess_freshness(body, published_at=source.published_at,
-                                         retrieved_at=source.retrieved_at)
+                                         retrieved_at=source.retrieved_at,
+                                         url=source.url)
             # The authority's own jurisdiction wins. `energie.wallonie.be` is the
             # Walloon energy portal whatever a page happens to mention, and the
             # live run showed text detection tagging it BE-BRU because one page

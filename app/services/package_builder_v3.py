@@ -97,7 +97,8 @@ def build_package_v3(
             body_text = f"{source.title or ''}\n{source.summary or ''}"
             freshness = assess_freshness(body_text,
                                          published_at=source.published_at,
-                                         retrieved_at=source.retrieved_at)
+                                         retrieved_at=source.retrieved_at,
+                                         url=source.url)
             # For a registered authority its own jurisdiction is definitive; a
             # Walloon portal does not become a Brussels source because a page
             # mentions Brussels. Text detection applies only to unregistered
