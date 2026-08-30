@@ -311,3 +311,155 @@ place.
 La traduction NL des quatre textes de consentement **n'est plus bloquante pour
 cette campagne**. Elle redevient un prérequis le jour où une campagne
 néerlandophone démarre, et la garde l'imposera d'elle-même.
+
+---
+
+# Addendum — les trois correctifs autorisés, et ce que l'un d'eux n'avait pas
+
+Autorisation du propriétaire : les trois correctifs, mutations comprises, puis
+re-jugement du même brouillon aux portes seules, puis la politique de relance
+bornée. Rien ne se publie sans le mot du propriétaire.
+
+## 1. L'apparieur — livré dans la forme imposée
+
+Le verdict qui a rendu le correctif nécessaire est une contradiction interne :
+le brouillon `8a1f6e46` est revenu avec **score factuel 100** — chaque phrase
+factuelle correspond à une affirmation ÉTAYÉE — et **cinq bloquants** disant que
+ces mêmes phrases affirmaient des affirmations NON ÉTAYÉES. Les deux lectures
+étaient vraies du même texte. `_matches_claim` répond « cette phrase pourrait
+être cette affirmation » ; les contrôles bloquants lisaient cette réponse comme
+« le brouillon affirme cette affirmation ».
+
+Quand une phrase apparie à la fois une affirmation bloquable et une étayée, les
+deux lectures sont désormais **comparées** — vocabulaire partagé et chiffres
+repris, `0.6 × jaccard + 0.4 × part des chiffres`, marge 0,05 — et seule la plus
+forte est retenue. Trois issues :
+
+| comparaison | verdict |
+|---|---|
+| la bloquable l'emporte au-delà de la marge | bloque, comme avant |
+| l'étayée l'emporte au-delà de la marge | aucun constat : rien à reprocher au texte |
+| écart dans la marge, ou indécidable | **bloque**, sous `AMBIGUOUS_MATCH` |
+
+`AMBIGUOUS_MATCH` nomme les deux candidates et dit dans son propre message qu'il
+s'agit d'un cas d'apparieur, non d'une faute de rédaction. Fail-closed : préférer
+l'étayée par principe reste interdit, et le mutant qui produit ce comportement
+est tué par les tests.
+
+Appliqué aux trois contrôles concernés : `HIGH_RISK_CLAIM_ASSERTED`,
+`CONFLICTING_EVIDENCE_ASSERTED`, `REGIONAL_SCOPE_NOT_STATED`.
+
+## 2. Les statistiques de consommation — le correctif proposé n'avait pas de cible
+
+Mesure faite avant d'écrire une ligne, par la méthode `eur`-dans-*chaleur* :
+
+```
+GENERAL   LOW   ANY        Une installation typique peut couvrir la consommation
+                           annuelle d'une famille de 4 personnes, soit environ 5000 kWh
+GENERAL   LOW   ANY        La consommation moyenne d'un ménage belge est de 3500 kWh par an.
+GENERAL   LOW   ANY        Un ménage de quatre personnes consomme environ 4600 kWh par an.
+GENERAL   LOW   ANY        Une installation de 5 kWc produit environ 4750 kWh par an.
+GENERAL   LOW   ANY        La production annuelle atteint 950 kWh par kWc installé.
+GENERAL   LOW   ANY        Les besoins d'une famille avec deux enfants avoisinent 5000 kWh.
+GENERAL   LOW   ANY        L'autoconsommation couvre 30 % des 3500 kWh consommés.
+GRID_RULE HIGH  OFFICIAL   Le tarif prosumer est calculé sur la puissance de l'onduleur.
+GRID_RULE HIGH  OFFICIAL   Le raccordement est facturé par le gestionnaire de réseau.
+
+avant → après : 0 affirmation change de catégorie.
+```
+
+La phrase du constat n°5 classe **GENERAL**, pas GRID_RULE. Le vocabulaire
+GRID_RULE — profil comme indices universels — ne contient aucun terme de
+consommation ; le seul terme litigieux, `kwh` dans ENERGY_PRICE, avait déjà été
+retiré. **Le GRID_RULE affiché dans le message de QA était celui de
+l'affirmation du registre**, pas celui de la phrase. Le défaut est l'apparieur,
+donc le correctif n°2 est absorbé par le n°1 et rien n'a été touché dans le
+classificateur.
+
+## 3. Le bloc de calcul scrapé
+
+Un simulateur de coût aplati donne une ligne d'étiquettes et de valeurs. Tous
+les chiffres sont réels, rien n'y est affirmé : c'est un exemple que le lecteur
+est invité à changer. Extrait comme affirmation, il devient un ROI à risque
+ÉLEVÉ qu'aucune source ne peut établir — puisque aucune source ne l'énonce, la
+page le calcule.
+
+Signal retenu : densité étiquette/valeur, un deux-points suivi d'un chiffre,
+**trois fois ou plus**. Mesuré sur le matériau bloquant :
+
+```
+bloc de calcul                                        6 paires « : chiffre »
+« En Wallonie : le retour sur investissement… 8 ans » 0
+« Comptez entre 1€ et 1,2€ par watt crête installé. » 0
+« …2,055 Certificats Verts par 1000 kWh… »            0
+« Le prix moyen est d'environ 1 €/Wc hors TVA… »      0
+```
+
+Séparation nette, 6 contre 0 sur six affirmations de prose réelles. Le seuil est
+à trois et non à un parce que « Retour : 8 ans » dans une phrase est de la
+ponctuation française ordinaire.
+
+## Ce que le re-jugement demande, et pourquoi il n'a pas été exécuté ici
+
+`seolead draft rejudge <id>` relit le brouillon, son brief et son paquet tels
+qu'ils ont été scellés et repasse les deux portes déterministes dessus. Rien
+n'est acheté, rien n'est écrit, aucune ligne de QA n'est ajoutée. La revue LLM
+consultative est volontairement absente : elle coûte de l'argent et ne bloque
+jamais.
+
+**Cet environnement n'a pas accès à la base de production** — ni socket Docker,
+ni identifiants, et la politique réseau refuse les hôtes externes. Le compte de
+bloquants sur `8a1f6e46-8b0c-4603-8bcf-1ced0a4e7534` doit donc être produit sur
+le VPS :
+
+```
+docker exec seolead_api seolead draft rejudge 8a1f6e46-8b0c-4603-8bcf-1ced0a4e7534
+```
+
+## La politique de relance
+
+Bornée à **deux tentatives supplémentaires**, rédaction seule réémise, contre le
+même brief et le même paquet scellés, en portant les bloquants précédents dans
+l'invite — avec la précision explicite que les preuves n'ont pas changé, sans
+quoi le moyen le plus court de satisfaire la porte serait d'inventer une source.
+
+Jamais relancé, parce qu'aucune réécriture n'y répond :
+`INSUFFICIENT_SUPPORTED_EVIDENCE`, `NO_SUPPORTED_EVIDENCE`, `NO_SUPPORTED_CLAIMS`,
+`NO_TRACEABLE_SOURCES`, `DUPLICATE_TITLE`, `AMBIGUOUS_MATCH`. Un seul suffit à
+interdire la relance, même entouré de fautes corrigeables.
+
+Les constats n°1-2 (SUBSIDY exigeant OFFICIAL) sont relançables : le remède est
+que le rédacteur les abandonne, et c'est exactement ce que la politique lui
+demande.
+
+## La piste CWaPE — vérifiée pour la part qui l'est ici
+
+Ce qui est vérifié, par mesure locale : le mécanisme de datation par segment
+d'URL **date bien les décisions CWaPE**.
+
+```
+2025  https://www.cwape.be/node/2025.01.16-CD-25a16-CWaPE-0012      → DATED_CURRENT
+2024  https://www.cwape.be/decisions/2024.03.19-CD-24j19-CWaPE-0055 → UNDATED
+None  https://energie.wallonie.be/fr/le-tarif-prosumer.html         → UNDATED
+```
+
+Deux conséquences, et la seconde est une limite du mécanisme, pas de la piste :
+
+1. Une décision CWaPE **de l'année en cours ou de la précédente** est datable et
+   porte une affirmation de règle de réseau. La substance de l'article a donc
+   bien une source possible, et `energie.wallonie.be` n'était que le mauvais
+   véhicule d'un fait juste.
+2. Une décision de **2024** retombe en UNDATED : `_URL_YEAR_CURRENT_WITHIN = 1`
+   et nous sommes en 2026. Si le tarif prosumer en vigueur est fixé par une
+   décision de 2024 toujours applicable, l'année d'URL seule ne l'établira pas —
+   il faudra que la page porte un marqueur d'actualité, ou que la décision plus
+   récente soit celle qui est retrouvée.
+
+Ce qui **n'est pas vérifié** : qu'une telle décision existe, qu'elle soit en
+vigueur, et qu'elle énonce le chiffre employé. La politique réseau de cet
+environnement refuse `cwape.be` (403 au CONNECT) et la sonde payante tourne sur
+le VPS. La vérification reste à faire :
+
+```
+docker exec seolead_api seolead authority probe --category GRID_RULE --domain cwape.be
+```
