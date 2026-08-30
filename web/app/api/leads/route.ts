@@ -40,10 +40,20 @@ export async function POST(request: Request) {
       );
     }
     // The API's refusal messages name fields, never values, so they are safe to
-    // show. Anything unexpected becomes a generic message rather than an echo.
-    const detail = (result.body as { detail?: { message?: string } })?.detail;
+    // show — with one exception, and it took a real visitor to find it. A
+    // refusal by the spam defences must not be echoed: which defence fired is
+    // an instruction to whoever tripped it, and the browser reading it may be
+    // the bot. The visitor gets a neutral message that says the one useful
+    // thing, try again; the reason stays in the API's log.
+    const detail = (result.body as { detail?: { code?: string; message?: string } })
+      ?.detail;
+    const refused = detail?.code === "SUBMISSION_REFUSED";
     return NextResponse.json(
-      { message: detail?.message ?? "Votre demande n'a pas pu être enregistrée." },
+      {
+        message: refused
+          ? "Votre demande n'a pas pu être enregistrée. Merci de réessayer."
+          : detail?.message ?? "Votre demande n'a pas pu être enregistrée.",
+      },
       { status: result.status === 422 ? 422 : 400 },
     );
   } catch {

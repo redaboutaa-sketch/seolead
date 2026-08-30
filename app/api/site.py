@@ -82,8 +82,21 @@ class LeadRequest(BaseModel):
     # decides which keys exist; unknown keys are dropped server-side.
     consents: dict = Field(default_factory=dict)
     attribution: dict = Field(default_factory=dict)
-    # Spam signals. `honeypot` is a field no human sees.
+    # Spam signals. The decoy field carries a name with no meaning to an
+    # autofill engine and none to a reader of the request body either — the
+    # payload travels through a browser, and naming the trap in it is naming it
+    # to whoever is watching. `honeypot` stays accepted because a page served
+    # before this deploy is still posting it, and an alias that quietly stops
+    # being read would disable the defence for those visitors without a trace.
+    ref_token_2: str | None = Field(None, max_length=200)
     honeypot: str | None = Field(None, max_length=200)
+
+    @property
+    def decoy_value(self) -> str | None:
+        # The form posts "" for an untouched field, under either key. Empty is
+        # absent: a decoy nobody filled must not read as a decoy somebody did.
+        return (self.ref_token_2 or "").strip() or (self.honeypot or "").strip() \
+            or None
     elapsed_ms: int | None = Field(None, ge=0, le=86_400_000)
     client_key: str | None = Field(None, max_length=128)
 
@@ -257,7 +270,7 @@ async def create_lead(site_id: str, payload: LeadRequest,
         consent_marketing=payload.consent_marketing,
         consents=payload.consents,
         attribution=payload.attribution,
-        signals=SubmissionSignals(honeypot_value=payload.honeypot,
+        signals=SubmissionSignals(honeypot_value=payload.decoy_value,
                                   elapsed_ms=payload.elapsed_ms,
                                   client_key=payload.client_key),
     )

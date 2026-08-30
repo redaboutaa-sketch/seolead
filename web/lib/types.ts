@@ -207,6 +207,6 @@ export interface LeadPayload {
   consent_processing: boolean;
   consent_marketing: boolean;
   attribution: Record<string, unknown>;
-  honeypot?: string | null;
+  ref_token_2?: string | null;
   elapsed_ms?: number | null;
 }

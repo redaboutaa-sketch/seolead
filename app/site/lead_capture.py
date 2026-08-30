@@ -38,6 +38,25 @@ class LeadRejected(SeoLeadError):
     code = "LEAD_REJECTED"
 
 
+class SubmissionRefused(LeadRejected):
+    """A refusal by the spam defences, said without naming which one fired.
+
+    The message a visitor sees travels to a browser, and a browser may be a
+    bot's. Telling it "honeypot field was filled" tells it exactly what to
+    change; telling a wrongly-refused human the same thing helps them not at
+    all. The owner met both halves of that on 2026-08-30, when Chrome
+    autofilled the decoy field and the page answered him with the word
+    "honeypot".
+
+    So the reason goes to the server log, where an operator reads it, and the
+    exception carries only a code the front end maps to a neutral, actionable
+    message. Every spam verdict is treated alike: the timing floor announced its
+    own threshold in milliseconds, which is a number a bot only has to exceed.
+    """
+
+    code = "SUBMISSION_REFUSED"
+
+
 # Deliberately permissive on the local part and strict on shape. A stricter regex
 # rejects valid addresses, and the real verification is a delivered email.
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
@@ -257,7 +276,7 @@ async def capture_lead(
         # Logged without any submitted field: a spam log that contains the payload
         # is a copy of the payload.
         logger.warning("lead submission rejected", extra={"reason": verdict.reason})
-        raise LeadRejected(f"submission rejected: {verdict.reason}")
+        raise SubmissionRefused("submission could not be recorded")
 
     try:
         conversion = ConversionType(submission.conversion_type)

@@ -243,7 +243,7 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
     track("FORM_SUBMITTED", { form: config.conversion.form_id });
 
     const contactKeys = new Set([
-      "first_name", "last_name", "email", "phone", "postcode", "honeypot",
+      "first_name", "last_name", "email", "phone", "postcode", "ref_token_2",
     ]);
     // Consent cases are excluded from qualification by their TYPE, not by a
     // hard-coded key list: a new case added in YAML must not leak into the
@@ -279,7 +279,7 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
         consent_marketing: values.consent_marketing === true,
         consents,
         attribution,
-        honeypot: (values.honeypot as string) || "",
+        ref_token_2: (values.ref_token_2 as string) || "",
         elapsed_ms: Date.now() - startedAt.current,
       }),
     }).catch(() => null);
@@ -338,16 +338,36 @@ export function LeadForm({ config, locale, conversionType, attribution }: Props)
         />
       ))}
 
-      {/* Not visible, not focusable, not announced. Only a bot fills it. */}
-      <div className="honeypot" aria-hidden="true">
-        <label htmlFor="field-honeypot">Ne pas remplir</label>
+      {/*
+       * Not visible, not focusable, not announced, and — the part that was
+       * wrong — not recognisable by an autofill engine.
+       *
+       * This field was named `company_website`. Chrome maps the token
+       * `website` to its URL/organisation heuristic, filled it from the
+       * owner's saved profile, and the server refused his own first real
+       * submission for tripping the trap. `autocomplete="off"` was already
+       * set and Chrome ignored it, as it routinely does on a field it thinks
+       * it recognises: the name is the signal that matters, so the name is
+       * what changed. `ref_token_2` matches no autofill dictionary.
+       *
+       * The wrapper is `inert` as well as `aria-hidden`, so the field is
+       * outside the accessibility tree AND outside interaction — a screen
+       * reader must never offer a human a field whose only correct value is
+       * empty. `tabIndex={-1}` stays for browsers that do not support inert.
+       *
+       * Nothing here names the trap: a DOM that says "honeypot" documents the
+       * defence to the scraper it is meant to catch.
+       */}
+      <div className="form-aux" aria-hidden="true" inert>
+        <label htmlFor="field-ref-2">Laisser vide</label>
         <input
-          id="field-honeypot"
-          name="company_website"
+          id="field-ref-2"
+          name="ref_token_2"
+          type="text"
           tabIndex={-1}
           autoComplete="off"
-          value={(values.honeypot as string) ?? ""}
-          onChange={(event) => setValue("honeypot", event.target.value)}
+          value={(values.ref_token_2 as string) ?? ""}
+          onChange={(event) => setValue("ref_token_2", event.target.value)}
         />
       </div>
 

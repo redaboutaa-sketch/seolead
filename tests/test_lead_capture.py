@@ -16,8 +16,9 @@ from app.models import (CapturedLead, LeadAttribution, LeadConsent, Site,
                         SiteEvent, Vertical)
 from app.site.config import load_site
 from app.site.lead_capture import (LeadRejected, LeadSubmission,
-                                   LocalLeadDestination, capture_lead,
-                                   normalize_email, normalize_phone)
+                                   LocalLeadDestination, SubmissionRefused,
+                                   capture_lead, normalize_email,
+                                   normalize_phone)
 from app.site.spam_protection import (AcceptAllSpamProtection,
                                       HeuristicSpamProtection, SubmissionSignals)
 
@@ -500,23 +501,66 @@ class TestProspect360Boundary:
 
 @pytest.mark.asyncio
 class TestSpamProtection:
-    async def test_a_filled_honeypot_is_rejected(self, session, solar_site):
-        with pytest.raises(LeadRejected, match="honeypot"):
+    async def _refuse(self, session, solar_site, signals):
+        with pytest.raises(SubmissionRefused) as caught:
             await capture_lead(
-                session,
-                submission=_submission(
-                    signals=SubmissionSignals(honeypot_value="http://spam.example",
-                                              elapsed_ms=40_000)),
+                session, submission=_submission(signals=signals),
                 site=solar_site, config=load_site("solar_be"),
                 vertical_code="SOLAR_BE", spam=HeuristicSpamProtection())
+        return caught.value
+
+    async def test_a_filled_honeypot_is_rejected(self, session, solar_site):
+        assert await self._refuse(
+            session, solar_site,
+            SubmissionSignals(honeypot_value="http://spam.example",
+                              elapsed_ms=40_000))
 
     async def test_an_instant_submission_is_rejected(self, session, solar_site):
-        with pytest.raises(LeadRejected, match="floor"):
-            await capture_lead(
-                session,
-                submission=_submission(signals=SubmissionSignals(elapsed_ms=120)),
-                site=solar_site, config=load_site("solar_be"),
-                vertical_code="SOLAR_BE", spam=HeuristicSpamProtection())
+        assert await self._refuse(
+            session, solar_site, SubmissionSignals(elapsed_ms=120))
+
+    # ── What the refusal is allowed to say ───────────────────────────────────
+    # On 2026-08-30 the owner submitted the form himself, from Chrome, and the
+    # page answered "submission rejected: honeypot field was filled". Two
+    # failures in one sentence: it told a wrongly-refused human nothing he could
+    # act on, and it told whoever tripped the trap exactly which trap it was.
+
+    @pytest.mark.parametrize("signals", [
+        SubmissionSignals(honeypot_value="http://spam.example", elapsed_ms=40_000),
+        SubmissionSignals(elapsed_ms=120),
+    ])
+    async def test_the_refusal_names_no_defence(self, session, solar_site,
+                                                signals):
+        message = str(await self._refuse(session, solar_site, signals)).casefold()
+        for word in ("honeypot", "floor", "spam", "trap", "bot", "2500", "ms"):
+            assert word not in message, \
+                f"the visitor-facing refusal must not contain {word!r}"
+
+    async def test_it_carries_its_own_code_so_the_front_end_can_neutralise_it(
+            self, session, solar_site):
+        """The proxy needs to tell this refusal from a useful validation one.
+
+        "consent to process the request is required" helps a visitor and must
+        still be shown; this one must not be.
+        """
+        refusal = await self._refuse(
+            session, solar_site,
+            SubmissionSignals(honeypot_value="x", elapsed_ms=40_000))
+        assert refusal.code == "SUBMISSION_REFUSED"
+        assert refusal.code != LeadRejected.code
+        assert isinstance(refusal, LeadRejected), \
+            "the API's existing handler must keep catching it"
+
+    async def test_the_reason_still_reaches_the_operator(self, session,
+                                                         solar_site, caplog):
+        """Neutral to the visitor, precise in the log. Not neutral everywhere."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+        await self._refuse(session, solar_site,
+                           SubmissionSignals(honeypot_value="x", elapsed_ms=40_000))
+        reasons = [getattr(r, "reason", "") for r in caplog.records]
+        assert any("honeypot" in str(reason) for reason in reasons)
 
 
 class TestNormalization:
