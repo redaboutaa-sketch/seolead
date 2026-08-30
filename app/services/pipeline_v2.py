@@ -49,6 +49,7 @@ from app.services.relevance import (RelevanceDecision, RelevanceStatus,
                                     semantic_review)
 from app.services.research_cache import (ResearchKind, is_fresh, serp_cache_key)
 from app.services.source_quality import SourceQuality, classify_domain
+from app.services import title_registry
 from app.verticals.profile import VerticalProfile, load_profile
 
 logger = logging.getLogger(__name__)
@@ -668,25 +669,10 @@ async def run_pipeline_v2(
     result.content_draft_id = draft.id
 
     # ── Stage 9: QA ──────────────────────────────────────────────────────────
-    # Titles of drafts that could still reach publication. A REJECTED draft is
-    # excluded because that state is TERMINAL — `approval_service` maps it to
-    # `ContentStatus.REJECTED` and allows no transition out of it — so such a
-    # draft can never be published and can never compete for a query. Counting
-    # it deadlocked the workflow instead of guarding it: the writer is seeded
-    # with the brief's `working_title`, so a rerun converges on the same title,
-    # and one rejection made every future draft for that query permanently
-    # unpublishable.
-    #
-    # A draft that merely FAILED QA still counts: it is undecided, and letting a
-    # replacement appear silently beside it is how a queue fills with identical
-    # drafts. Disposing of it — `seolead content reject` — is the deliberate act
-    # that frees the title.
-    existing_titles = (
-        await session.execute(
-            select(ContentDraft.title)
-            .where(ContentDraft.id != draft.id)
-            .where(ContentDraft.status != ContentStatus.REJECTED.value))
-    ).scalars().all()
+    # Titles this draft could actually cannibalise. See `title_registry` for why
+    # its own keyword is excluded: those drafts share its slug, so they compete
+    # for nothing.
+    existing_titles = await title_registry.competing_titles(session, draft)
 
     factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
     factual_row = QAReview(content_draft_id=draft.id,

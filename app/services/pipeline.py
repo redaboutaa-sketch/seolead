@@ -28,6 +28,7 @@ from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
                         ResearchSource, SeedKeyword, Vertical)
 from app.providers.llm.base import LLMProvider
 from app.providers.research.base import ResearchProvider
+from app.services import title_registry
 from app.services import brief_service, draft_service, package_builder, qa_service
 from app.services.intent import classify_intent, normalize_query
 from app.verticals.profile import VerticalProfile, load_profile
@@ -388,26 +389,9 @@ async def run_pipeline(
     result.content_draft_id = draft.id
 
     # ── Stage 5: QA ──────────────────────────────────────────────────────────
-    # Titles of drafts that could still reach publication. A REJECTED draft is
-    # excluded because that state is TERMINAL — `approval_service` maps it to
-    # `ContentStatus.REJECTED` and allows no transition out of it — so such a
-    # draft can never be published and can never compete for a query. Counting
-    # it deadlocked the workflow instead of guarding it: the writer is seeded
-    # with the brief's `working_title`, so a rerun converges on the same title,
-    # and one rejection made every future draft for that query permanently
-    # unpublishable.
-    #
-    # A draft that merely FAILED QA still counts: it is undecided, and letting a
-    # replacement appear silently beside it is how a queue fills with identical
-    # drafts. Disposing of it — `seolead content reject` — is the deliberate act
-    # that frees the title.
-    existing_titles = (
-        await session.execute(
-            select(ContentDraft.title)
-            .where(ContentDraft.id != draft.id)
-            .where(ContentDraft.status != ContentStatus.REJECTED.value)
-        )
-    ).scalars().all()
+    # Titles this draft could actually cannibalise. See `title_registry`
+    # for why its own keyword is excluded: those drafts share its slug.
+    existing_titles = await title_registry.competing_titles(session, draft)
 
     deterministic = qa_service.run_deterministic_qa(
         draft_payload, brief_payload, package_dict, profile,
