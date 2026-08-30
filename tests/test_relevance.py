@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.relevance import (RelevanceStatus, RelevanceThresholds,
-                                    build_query_profile, score_claim, score_source,
+from app.services.relevance import (RESEARCH_QUERY_KEY, RelevanceStatus,
+                                    RelevanceThresholds,
+                                    build_query_profile, query_that_fetched,
+                                    score_claim, score_source,
                                     tokenize)
 
 SOLAR_QUERY = "prix panneaux solaires Belgique"
@@ -181,3 +183,116 @@ class TestTokenizer:
 
     def test_accents_are_folded(self):
         assert tokenize("rentabilité") == tokenize("rentabilite")
+
+
+# ─── Which question a source is held to ──────────────────────────────────────
+
+class TestSourceIsJudgedAgainstTheQueryThatFetchedIt:
+    """The live run of 2026-08-30: 31 of 40 official pages discarded, wrongly.
+
+    The targeted authoritative pass asks a regulator a question of its OWN —
+    "premie zonnepanelen Vlaanderen voorwaarden officieel" — precisely because
+    the article's query would never surface that page. The gate then scored the
+    answer against the article's query and rejected it for having no topical
+    overlap with a question nobody had put to it. Every vlaanderen.be and every
+    creg.be result went out that way, and `high_risk_supported` was 0 of 57.
+
+    The gate itself does not move. Only the pairing does.
+    """
+
+    ARTICLE_QUERY = "rentabilite panneaux solaires belgique"
+
+    VLAANDEREN = {
+        "title": "Premie zonnepanelen — Vlaanderen.be",
+        "body": ("De Vlaamse overheid kent een premie toe voor de plaatsing van "
+                 "zonnepanelen. De voorwaarden en bedragen vindt u hier."),
+        "url": "https://www.vlaanderen.be/premie-zonnepanelen",
+    }
+    VLAANDEREN_QUERY = "premie zonnepanelen Vlaanderen voorwaarden officieel"
+
+    CREG = {
+        "title": "Tarifs de l'électricité pour les ménages — CREG",
+        "body": ("La CREG publie l'évolution du prix de l'électricité et des "
+                 "tarifs régulés pour les ménages belges."),
+        "url": "https://www.creg.be/fr/tarifs-electricite-menages",
+    }
+    CREG_QUERY = "prix electricite tarif regule menages"
+
+    def test_metadata_carries_the_query_that_fetched_the_source(self):
+        assert query_that_fetched({RESEARCH_QUERY_KEY: "sa propre requête"},
+                                  default="autre") == "sa propre requête"
+
+    @pytest.mark.parametrize("metadata", [None, {}, {RESEARCH_QUERY_KEY: ""},
+                                          {RESEARCH_QUERY_KEY: "   "},
+                                          {RESEARCH_QUERY_KEY: 42}])
+    def test_without_a_recorded_query_the_article_query_still_applies(self,
+                                                                      metadata):
+        """General web research is unchanged: it never records one."""
+        assert query_that_fetched(metadata, default="requête d'article") == \
+            "requête d'article"
+
+    @pytest.mark.parametrize("source,targeted", [
+        (VLAANDEREN, VLAANDEREN_QUERY),
+        (CREG, CREG_QUERY),
+    ])
+    def test_an_official_page_was_discarded_by_the_wrong_question(
+            self, source, targeted, solar_profile):
+        """First half of the proof: this is what the live run did."""
+        against_article = score_source(query=self.ARTICLE_QUERY,
+                                       profile=solar_profile, **source)
+        assert against_article.status is RelevanceStatus.IRRELEVANT
+
+    @pytest.mark.parametrize("source,targeted", [
+        (VLAANDEREN, VLAANDEREN_QUERY),
+        (CREG, CREG_QUERY),
+    ])
+    def test_the_same_page_passes_against_the_question_it_answers(
+            self, source, targeted, solar_profile):
+        """Second half: the 31 discarded sources come back."""
+        metadata = {RESEARCH_QUERY_KEY: targeted}
+        decision = score_source(
+            query=query_that_fetched(metadata, default=self.ARTICLE_QUERY),
+            profile=solar_profile, **source)
+        assert decision.status is RelevanceStatus.RELEVANT
+        assert decision.status.is_eligible is True
+
+    def test_an_off_topic_page_is_still_rejected_under_the_targeted_query(
+            self, solar_profile):
+        """The counter-proof. Re-pairing is not a hole.
+
+        The Phase 2 failure re-run through the new path: a racing game answering
+        a Flemish subsidy query is rejected by the same hard rule, for the same
+        reason, with the targeted query named in it.
+        """
+        metadata = {RESEARCH_QUERY_KEY: self.VLAANDEREN_QUERY}
+        decision = score_source(
+            query=query_that_fetched(metadata, default=self.ARTICLE_QUERY),
+            profile=solar_profile,
+            title="Grand Prix Circuit — jeu de course automobile",
+            body="Le meilleur jeu de course. Prix de lancement à 19,99 €.",
+            url="https://exemple-jeux.be/grand-prix-circuit")
+        assert decision.status is RelevanceStatus.IRRELEVANT
+        assert decision.status.is_eligible is False
+
+    def test_the_threshold_is_still_what_decides(self, solar_profile):
+        """Mutation on the threshold, in the test itself.
+
+        If re-pairing had quietly made the gate permissive, tightening the bar
+        would change nothing. It changes everything: the same official page,
+        against the same targeted query, falls out when the bar is raised and
+        passes when it is lowered. The threshold still carries the decision.
+        """
+        args = dict(query=self.VLAANDEREN_QUERY, profile=solar_profile,
+                    **self.VLAANDEREN)
+        strict = score_source(**args, thresholds=RelevanceThresholds(
+            relevant_at=0.99, low_relevance_at=0.9, irrelevant_below=0.9))
+        default = score_source(**args, thresholds=RelevanceThresholds())
+        assert strict.status is not RelevanceStatus.RELEVANT
+        assert default.status is RelevanceStatus.RELEVANT
+
+    def test_the_default_thresholds_have_not_moved(self):
+        """Pinned, because the arbitrage was «corrige l'appariement, pas le seuil»."""
+        thresholds = RelevanceThresholds()
+        assert thresholds.relevant_at == 0.55
+        assert thresholds.low_relevance_at == 0.30
+        assert thresholds.irrelevant_below == 0.30

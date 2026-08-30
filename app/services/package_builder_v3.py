@@ -25,7 +25,8 @@ from app.services.claim_policy import ClaimRisk
 from app.services.evidence_model import EvaluatedClaim, EvidenceStatus as ES
 from app.services.passage_extraction import extract_passages
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
-                                    RelevanceThresholds, score_source)
+                                    RelevanceThresholds, query_that_fetched,
+                                    score_source)
 from app.services.authority_registry import AuthorityRegistry, build_registry
 from app.services.freshness import FreshnessStatus, assess as assess_freshness
 from app.services.region import Region, detect_region, region_for_market
@@ -70,8 +71,13 @@ def build_package_v3(
         for index, source in enumerate(result.sources):
             ref = source.candidate_id or f"{result.provider}-{index:03d}"
 
+            # A source is judged against the question it was fetched to answer.
+            # For general web research that IS the article's query; for the
+            # targeted authoritative pass it is the planner's own query, and
+            # using the article's query there discarded every official page.
             decision = supplied.get(ref) or score_source(
-                query=query, profile=profile, title=source.title,
+                query=query_that_fetched(source.metadata, default=query),
+                profile=profile, title=source.title,
                 body=source.summary, url=source.url, thresholds=thresholds)
 
             quality = quality_module.classify_domain(

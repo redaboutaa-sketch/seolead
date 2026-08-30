@@ -45,7 +45,8 @@ from app.services import (brief_service, draft_service, factual_qa_v2,
 from app.services.intent import classify_intent, normalize_query
 from app.services.provider_usage import JobBudget, UsageRecorder
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
-                                    score_source, semantic_review)
+                                    query_that_fetched, score_source,
+                                    semantic_review)
 from app.services.research_cache import (ResearchKind, is_fresh, serp_cache_key)
 from app.services.source_quality import SourceQuality, classify_domain
 from app.verticals.profile import VerticalProfile, load_profile
@@ -511,11 +512,16 @@ async def run_pipeline_v2(
 
                     # Official pages go through the same relevance gate as
                     # everything else — being official does not make a page
-                    # on-topic.
+                    # on-topic. What changed is the question they are held to:
+                    # each page is scored against the targeted query that
+                    # fetched it, not against the article's query, which was
+                    # never put to it. Same gate, same thresholds.
                     for index, source in enumerate(official_result.sources):
                         ref = source.candidate_id or f"official-{index:03d}"
                         decisions[ref] = score_source(
-                            query=query, profile=profile, title=source.title,
+                            query=query_that_fetched(source.metadata,
+                                                     default=query),
+                            profile=profile, title=source.title,
                             body=source.summary, url=source.url,
                             thresholds=thresholds)
 

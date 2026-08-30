@@ -172,6 +172,38 @@ def _coverage(query_tokens: frozenset[str], text_tokens: set[str]) -> float:
     return len(query_tokens & text_tokens) / len(query_tokens)
 
 
+# Key under which a research provider records the query that actually fetched a
+# source. Set by the targeted authoritative pass; absent everywhere else.
+RESEARCH_QUERY_KEY = "research_query"
+
+
+def query_that_fetched(metadata: dict | None, *, default: str) -> str:
+    """The question a source was fetched to answer.
+
+    For general web research this is the article's own query and the two are the
+    same string. For the targeted authoritative pass they are NOT: the planner
+    asks a regulator a question of its own — "premie zonnepanelen Vlaanderen
+    voorwaarden officieel" — precisely because the article's query would never
+    surface that page.
+
+    Scoring the answer against the article's query is asking one question and
+    marking the answer to another. It discarded every vlaanderen.be and creg.be
+    result of the live run, with the reason "the query is about panneau,
+    rentabilite, solaire" — true, and beside the point, since nobody had asked
+    those pages about that.
+
+    This changes only WHICH query a source is compared against. The gate, its
+    hard rule and its thresholds are untouched: an off-topic answer to the
+    targeted query is still rejected by the same rule that rejects a racing
+    circuit for a solar pricing query.
+    """
+    if metadata:
+        recorded = metadata.get(RESEARCH_QUERY_KEY)
+        if isinstance(recorded, str) and recorded.strip():
+            return recorded
+    return default
+
+
 def score_source(
     *,
     query: str,

@@ -17,6 +17,7 @@ from app.services.evidence_model import EvidenceRef, evaluate_claim
 from app.services.freshness import FreshnessStatus, assess
 from app.services.provider_usage import UsageRecorder
 from app.services.region import Region, detect_region, scope_is_compatible
+from app.services.relevance import RESEARCH_QUERY_KEY, query_that_fetched
 from app.services.relevance import RelevanceStatus
 from app.services.research_planner import plan_authoritative_research
 from app.services.source_quality import SourceQuality
@@ -433,6 +434,39 @@ class TestExecutor:
         assert result.provider == "tavily_authoritative"
         assert {s.url for s in result.sources} == {
             "https://energie.wallonie.be/fr/prime.html"}
+
+    async def test_every_folded_source_carries_the_query_that_fetched_it(
+            self, solar_profile):
+        """The stamp that lets the relevance gate ask the right question.
+
+        Folding into the standard provider shape used to drop the planner's own
+        query, leaving the gate downstream with nothing to compare against but
+        the article's query — which is how 31 of 40 official pages were thrown
+        away in the live run of 2026-08-30.
+        """
+        run, _ = await self._run(solar_profile, [_source(
+            "https://energie.wallonie.be/fr/prime.html", "Prime",
+            "La prime est actuellement de 1 750 €.", "o1")])
+        result = run.to_provider_result(query="requête d'article", market="BE",
+                                        language="fr")
+        assert result.sources
+        assert len(result.sources) == len(run.accepted)
+        for source, accepted in zip(result.sources, run.accepted, strict=True):
+            recorded = query_that_fetched(source.metadata,
+                                          default="requête d'article")
+            assert recorded != "requête d'article"
+            assert recorded == accepted.query
+
+    async def test_folding_preserves_the_metadata_a_source_already_had(
+            self, solar_profile):
+        run, _ = await self._run(solar_profile, [_source(
+            "https://energie.wallonie.be/fr/prime.html", "Prime",
+            "La prime est actuellement de 1 750 €.", "o1")])
+        run.accepted[0].source = run.accepted[0].source.model_copy(
+            update={"metadata": {"provider_rank": 3}})
+        result = run.to_provider_result(query="q", market="BE", language="fr")
+        assert result.sources[0].metadata["provider_rank"] == 3
+        assert RESEARCH_QUERY_KEY in result.sources[0].metadata
 
     async def test_an_empty_run_says_so_rather_than_failing(self, solar_profile):
         run, _ = await self._run(solar_profile, [])
