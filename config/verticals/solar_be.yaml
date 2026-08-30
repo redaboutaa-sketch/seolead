@@ -334,6 +334,43 @@ official_source_policy:
       priority: 60
       claim_categories: [SUBSIDY, ROI, ENERGY_PRICE, MARKET_AVERAGE]
 
+    # ── Candidats NON RATIFIÉS ──────────────────────────────────────────────
+    # Le registre est une porte de confiance : y figurer autorise un domaine à
+    # établir des affirmations à risque HIGH. Ces entrées sont proposées, pas
+    # actives — `build_registry` les exclut tant que `pending_ratification` est
+    # vrai, et seule la sonde `seolead authority probe --include-pending` les
+    # interroge.
+    #
+    # Pourquoi elles existent : une affirmation de ROI de portée belge exige
+    # 2 sources concordantes, et le registre ne contient qu'UN domaine dont la
+    # région couvre BE (apere.org). Elle est donc insatisfiable par
+    # construction, quelle que soit la qualité des pages retournées. Idem pour
+    # BE-BRU.
+    #
+    # Ce que je NE peux pas affirmer depuis ce dépôt : que ces organismes
+    # publient effectivement des chiffres de temps de retour pour une
+    # installation résidentielle. L'egress est bloqué vers eux ; la sonde
+    # existe pour que la question soit tranchée sur pièces et non sur ma
+    # mémoire. Voir docs/authorities/ROI_AUTHORITIES_RATIFICATION.md.
+    - domain: plan.be
+      name: Bureau fédéral du Plan
+      authority_type: GOVERNMENT
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 75
+      claim_categories: [ROI, ENERGY_PRICE, MARKET_AVERAGE]
+      pending_ratification: true
+    - domain: statbel.fgov.be
+      name: Statbel — office belge de statistique
+      authority_type: PUBLIC_AGENCY
+      region: BE
+      market: BE
+      languages: [fr, nl]
+      priority: 75
+      claim_categories: [ENERGY_PRICE, MARKET_AVERAGE]
+      pending_ratification: true
+
   # Claim-category-specific official queries. Regional variants matter: a single
   # "Belgium" query returns the federal level and misses the regional schemes
   # that actually set the premiums.

@@ -50,6 +50,13 @@ class AuthorityEntry:
     claim_categories: frozenset[ClaimCategory]
     priority: int = 50
     name: str = ""
+    # A candidate the owner has not ratified. The registry is a TRUST gate: an
+    # entry here lets a domain establish HIGH-risk claims — subsidies, grid
+    # rules, profitability — so who belongs in it is a decision for the person
+    # answerable for what the site publishes, never for whoever edited the file
+    # last. A pending entry is carried, described and probeable, and excluded
+    # from every registry the pipeline actually consults.
+    pending_ratification: bool = False
 
     def speaks_for(self, category: ClaimCategory) -> bool:
         """An empty category set means "general authority", not "no authority"."""
@@ -63,6 +70,7 @@ class AuthorityEntry:
             "languages": list(self.languages),
             "claim_categories": sorted(c.value for c in self.claim_categories),
             "priority": self.priority,
+            "pending_ratification": self.pending_ratification,
         }
 
 
@@ -121,13 +129,19 @@ def _as_category_set(values) -> frozenset[ClaimCategory]:
     return frozenset(out)
 
 
-def build_registry(profile: VerticalProfile) -> AuthorityRegistry:
+def build_registry(profile: VerticalProfile, *,
+                   include_pending: bool = False) -> AuthorityRegistry:
     """Build the registry from vertical configuration.
 
     Accepts both shapes: the Phase 3.1 flat list of domain strings (which become
     UNKNOWN-region general authorities), and the Phase 3.2 richer form with
     metadata. Supporting both means a vertical that has not been migrated still
     works rather than silently losing its authorities.
+
+    Entries marked `pending_ratification` are excluded unless `include_pending`
+    is asked for explicitly, and the only caller that asks is the probe an
+    operator runs to decide whether to ratify them. Nothing in the pipeline
+    passes it.
     """
     policy = profile.official_source_policy or {}
     registry = AuthorityRegistry()
@@ -172,6 +186,7 @@ def build_registry(profile: VerticalProfile) -> AuthorityRegistry:
             claim_categories=_as_category_set(raw.get("claim_categories")),
             priority=int(raw.get("priority", 50) or 50),
             name=str(raw.get("name") or domain),
+            pending_ratification=bool(raw.get("pending_ratification", False)),
         ))
 
     # Legacy `authoritative_domains` remains honoured as a general authority.
@@ -186,4 +201,7 @@ def build_registry(profile: VerticalProfile) -> AuthorityRegistry:
             languages=tuple(profile.languages), claim_categories=frozenset(),
             priority=40, name=normalized))
 
+    if not include_pending:
+        registry.entries = [e for e in registry.entries
+                            if not e.pending_ratification]
     return registry
