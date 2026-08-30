@@ -175,6 +175,38 @@ class TestExternalLinks:
         assert "competitor" in lowered
         assert "markdown link" in lowered or "url" in lowered
 
+    def test_the_writer_is_told_to_build_on_every_supplied_fact(self,
+                                                                solar_profile):
+        """The prompt must ask for what QA measures.
+
+        `run_seo_qa_v2` blocks a draft that uses NONE of the brief's supported
+        facts and warns below a third — a floor. The prompt communicated no
+        floor at all: it passed the facts under the key `facts_you_may_state`
+        and said only « use ONLY the supplied facts », which is a ceiling. A
+        live run used 3 of 12 and was flagged for exactly the thing it had
+        never been asked to do.
+        """
+        brief = {"primary_query": SOLAR_QUERY, "content_type": "GUIDE",
+                 "search_intent": "INFORMATIONAL", "target_audience": "x",
+                 "objective": "y", "recommended_title": "t", "outline": [],
+                 "key_questions": [], "required_sources": [],
+                 "missing_information": [], "cta_strategy": {},
+                 "cautionary_claims": [],
+                 "required_facts": [{"fact": "Un fait établi."}]}
+        system, user = build_generation_prompt(brief, {"language": "fr",
+                                                       "market": "BE"})
+        lowered = system.lower()
+        assert "substance" in lowered
+        assert "must appear" in lowered
+        # The floor must not become stuffing: leaving an unfitting fact out is
+        # explicitly allowed, and repeating one to look thorough is refused.
+        assert "fits nowhere" in lowered
+        assert "never force" in lowered
+        # The payload key carries the obligation too — a key named
+        # « may state » undoes the instruction it travels with.
+        assert "facts_you_must_build_on" in user
+        assert "facts_you_may_state" not in user
+
     def test_an_external_link_in_the_body_still_blocks_at_qa(self, solar_profile):
         verdict = run_seo_qa_v2(
             {"title": "Prix", "body": "# Prix\n\nVoir [ce comparateur](https://autre.be).\n",
