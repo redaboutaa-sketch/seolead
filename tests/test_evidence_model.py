@@ -14,6 +14,7 @@ from app.core.enums import (AuthorityRequirement, ClaimCategory, EvidenceStatus,
 from app.services.claim_extraction import (_VERB_MARKER, _is_assertion,
                                            _is_flattened_list,
                                            _is_title_fragment,
+                                           _is_worked_example,
                                            extract_claim_set, extract_claims)
 from app.services.claim_policy import (ClaimRisk, authority_is_sufficient,
                                        classify_category, requirements_for)
@@ -257,6 +258,58 @@ class TestFlattenedNavigationIsNotAClaim:
         assert _is_assertion(
             "Une installation panneaux + batterie revient à 12 000 € en "
             "Belgique.") is True
+
+
+class TestWorkedExampleIsNotAProposition:
+    """The second thing a flattened page hands the extractor: a simulator row.
+
+    A cost calculator renders as one line of labelled values. Every figure in it
+    is real and none of it asserts anything — it is an example the reader is
+    invited to change. Extracted as a claim it becomes a HIGH-risk ROI statement
+    that no source can establish, because no source states it: the page computes
+    it. The QA matcher then offers it to any draft sentence mentioning a payback
+    period, and the draft is blocked for a table.
+
+    The signal is label/value density — a colon immediately followed by a figure.
+    Measured on the blocking material of 2026-08-30, the scraped block scored 6
+    pairs and the six real prose claims it competed with scored 0. The block
+    below reproduces that shape; the prose claims are verbatim from the package.
+    """
+
+    BLOCK = ("Puissance: 4 kWc Coût de l'installation: 6.000 € Production "
+             "annuelle: 3.800 kWh Économie annuelle: 950 € Retour sur "
+             "investissement: 6,3 ans Durée de vie: 25 ans")
+
+    def test_the_block_is_refused(self):
+        assert _is_worked_example(self.BLOCK) is True
+        assert _is_assertion(self.BLOCK) is False
+
+    def test_it_never_reaches_the_claim_set(self):
+        passage = Passage(text=self.BLOCK, offset=0, source_ref="s1")
+        assert extract_claims(passage) == []
+
+    @pytest.mark.parametrize("claim", [
+        # Verbatim from the same run. Every one of them scored 0 pairs.
+        "En Wallonie : le retour sur investissement atteint 8 ans.",
+        "Comptez entre 1€ et 1,2€ par watt crête installé.",
+        "Les installations de moins de 5 kWc reçoivent 2,055 Certificats Verts "
+        "par 1000 kWh produits et cela pendant 10 ans.",
+        "Le prix moyen est désormais d'environ 1 €/Wc hors TVA, soit environ "
+        "5.000 € pour une installation moyenne de 5.000 Wc",
+    ])
+    def test_real_claims_are_untouched(self, claim):
+        assert _is_worked_example(claim) is False
+        assert _is_assertion(claim) is True
+
+    def test_one_labelled_figure_in_a_sentence_is_ordinary_punctuation(self):
+        """Why the threshold is three and not one.
+
+        "En Wallonie : le retour sur investissement atteint 8 ans." is a claim
+        the pipeline needs. French uses the colon as prose; the table is what
+        repeats it.
+        """
+        assert _is_worked_example("Retour sur investissement : 8 ans.") is False
+        assert _is_worked_example("Puissance: 4 kWc Coût: 6.000 €") is False
 
 
 # ─── Category, authority, freshness ──────────────────────────────────────────
