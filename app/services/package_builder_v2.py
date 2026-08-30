@@ -27,7 +27,8 @@ from app.services import claim_risk as risk_module
 from app.services import source_quality as quality_module
 from app.services.claim_risk import ClaimRisk
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
-                                    RelevanceThresholds, score_claim, score_source)
+                                    RelevanceThresholds, query_that_fetched,
+                                    score_claim, score_source)
 from app.services.source_quality import SourceQuality
 from app.verticals.profile import VerticalProfile
 
@@ -88,8 +89,13 @@ def build_package_v2(
         for index, source in enumerate(result.sources):
             ref = source.candidate_id or f"{provider}-{index:03d}"
 
+            # A source is judged against the question it was fetched to answer.
+            # For general web research that IS the article's query; for the
+            # targeted authoritative pass it is the planner's own query, and
+            # using the article's query there discarded every official page.
             decision = supplied.get(ref) or score_source(
-                query=query, profile=profile, title=source.title,
+                query=query_that_fetched(source.metadata, default=query),
+                profile=profile, title=source.title,
                 body=source.summary, url=source.url, thresholds=thresholds,
             )
             quality = quality_module.classify_domain(

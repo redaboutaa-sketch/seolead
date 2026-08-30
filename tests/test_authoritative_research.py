@@ -17,6 +17,7 @@ from app.services.evidence_model import EvidenceRef, evaluate_claim
 from app.services.freshness import FreshnessStatus, assess
 from app.services.provider_usage import UsageRecorder
 from app.services.region import Region, detect_region, scope_is_compatible
+from app.services.relevance import RESEARCH_QUERY_KEY, query_that_fetched
 from app.services.relevance import RelevanceStatus
 from app.services.research_planner import plan_authoritative_research
 from app.services.source_quality import SourceQuality
@@ -118,6 +119,34 @@ class TestRegionalScope:
         assert detect_region(
             "En Belgique, la prime wallonne s'élève à 1 750 €.").region \
             is Region.BE_WAL
+
+    def test_a_text_naming_several_regions_is_national_not_the_first_one(self):
+        """The defect that emptied the evidence set for BE-wide claims.
+
+        Detection returned whichever sub-region came first in the iteration
+        order — always BE-WAL. A page comparing the three regional schemes is
+        exactly the Belgium-wide source a Belgium-wide claim needs, and it was
+        stamped Walloon, then rejected for "regional scope mismatch".
+        """
+        match = detect_region(
+            "Comparatif des primes en Wallonie, à Bruxelles et en Flandre.")
+        assert match.region is Region.BE
+        # And the reason is legible: all three are named in the evidence.
+        assert "wallonie" in match.evidence
+        assert "bruxelles" in match.evidence
+        assert "flandre" in match.evidence
+
+    def test_two_regions_are_already_enough_to_be_national(self):
+        assert detect_region(
+            "La prime diffère entre la Wallonie et la Flandre.").region \
+            is Region.BE
+
+    def test_a_multi_region_source_can_now_support_a_belgian_claim(self):
+        """The consequence, stated as the rule it restores."""
+        evidence = detect_region(
+            "En Wallonie comme en Flandre, le compteur ne tourne plus à "
+            "l'envers.").region
+        assert scope_is_compatible(evidence, Region.BE) is True
 
     def test_national_evidence_covers_a_regional_claim(self):
         assert scope_is_compatible(Region.BE, Region.BE_WAL) is True
@@ -405,6 +434,39 @@ class TestExecutor:
         assert result.provider == "tavily_authoritative"
         assert {s.url for s in result.sources} == {
             "https://energie.wallonie.be/fr/prime.html"}
+
+    async def test_every_folded_source_carries_the_query_that_fetched_it(
+            self, solar_profile):
+        """The stamp that lets the relevance gate ask the right question.
+
+        Folding into the standard provider shape used to drop the planner's own
+        query, leaving the gate downstream with nothing to compare against but
+        the article's query — which is how 31 of 40 official pages were thrown
+        away in the live run of 2026-08-30.
+        """
+        run, _ = await self._run(solar_profile, [_source(
+            "https://energie.wallonie.be/fr/prime.html", "Prime",
+            "La prime est actuellement de 1 750 €.", "o1")])
+        result = run.to_provider_result(query="requête d'article", market="BE",
+                                        language="fr")
+        assert result.sources
+        assert len(result.sources) == len(run.accepted)
+        for source, accepted in zip(result.sources, run.accepted, strict=True):
+            recorded = query_that_fetched(source.metadata,
+                                          default="requête d'article")
+            assert recorded != "requête d'article"
+            assert recorded == accepted.query
+
+    async def test_folding_preserves_the_metadata_a_source_already_had(
+            self, solar_profile):
+        run, _ = await self._run(solar_profile, [_source(
+            "https://energie.wallonie.be/fr/prime.html", "Prime",
+            "La prime est actuellement de 1 750 €.", "o1")])
+        run.accepted[0].source = run.accepted[0].source.model_copy(
+            update={"metadata": {"provider_rank": 3}})
+        result = run.to_provider_result(query="q", market="BE", language="fr")
+        assert result.sources[0].metadata["provider_rank"] == 3
+        assert RESEARCH_QUERY_KEY in result.sources[0].metadata
 
     async def test_an_empty_run_says_so_rather_than_failing(self, solar_profile):
         run, _ = await self._run(solar_profile, [])

@@ -78,26 +78,50 @@ class RegionMatch:
         return {"region": self.region.value, "matched_on": self.evidence}
 
 
-def detect_region(text: str, *, default: Region = Region.UNKNOWN) -> RegionMatch:
-    """Detect the most specific region named in a text.
+def _names(region: Region, normalized: str) -> str | None:
+    """The first vocabulary term of `region` present in `normalized`, if any."""
+    for term in _REGION_TERMS[region]:
+        if re.search(rf"(?<!\w){re.escape(normalize_query(term))}(?!\w)",
+                     normalized):
+            return term
+    return None
 
-    Sub-national first: a page that says both "Belgique" and "Wallonie" is almost
-    always describing a Walloon rule in a Belgian context, and scoping it to the
-    country would over-generalise it.
+
+def detect_region(text: str, *, default: Region = Region.UNKNOWN) -> RegionMatch:
+    """Detect the region a text is scoped to.
+
+    One sub-national region named, and it wins over the country: a page that says
+    both "Belgique" and "Wallonie" is almost always describing a Walloon rule in a
+    Belgian context, and scoping it to the country would over-generalise it.
+
+    SEVERAL sub-national regions named, and the text is national. This is the
+    correction of a real defect: the previous version returned whichever region
+    came first in the iteration order, which was always BE-WAL. A page comparing
+    the Walloon, Brussels and Flemish schemes — precisely the Belgium-wide source
+    a Belgium-wide claim needs — was stamped Walloon, and every HIGH-risk claim it
+    supported was then rejected for "regional scope mismatch: BE-WAL evidence
+    cannot establish a BE-wide claim". The label was an artefact of enum ordering,
+    not of the text.
     """
     normalized = normalize_query(text or "")
     if not normalized:
         return RegionMatch(default, "")
 
-    for region in (Region.BE_WAL, Region.BE_BRU, Region.BE_VLG):
-        for term in _REGION_TERMS[region]:
-            if re.search(rf"(?<!\w){re.escape(normalize_query(term))}(?!\w)",
-                         normalized):
-                return RegionMatch(region, term)
+    subnational = [(region, term)
+                   for region in (Region.BE_WAL, Region.BE_BRU, Region.BE_VLG)
+                   if (term := _names(region, normalized)) is not None]
 
-    for term in _REGION_TERMS[Region.BE]:
-        if re.search(rf"(?<!\w){re.escape(normalize_query(term))}(?!\w)", normalized):
-            return RegionMatch(Region.BE, term)
+    if len(subnational) == 1:
+        region, term = subnational[0]
+        return RegionMatch(region, term)
+
+    if len(subnational) > 1:
+        return RegionMatch(Region.BE,
+                           ", ".join(term for _, term in subnational))
+
+    national = _names(Region.BE, normalized)
+    if national is not None:
+        return RegionMatch(Region.BE, national)
 
     return RegionMatch(default, "")
 

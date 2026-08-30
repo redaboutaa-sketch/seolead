@@ -54,10 +54,12 @@ from app.services import approval_service
 from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
 from app.services.pipeline import run_pipeline
+from app.services.claim_policy import requirements_for
 from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
 from app.services.provider_usage import UsageRecorder
 from app.services.research_planner import plan_authoritative_research
 from app.services.research_cache import freshness_policy
+from app.services.region import detect_region
 from app.verticals.profile import available_profiles, load_profile
 
 EXIT_OK = 0
@@ -224,6 +226,84 @@ async def cmd_package_rejected(args: argparse.Namespace) -> int:
                  "reason": r.get("rejection_reason")}
                 for r in (package.rejected_evidence or [])
             ],
+        })
+    return EXIT_OK
+
+
+async def cmd_package_replay(args: argparse.Namespace) -> int:
+    """Re-classify a sealed package's claims against the CURRENT policy.
+
+    Read-only and free: no provider is called, nothing is written, the package is
+    not modified. It answers one question — how many of these claims were being
+    held to a requirement they inherited from a mislabelling?
+
+    What it CANNOT answer is whether a claim is now supported. Evidence status
+    depends on the passages of every eligible source, and a sealed package keeps
+    only the passage that matched each claim, not the corpus. Re-deciding support
+    needs a live run. Reporting a support count from here would be an invention,
+    so this command reports the labels and says so.
+    """
+    async with get_sessionmaker()() as session:
+        package = await session.get(ResearchPackage, uuid.UUID(args.id))
+        if package is None:
+            _emit({"error": "not found"})
+            return EXIT_ERROR
+
+        keyword = await session.get(SeedKeyword, package.keyword_id)
+        profile = load_profile(
+            (await session.get(Vertical, keyword.vertical_id)).code)
+
+        def label(value) -> str:
+            """`ClaimRequirements` mixes enum members and plain strings."""
+            return getattr(value, "value", value)
+
+        changed: list[dict] = []
+        before_risk: dict[str, int] = {}
+        after_risk: dict[str, int] = {}
+        before_category: dict[str, int] = {}
+        after_category: dict[str, int] = {}
+
+        for fact in package.facts or []:
+            text = fact.get("claim") or ""
+            if not text:
+                continue
+            stored_category = fact.get("category")
+            stored_risk = fact.get("claim_risk")
+            stored_region = fact.get("claim_region") or fact.get("region")
+
+            requirements = requirements_for(text, profile)
+            region = detect_region(text).region
+            category, risk = label(requirements.category), label(requirements.risk)
+
+            before_risk[str(stored_risk)] = before_risk.get(str(stored_risk), 0) + 1
+            after_risk[risk] = after_risk.get(risk, 0) + 1
+            before_category[str(stored_category)] = \
+                before_category.get(str(stored_category), 0) + 1
+            after_category[category] = after_category.get(category, 0) + 1
+
+            if (category != stored_category or risk != stored_risk
+                    or (stored_region and region.value != stored_region)):
+                changed.append({
+                    "claim": text[:160],
+                    "category": {"before": stored_category, "after": category},
+                    "risk": {"before": stored_risk, "after": risk},
+                    "region": {"before": stored_region, "after": region.value},
+                    "min_corroborating_sources":
+                        requirements.min_corroborating_sources,
+                    "authority": label(requirements.authority),
+                    "evidence_status_when_sealed": fact.get("evidence_status"),
+                })
+
+        _emit({
+            "package_id": str(package.id), "query": package.query,
+            "claims": len(package.facts or []),
+            "reclassified": len(changed),
+            "risk": {"before": before_risk, "after": after_risk},
+            "category": {"before": before_category, "after": after_category},
+            "changed": changed,
+            "note": ("Labels only. Evidence status cannot be recomputed from a "
+                     "sealed package — it needs the full passage corpus, which "
+                     "is not kept. Run the pipeline to re-decide support."),
         })
     return EXIT_OK
 
@@ -792,6 +872,11 @@ def build_parser() -> argparse.ArgumentParser:
         "rejected", help="sources the relevance gate excluded, and why")
     package_rejected.add_argument("id")
     package_rejected.set_defaults(func=cmd_package_rejected)
+    package_replay = package_sub.add_parser(
+        "replay", help="re-classify a sealed package's claims under the current "
+                       "policy — read-only, no provider call")
+    package_replay.add_argument("id")
+    package_replay.set_defaults(func=cmd_package_replay)
 
     serp = sub.add_parser("serp", help="SERP snapshots")
     serp_sub = serp.add_subparsers(dest="action", required=True)

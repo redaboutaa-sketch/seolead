@@ -219,6 +219,74 @@ class TestClaimPolicy:
         assert requirements.risk == ClaimRisk.LOW
         assert requirements.freshness is FreshnessRequirement.NOT_REQUIRED
 
+    @pytest.mark.parametrize("claim", [
+        "Les panneaux solaires n'aiment pas les fortes chaleurs.",
+        "Pour fonctionner, ils ont besoin de lumière, pas de chaleur.",
+        "Un onduleur de qualité dure environ dix ans avant remplacement.",
+        "La meilleure orientation reste plein sud, inclinée à 35 degrés.",
+        "La valeur de revente du bien augmente après une installation.",
+        "Comptez environ cinq heures de production utile par jour.",
+        "Le rendement d'un capteur baisse quand la température monte.",
+    ])
+    def test_a_sentence_containing_no_money_is_not_a_price_claim(self, claim,
+                                                                 solar_profile):
+        """`eur` was matched as a substring, so *chaleur* was a price.
+
+        Every claim here is an ordinary explanation of how a panel behaves, and
+        every one of them was classified MARKET_PRICE — MEDIUM risk, SPECIALIST
+        authority, three corroborating sources — because "eur" hides inside
+        chaleur, onduleur, meilleur, heures, capteur and valeur. The evidence
+        those claims then needed does not exist, because they are not about
+        prices at all.
+        """
+        requirements = requirements_for(claim, solar_profile)
+        assert classify_category(claim, solar_profile) is ClaimCategory.GENERAL
+        assert requirements.risk == ClaimRisk.LOW
+        assert requirements.min_corroborating_sources == 1
+
+    @pytest.mark.parametrize("claim,expected", [
+        ("Le prix moyen d'une installation est de 7 000 € en Belgique.",
+         ClaimCategory.MARKET_AVERAGE),
+        ("Nos tarifs pour 5 kWc sont de 4 400 €.", ClaimCategory.VENDOR_PRICE),
+        ("L'installation coûte entre 4 000 et 6 000 euros.",
+         ClaimCategory.OBSERVED_PRICE_RANGE),
+        ("Le tarif appliqué a augmenté de 12 %.", ClaimCategory.MARKET_PRICE),
+    ])
+    def test_real_money_words_still_classify_as_price_claims(self, claim, expected,
+                                                             solar_profile):
+        """The counter-proof: the fix removed collisions, not the vocabulary."""
+        assert classify_category(claim, solar_profile) is expected
+
+    def test_the_euro_symbol_alone_is_still_money(self, solar_profile):
+        """`7 000€` has no word boundary before the symbol; `_has_currency` does."""
+        assert classify_category("Comptez 7 000€ pour 4 kWc.",
+                                 solar_profile) is not ClaimCategory.GENERAL
+
+    @pytest.mark.parametrize("claim", [
+        "La production n'était plus que de 16,8 kWh par jour en juillet.",
+        "Un ménage belge moyen consomme environ 3 500 kWh par an.",
+    ])
+    def test_a_quantity_of_energy_is_not_a_claim_about_its_price(self, claim,
+                                                                 solar_profile):
+        """`kwh` sat among three phrases that all name a price. It is a unit.
+
+        Every statement of energy produced or consumed inherited ENERGY_PRICE:
+        HIGH risk, institutional source, dated. Those are the sentences an
+        article about solar output is made of.
+        """
+        requirements = requirements_for(claim, solar_profile)
+        assert requirements.category is not ClaimCategory.ENERGY_PRICE
+        assert requirements.risk == ClaimRisk.LOW
+
+    @pytest.mark.parametrize("claim", [
+        "Le prix du kWh a atteint 0,35 € en 2024.",
+        "Le prix de l'électricité a augmenté de 12 % en un an.",
+    ])
+    def test_a_price_per_kwh_is_still_an_energy_price_claim(self, claim,
+                                                            solar_profile):
+        assert classify_category(claim,
+                                 solar_profile) is ClaimCategory.ENERGY_PRICE
+
     def test_commercial_source_cannot_satisfy_official_requirement(self):
         assert not authority_is_sufficient(AuthorityRequirement.OFFICIAL,
                                            SourceQuality.COMMERCIAL)

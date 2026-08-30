@@ -28,6 +28,7 @@ from app.schemas.research import NormalizedSource, ResearchProviderResult, Sourc
 from app.services.authority_registry import AuthorityEntry, AuthorityRegistry
 from app.services.freshness import assess as assess_freshness
 from app.services.provider_usage import UsageRecorder
+from app.services.relevance import RESEARCH_QUERY_KEY
 from app.services.region import Region, detect_region
 from app.services.research_planner import AuthoritativeQuery, ResearchPlan
 from app.verticals.profile import VerticalProfile
@@ -91,7 +92,18 @@ class AuthoritativeRunResult:
         machinery as any other. There is no separate, less-tested path for the
         sources that matter most.
         """
-        sources = [s.source for s in self.accepted]
+        # Each page carries the question it was fetched to answer. Without this
+        # the relevance gate downstream can only compare it to the article's own
+        # query — a question these pages were never asked — and every one of them
+        # is discarded for having no topical overlap with it.
+        sources = [
+            s.source.model_copy(update={"metadata": {
+                **s.source.metadata,
+                RESEARCH_QUERY_KEY: s.query,
+                "research_category": s.category.value,
+            }})
+            for s in self.accepted
+        ]
         state = SourceState.OK if sources else SourceState.NO_RESULTS
         unresolved: list[str] = []
         if not sources:
