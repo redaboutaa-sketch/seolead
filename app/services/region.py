@@ -87,6 +87,18 @@ def _names(region: Region, normalized: str) -> str | None:
     return None
 
 
+def names_region(text: str, region: Region) -> bool:
+    """Whether this text names this region, whatever else it also names.
+
+    Distinct from `detect_region`, which picks ONE scope for a whole page. Here
+    the question is per-sentence and additive: a ventilated sentence — « en
+    Wallonie : X ; en Flandre : Y » — names both, and both answers are yes.
+    """
+    if region is Region.UNKNOWN:
+        return False
+    return _names(region, normalize_query(text or "")) is not None
+
+
 def detect_region(text: str, *, default: Region = Region.UNKNOWN) -> RegionMatch:
     """Detect the region a text is scoped to.
 

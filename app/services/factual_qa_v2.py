@@ -27,6 +27,7 @@ import re
 from app.core.enums import EvidenceStatus
 from app.services.claim_policy import ClaimRisk
 from app.services.intent import normalize_query
+from app.services.region import Region, names_region
 from app.verticals.profile import VerticalProfile
 
 _FACTUAL_SENTENCE = re.compile(
@@ -52,6 +53,13 @@ def _numbers(text: str) -> set[str]:
 
 def _content_words(text: str) -> set[str]:
     return {w for w in normalize_query(text).split() if len(w) > 4}
+
+
+def _region_of(claim: dict) -> Region:
+    try:
+        return Region(str(claim.get("region") or "").upper())
+    except ValueError:
+        return Region.UNKNOWN
 
 
 def _finding(code: str, message: str, *, blocking: bool, detail: str = "") -> dict:
@@ -122,6 +130,33 @@ def run_factual_qa_v2(draft: dict, package: dict,
                     f"that the evidence set could not establish "
                     f"({status}): {claim.get('reason', '')[:160]}",
                     blocking=True, detail=str(claim.get("claim"))[:280]))
+
+        # ── A regional figure stated as the country's ────────────────────
+        # This check exists because of a change made beside it: a claim naming
+        # no region, in a category this market sets regionally, is now scoped to
+        # the region its evidence covers instead of dying on the country-wide
+        # bar. That makes seventeen payback claims provable — and it makes a new
+        # failure possible, where the writer states a Walloon figure flat and the
+        # page tells a Flemish reader something false about their own region.
+        #
+        # So the region must survive into the sentence. Naming it is what makes
+        # the claim true; dropping it is false by omission, and no amount of
+        # sourcing repairs that.
+        claim_region = _region_of(claim)
+        if (claim.get("regionally_determined") and claim_region.is_subnational
+                and body):
+            for sentence in extract_draft_claims(body):
+                if not _matches_claim(sentence, claim):
+                    continue
+                if not names_region(sentence, claim_region):
+                    add(_finding(
+                        "REGIONAL_SCOPE_NOT_STATED",
+                        f"The draft states a {claim.get('category')} figure that "
+                        f"holds for {claim_region.value} without naming the "
+                        f"region. Written flat it reads as country-wide, and no "
+                        f"source establishes it for the country.",
+                        blocking=True, detail=sentence[:280]))
+                break
 
         if status == EvidenceStatus.CONFLICTING.value:
             if body and any(_matches_claim(s, claim)

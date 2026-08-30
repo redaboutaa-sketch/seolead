@@ -15,6 +15,7 @@ import json
 import logging
 
 from app.core.errors import LLMProviderError
+from app.services import brief_service
 from app.providers.llm.base import (LLMCapability, LLMProvider, LLMRequest,
                                     LLMResponse)
 
@@ -37,6 +38,24 @@ EVIDENCE
 - Never invent a statistic, price, percentage, date, subsidy, tax rate, regulation,
   study, source or testimonial.
 - Never present an estimate as a measurement.
+
+REGIONAL SCOPE
+- Some subjects are set REGION BY REGION in this market. Each supplied fact says
+  so: `regionally_determined` and the `region` it belongs to.
+- A figure for one region is NOT the country's figure. Stating it without naming
+  its region is false by omission, however well sourced the number is — and no
+  source publishes a country-wide number for these subjects, so you cannot get
+  one by averaging or merging them.
+- Write these in regional scope, naming the region in the SAME SENTENCE as the
+  figure. When the page addresses the whole country, break the subject out —
+  "en Wallonie : X ; en Flandre : Y ; à Bruxelles : Z" — each segment carrying
+  that region's own supplied fact.
+- Say nothing about a region for which no fact was supplied. `silent_regions`
+  lists them: their absence is a gap in the research, not evidence that the
+  subject does not apply there, and inventing the missing segment to make the
+  breakdown look complete is the worst thing you could do here.
+- A country-wide phrasing is allowed only when a supplied fact is itself scoped
+  to the whole country, or when the sentence carries the breakdown.
 
 LIMITATIONS
 - The listed limitations describe real gaps in what was researched. You must not
@@ -128,6 +147,8 @@ def build_generation_prompt(brief: dict, package: dict) -> tuple[str, str]:
         "outline": brief["outline"],
         "questions_to_answer": brief["key_questions"],
         "facts_you_must_build_on": brief["required_facts"],
+        "regional_scope": brief_service.regional_scope(
+            brief["required_facts"]),
         "sources": brief["required_sources"],
         "limitations_you_must_respect": brief["missing_information"],
         "call_to_action": brief["cta_strategy"],

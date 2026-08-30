@@ -76,6 +76,12 @@ class VerticalProfile(BaseModel):
     # category → {authority, freshness, risk, min_corroborating_sources,
     # rationale}. Overrides the cross-vertical defaults in `claim_policy`.
     authority_policy: dict[str, dict] = Field(default_factory=dict)
+    # Categories whose answer is set REGIONALLY in this market. In Belgium the
+    # premium, the prosumer tariff, the green certificates and therefore the
+    # payback all differ by region; in a unitary market the same list would be
+    # empty. Nothing in the code knows that — it is configuration, like every
+    # other statement about a market.
+    regionally_determined_claims: list[str] = Field(default_factory=list)
     # Where to look when a HIGH-risk claim is unresolved. A placeholder here is
     # deliberate: it can be populated without touching orchestration code.
     official_source_policy: dict = Field(default_factory=dict)

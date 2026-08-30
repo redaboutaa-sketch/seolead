@@ -47,6 +47,12 @@ class ClaimRequirements:
     freshness: FreshnessRequirement
     min_corroborating_sources: int
     rationale: str
+    # Whether this market sets the answer REGIONALLY. Configuration, not code:
+    # a Belgian premium is regional, a French one is not, and nothing here knows
+    # which. When true, the claim is written in regional scope and a country-wide
+    # phrasing is only admissible from a genuinely national source — or from a
+    # sentence that carries the breakdown itself.
+    regionally_determined: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -54,6 +60,7 @@ class ClaimRequirements:
             "authority": self.authority.value, "freshness": self.freshness.value,
             "min_corroborating_sources": self.min_corroborating_sources,
             "rationale": self.rationale,
+            "regionally_determined": self.regionally_determined,
         }
 
 
@@ -326,7 +333,16 @@ def requirements_for(claim: str, profile: VerticalProfile) -> ClaimRequirements:
     return ClaimRequirements(category=category, risk=risk, authority=authority,
                              freshness=freshness,
                              min_corroborating_sources=corroboration,
-                             rationale=rationale)
+                             rationale=rationale,
+                             regionally_determined=is_regionally_determined(
+                                 category, profile))
+
+
+def is_regionally_determined(category: ClaimCategory,
+                             profile: VerticalProfile | None) -> bool:
+    """Whether this market sets this category's answer region by region."""
+    declared = getattr(profile, "regionally_determined_claims", None) or []
+    return category.value in {str(c).upper() for c in declared}
 
 
 def authority_is_sufficient(requirement: AuthorityRequirement,
