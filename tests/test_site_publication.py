@@ -488,6 +488,23 @@ class TestContentSanitization:
 
 # ─── Site configuration ──────────────────────────────────────────────────────
 
+def _with_validated_consents(base: dict) -> dict:
+    """Leaving staging also requires no consent case — base text or any
+    supported-locale variant — still marked `pending_legal_review`; tests that
+    model a launch must model that step."""
+    fields = []
+    for field in base["conversion"]["fields"]:
+        cleaned = {k: v for k, v in field.items() if k != "pending_legal_review"}
+        if cleaned.get("i18n"):
+            cleaned["i18n"] = {
+                locale: {k: v for k, v in variant.items()
+                         if k != "pending_legal_review"}
+                for locale, variant in cleaned["i18n"].items()
+            }
+        fields.append(cleaned)
+    return {**base, "conversion": {**base["conversion"], "fields": fields}}
+
+
 class TestSiteConfiguration:
     def test_solar_be_has_its_domain_and_is_still_not_indexable(self):
         """The domain arriving must not, on its own, make the site indexable.
@@ -509,7 +526,7 @@ class TestSiteConfiguration:
             SiteConfig(**raw)
 
     def test_a_site_with_no_domain_may_not_leave_staging(self):
-        raw = load_site("solar_be").model_dump()
+        raw = _with_validated_consents(load_site("solar_be").model_dump())
         raw["domain"] = None
         raw["staging"] = False
         raw["seo"] = {**raw["seo"], "canonical_origin": None,
@@ -518,7 +535,7 @@ class TestSiteConfiguration:
             SiteConfig(**raw)
 
     def test_indexability_needs_all_three_conditions(self):
-        base = load_site("solar_be").model_dump()
+        base = _with_validated_consents(load_site("solar_be").model_dump())
         base.update(staging=False)
         base["seo"] = {**base["seo"], "allow_indexing": True}
         assert SiteConfig(**base).is_indexable is True
@@ -532,20 +549,32 @@ class TestSiteConfiguration:
             variant = {**base, **override}
             assert SiteConfig(**variant).is_indexable is False
 
-    def test_unsupplied_contact_and_legal_stay_empty_not_invented(self):
-        """The brand is now real. Everything the owner has NOT supplied is not."""
+    def test_supplied_contact_and_legal_are_present_exactly(self):
+        """The brand is real, and since 2026-08-30 so is the legal identity.
+
+        This test guarded against INVENTED contact details; the owner has now
+        supplied them, so it asserts the supplied values verbatim — a drift
+        here would mean someone edited the owner's identity without them.
+        """
         config = load_site("solar_be")
         assert config.brand_name == "Mon Projet Solaire"
         assert config.brand_name_is_placeholder is False
-        assert config.contact.company_name is None
-        assert config.contact.phone is None
+        # Fournis par le propriétaire le 2026-08-30.
+        assert config.contact.company_name == "Beaver Data Group"
+        assert config.contact.company_number == "935097675"
+        assert config.contact.phone == "+33650855704"
+        assert config.contact.email == "reda.boutaa@gmail.com"
+        assert config.contact.lead_destination_email == "reda.boutaa@gmail.com"
         # Le texte légal a été FOURNI et approuvé par le propriétaire le
-        # 2026-08-17 (version `solar-be-consent-v1.0-2026-08-17`). Ce garde
-        # existait pour empêcher un texte GÉNÉRÉ de se présenter comme relu ;
-        # sa prémisse est éteinte, et il affirme désormais l'inverse : ce qui a
-        # été fourni est présent, exactement.
+        # 2026-08-17 (version `solar-be-consent-v1.0-2026-08-17`), la politique
+        # incrémentée le 2026-08-30. Ce garde existait pour empêcher un texte
+        # GÉNÉRÉ de se présenter comme relu ; sa prémisse est éteinte, et il
+        # affirme désormais l'inverse : ce qui a été fourni est présent,
+        # exactement.
         assert config.legal.reviewed is True
         assert config.legal.consent_version == "solar-be-consent-v1.0-2026-08-17"
+        assert config.legal.privacy_policy_version == \
+            "solar-be-privacy-v1.1-2026-08-30"
         assert config.legal.data_controller == "BEAVER DATA GROUP"
         assert config.legal.privacy_contact_email == "reda.boutaa@gmail.com"
 

@@ -78,13 +78,16 @@ class LeadRequest(BaseModel):
     qualification: dict = Field(default_factory=dict)
     consent_processing: bool = False
     consent_marketing: bool = False
+    # Per-case consent answers, keyed by consent field key. The configuration
+    # decides which keys exist; unknown keys are dropped server-side.
+    consents: dict = Field(default_factory=dict)
     attribution: dict = Field(default_factory=dict)
     # Spam signals. `honeypot` is a field no human sees.
     honeypot: str | None = Field(None, max_length=200)
     elapsed_ms: int | None = Field(None, ge=0, le=86_400_000)
     client_key: str | None = Field(None, max_length=128)
 
-    @field_validator("qualification", "attribution")
+    @field_validator("qualification", "attribution", "consents")
     @classmethod
     def _bounded(cls, value: dict) -> dict:
         if len(value) > 40:
@@ -252,6 +255,7 @@ async def create_lead(site_id: str, payload: LeadRequest,
         qualification=payload.qualification,
         consent_processing=payload.consent_processing,
         consent_marketing=payload.consent_marketing,
+        consents=payload.consents,
         attribution=payload.attribution,
         signals=SubmissionSignals(honeypot_value=payload.honeypot,
                                   elapsed_ms=payload.elapsed_ms,

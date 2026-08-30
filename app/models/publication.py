@@ -21,8 +21,8 @@ from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer,
                         String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import (ConversionType, LeadState, PublicationState,
-                            SiteEventType)
+from app.core.enums import (ConsentChannel, ConsentPurpose, ConversionType,
+                            LeadState, PublicationState, SiteEventType)
 from app.db.base import (Base, JSONType, TZDateTime, UUIDType, created_column,
                          pk_column, updated_column)
 
@@ -30,6 +30,8 @@ _PUBLICATION_STATES = ", ".join(f"'{s.value}'" for s in PublicationState)
 _LEAD_STATES = ", ".join(f"'{s.value}'" for s in LeadState)
 _EVENT_TYPES = ", ".join(f"'{t.value}'" for t in SiteEventType)
 _CONVERSION_TYPES = ", ".join(f"'{t.value}'" for t in ConversionType)
+_CONSENT_PURPOSES = ", ".join(f"'{p.value}'" for p in ConsentPurpose)
+_CONSENT_CHANNELS = ", ".join(f"'{c.value}'" for c in ConsentChannel)
 
 
 class PublishedContent(Base):
@@ -160,6 +162,67 @@ class CapturedLead(Base):
 
     attribution: Mapped["LeadAttribution | None"] = relationship(
         back_populates="lead", cascade="all, delete-orphan", uselist=False)
+    consents: Mapped[list["LeadConsent"]] = relationship(
+        back_populates="lead", cascade="all, delete-orphan")
+
+
+class LeadConsent(Base):
+    """One consent case, as an event: which text, what answer, at what moment.
+
+    `CapturedLead` carries ONE version/timestamp pair, which was honest while the
+    form had one required consent and one optional boolean. It cannot represent
+    the target state — N independent cases (request follow-up per channel,
+    marketing, partner transfer), each with its own text version — without either
+    N column triplets or a blob. So each case becomes a row.
+
+    `granted` False is a recorded refusal, not an absence: a case the visitor was
+    shown and declined is a fact with legal weight, and it is what lets a later
+    export say "marketing: not consented" instead of guessing. A case the form
+    never offered has no row at all — absence of evidence stays distinguishable
+    from evidence of refusal.
+
+    The legacy columns on `CapturedLead` are untouched and stay authoritative for
+    export contract v1, which is armed and immutable. This table is what contract
+    v2 will read; until then it is local storage only.
+    """
+
+    __tablename__ = "lead_consent"
+    __table_args__ = (
+        CheckConstraint(f"purpose IN ({_CONSENT_PURPOSES})",
+                        name="ck_consent_purpose"),
+        CheckConstraint(f"channel IS NULL OR channel IN ({_CONSENT_CHANNELS})",
+                        name="ck_consent_channel"),
+        # One row per case and per lead: a second answer to the same checkbox in
+        # the same submission would be a bug, not a new fact.
+        UniqueConstraint("captured_lead_id", "consent_key",
+                         name="uq_lead_consent_case"),
+    )
+
+    id: Mapped[uuid.UUID] = pk_column()
+    captured_lead_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("captured_lead.id", ondelete="CASCADE"),
+        nullable=False)
+
+    # The form field key (`consent_processing`, `consent_marketing`, …). This is
+    # the join back to the site configuration that defined the case.
+    consent_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    # NULL means the consent text names no channel. Never defaulted.
+    channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # The version of the text the visitor saw, resolved from the site config at
+    # capture time. Required: a consent without its text version is the exact
+    # "consented — to what?" failure the split model exists to prevent.
+    text_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    granted_at: Mapped[object] = mapped_column(TZDateTime, nullable=False)
+    # Where the case was answered — the page path, same semantics as
+    # `CapturedLead.consent_source`.
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    created_at = created_column()
+
+    lead: Mapped[CapturedLead] = relationship(back_populates="consents")
 
 
 class LeadAttribution(Base):

@@ -72,3 +72,29 @@ export function contentPath(
 export function brandName(config: SiteConfigDTO | null): string {
   return config?.brand_name ?? "Site (configuration manquante)";
 }
+
+/**
+ * Resolve one localized text on a config object carrying `i18n` overrides.
+ *
+ * The base value is BOTH the default locale's text and the fallback: a locale
+ * whose translation has not landed renders the base text rather than a blank or
+ * a machine translation. Placeholders in the config are explicitly marked
+ * « À TRADUIRE PAR UN NATIF » so an untranslated string can never pass for a
+ * finished one.
+ */
+export function localizedText(
+  obj: {
+    i18n?: Record<
+      string,
+      { label?: string; help?: string; title?: string; description?: string }
+    >;
+    label?: string;
+    help?: string;
+    title?: string;
+    description?: string;
+  },
+  locale: string,
+  key: "label" | "help" | "title" | "description",
+): string | undefined {
+  return obj.i18n?.[locale]?.[key] ?? obj[key];
+}

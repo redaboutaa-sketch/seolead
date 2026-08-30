@@ -31,13 +31,13 @@ locale_paths:
   nl: "/nl"
 
 contact:
-  # PLACEHOLDER — all owner input.
-  email: null
-  phone: null
-  address: null
-  company_name: null
-  company_number: null
-  lead_destination_email: null
+  # Fournis par le propriétaire le 2026-08-30. Plus un placeholder.
+  email: "reda.boutaa@gmail.com"
+  phone: "+33650855704"
+  address: "43 rue de Marquillies, 59000 Lille, France"
+  company_name: "Beaver Data Group"
+  company_number: "935097675"
+  lead_destination_email: "reda.boutaa@gmail.com"
 
 legal:
   # Texte approuvé par le propriétaire le 2026-08-17. La version est ENREGISTRÉE
@@ -47,6 +47,12 @@ legal:
   terms_path: /conditions
   cookie_policy_path: null
   consent_version: "solar-be-consent-v1.0-2026-08-17"
+  # Version de la POLITIQUE affichée sur /confidentialite. Incrémentée le
+  # 2026-08-30 (section « Transmission à notre partenaire installateur »
+  # ajoutée, phrase d'exclusion retirée — validé par le propriétaire,
+  # responsable de traitement). Distincte de consent_version, qui identifie le
+  # texte du consentement au traitement et reste v1.0-2026-08-17.
+  privacy_policy_version: "solar-be-privacy-v1.1-2026-08-30"
   data_controller: "BEAVER DATA GROUP"
   privacy_contact_email: "reda.boutaa@gmail.com"
   reviewed: true
@@ -94,121 +100,229 @@ conversion:
   # Progressive disclosure: the project questions come first and carry visible
   # value, and contact details are requested last. A form that opens by demanding
   # a phone number converts worse and is a worse experience.
+  #
+  # i18n: chaque bloc `i18n.nl` est un PLACEHOLDER « À TRADUIRE PAR UN NATIF ».
+  # Le texte de base (fr) est le repli quand une clé nl manque — le mécanisme
+  # est le livrable, pas la traduction. Aucune traduction automatique, jamais :
+  # un libellé approximatif sur un formulaire de qualification coûte des leads
+  # et de la confiance, et personne ne relit une machine.
   form_steps:
     - key: project
       title: "Votre projet"
       description: "Quelques questions sur votre logement."
       fields: [owner_status, postcode, property_type]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Votre projet"
+          description: "[NL — À TRADUIRE PAR UN NATIF] Quelques questions sur votre logement."
     - key: roof
       title: "Votre toiture"
       description: "Pour situer la taille d'installation possible."
       fields: [roof_type, roof_orientation]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Votre toiture"
+          description: "[NL — À TRADUIRE PAR UN NATIF] Pour situer la taille d'installation possible."
     - key: consumption
       title: "Votre consommation"
       description: "Facultatif — utile pour affiner l'estimation."
-      fields: [annual_consumption_kwh, monthly_bill_eur, battery_interest]
+      # `monthly_bill_eur` retiré — DEC-P5A-QUAL-06 : « not collected and later
+      # discarded: NOT COLLECTED ». Le contrat ne le porte pas, et une donnée
+      # collectée pour être jetée est une promesse implicite non tenue.
+      fields: [annual_consumption_kwh, battery_interest]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Votre consommation"
+          description: "[NL — À TRADUIRE PAR UN NATIF] Facultatif — utile pour affiner l'estimation."
     - key: timing
       title: "Votre échéance"
       fields: [project_timeframe]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Votre échéance"
     - key: contact
       title: "Vos coordonnées"
       description: "Pour vous transmettre l'estimation."
       fields: [first_name, last_name, email, phone, consent_processing,
-               consent_marketing]
+               consent_followup_contact, consent_marketing,
+               consent_partner_transfer]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Vos coordonnées"
+          description: "[NL — À TRADUIRE PAR UN NATIF] Pour vous transmettre l'estimation."
 
   fields:
     - key: owner_status
       type: choice
       label: "Êtes-vous propriétaire du logement ?"
       required: true
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Êtes-vous propriétaire du logement ?"}
       options:
-        - {value: OWNER, label: "Propriétaire"}
-        - {value: OWNER_TO_BE, label: "En cours d'achat"}
-        - {value: TENANT, label: "Locataire"}
+        - value: OWNER
+          label: "Propriétaire"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Propriétaire"}}
+        - value: OWNER_TO_BE
+          label: "En cours d'achat"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] En cours d'achat"}}
+        - value: TENANT
+          label: "Locataire"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Locataire"}}
     - key: postcode
       type: postcode
       label: "Code postal"
       required: true
       pattern: "^[1-9][0-9]{3}$"
       help: "4 chiffres, ex. 1000"
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF] Code postal"
+          help: "[NL — À TRADUIRE PAR UN NATIF] 4 chiffres, ex. 1000"
     - key: property_type
       type: choice
       label: "Type de logement"
       required: true
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Type de logement"}
       options:
-        - {value: HOUSE, label: "Maison"}
-        - {value: APARTMENT, label: "Appartement"}
-        - {value: BUSINESS, label: "Bâtiment professionnel"}
+        - value: HOUSE
+          label: "Maison"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Maison"}}
+        - value: APARTMENT
+          label: "Appartement"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Appartement"}}
+        - value: BUSINESS
+          label: "Bâtiment professionnel"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Bâtiment professionnel"}}
     - key: roof_type
       type: choice
       label: "Type de toiture"
       required: false
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Type de toiture"}
       options:
-        - {value: PITCHED, label: "Toiture inclinée"}
-        - {value: FLAT, label: "Toiture plate"}
-        - {value: MIXED, label: "Les deux"}
-        - {value: UNKNOWN, label: "Je ne sais pas"}
+        - value: PITCHED
+          label: "Toiture inclinée"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Toiture inclinée"}}
+        - value: FLAT
+          label: "Toiture plate"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Toiture plate"}}
+        - value: MIXED
+          label: "Les deux"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Les deux"}}
+        - value: UNKNOWN
+          label: "Je ne sais pas"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
     - key: roof_orientation
       type: choice
       label: "Orientation principale"
       required: false
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Orientation principale"}
       options:
-        - {value: SOUTH, label: "Sud"}
-        - {value: EAST_WEST, label: "Est / Ouest"}
-        - {value: NORTH, label: "Nord"}
-        - {value: UNKNOWN, label: "Je ne sais pas"}
+        - value: SOUTH
+          label: "Sud"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Sud"}}
+        - value: EAST_WEST
+          label: "Est / Ouest"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Est / Ouest"}}
+        - value: NORTH
+          label: "Nord"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Nord"}}
+        - value: UNKNOWN
+          label: "Je ne sais pas"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
     - key: annual_consumption_kwh
       type: number
       label: "Consommation annuelle (kWh)"
       required: false
       min: 0
       max: 100000
-    - key: monthly_bill_eur
-      type: number
-      label: "Facture mensuelle moyenne (€)"
-      required: false
-      min: 0
-      max: 10000
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Consommation annuelle (kWh)"}
     - key: battery_interest
       type: choice
       label: "Une batterie domestique vous intéresse-t-elle ?"
       required: false
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Une batterie domestique vous intéresse-t-elle ?"}
       options:
-        - {value: YES, label: "Oui"}
-        - {value: MAYBE, label: "Peut-être"}
-        - {value: NO, label: "Non"}
+        - value: YES
+          label: "Oui"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: MAYBE
+          label: "Peut-être"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Peut-être"}}
+        - value: NO
+          label: "Non"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
     - key: project_timeframe
       type: choice
       label: "Quand souhaitez-vous réaliser le projet ?"
       required: true
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Quand souhaitez-vous réaliser le projet ?"}
       options:
-        - {value: ASAP, label: "Dès que possible"}
-        - {value: LT_6M, label: "Dans les 6 mois"}
-        - {value: LT_12M, label: "Dans l'année"}
-        - {value: EXPLORING, label: "Je me renseigne"}
+        - value: ASAP
+          label: "Dès que possible"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Dès que possible"}}
+        - value: LT_6M
+          label: "Dans les 6 mois"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Dans les 6 mois"}}
+        - value: LT_12M
+          label: "Dans l'année"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Dans l'année"}}
+        - value: EXPLORING
+          label: "Je me renseigne"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je me renseigne"}}
     - key: first_name
       type: text
       label: "Prénom"
       required: false
       max_length: 120
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Prénom"}
     - key: last_name
       type: text
       label: "Nom"
       required: false
       max_length: 120
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Nom"}
     - key: email
       type: email
       label: "Adresse e-mail"
       required: true
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Adresse e-mail"}
     - key: phone
       type: phone
       label: "Téléphone"
       required: false
       help: "Uniquement si vous souhaitez être rappelé."
-    # Two separate consents. Bundling them would make the necessary processing
-    # conditional on accepting marketing, which is not a real choice.
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF] Téléphone"
+          help: "[NL — À TRADUIRE PAR UN NATIF] Uniquement si vous souhaitez être rappelé."
+    # Separate consents, one purpose per case. Bundling them would make the
+    # necessary processing conditional on accepting the rest, which is not a
+    # real choice.
+    #
+    # TEXTES FR VALIDÉS par le propriétaire, responsable de traitement, le
+    # 2026-08-30 (locale fr-BE). Chaque texte est identifié par sa version ;
+    # le modifier, c'est frapper une nouvelle version — un test épingle chaque
+    # libellé au caractère près contre son identifiant.
+    #
+    # Les variantes NL restent `pending_legal_review` DANS leur bloc i18n :
+    # elles seront traduites par un locuteur natif PUIS validées — jamais
+    # traduites automatiquement, une version par locale. Le chargeur refuse de
+    # quitter le staging tant qu'une variante d'une locale servie est en
+    # attente.
     - key: consent_processing
       type: consent
+      consent_purpose: PROCESSING
+      # INCHANGÉ — version solar-be-consent-v1.0-2026-08-17 via
+      # legal.consent_version.
       label: >-
         J'accepte que mes données personnelles soient traitées par BEAVER DATA
         GROUP, responsable du traitement de Solar Belgium, afin d'analyser ma
@@ -216,10 +330,60 @@ conversion:
         assurer le suivi de ma demande. J'ai pris connaissance de la Politique
         de confidentialité et je peux retirer mon consentement à tout moment.
       required: true
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Consentement au traitement de la demande (texte fr non modifié faisant foi)."
+          pending_legal_review: true
+    # UNE case, DEUX entrées : le texte validé nomme les deux canaux, la case
+    # émet une ligne PHONE et une ligne WHATSAPP, même texte, même version.
+    - key: consent_followup_contact
+      type: consent
+      consent_purpose: FOLLOWUP_CONTACT
+      consent_channels: [PHONE, WHATSAPP]
+      consent_version: "solar-be-followup-contact-v1.0-2026-08-30"
+      label: >-
+        J'accepte d'être recontacté(e) par BEAVER DATA GROUP, par téléphone ou
+        par WhatsApp, au sujet de ma demande d'étude solaire, afin d'en
+        préciser les éléments et d'en recevoir les résultats. Ce consentement
+        ne porte que sur le suivi de ma demande. Je peux le retirer à tout
+        moment.
+      required: false
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Suivi de la demande par téléphone ou WhatsApp (texte fr validé faisant foi)."
+          pending_legal_review: true
+    # Remplace l'ancienne case marketing sans canal (Décision 2 : elle était
+    # intransmissible). Nouveau texte, canal nommé, nouvelle version.
     - key: consent_marketing
       type: consent
-      label: "J'accepte de recevoir des informations sur les offres et conseils."
+      consent_purpose: MARKETING
+      consent_channel: WHATSAPP
+      consent_version: "solar-be-marketing-whatsapp-v1.0-2026-08-30"
+      label: >-
+        J'accepte de recevoir par WhatsApp des informations et offres de
+        BEAVER DATA GROUP relatives aux solutions d'énergie, y compris les
+        offres de sa boutique partenaire. Je peux me désinscrire à tout
+        moment, notamment en répondant STOP.
       required: false
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Informations et offres par WhatsApp (texte fr validé faisant foi)."
+          pending_legal_review: true
+    - key: consent_partner_transfer
+      type: consent
+      consent_purpose: PARTNER_TRANSFER
+      consent_version: "solar-be-partner-transfer-v1.0-2026-08-30"
+      label: >-
+        J'accepte que mes coordonnées et les caractéristiques de mon projet
+        soient transmises à Solution SG, partenaire installateur de BEAVER
+        DATA GROUP, dans le seul but d'organiser un rendez-vous relatif à mon
+        projet solaire. BEAVER DATA GROUP demeure responsable de ce
+        traitement. Je peux retirer ce consentement à tout moment.
+      required: false
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Transmission de la demande au partenaire installateur (texte fr validé faisant foi)."
+          pending_legal_review: true
 
 # Routes the site knows about. Internal links may only target a path listed here,
 # so a link cannot ship pointing at a page that does not exist.
@@ -231,6 +395,8 @@ routes:
   # stale here — the content has been published at the longer slug since Phase 4.
   - {path: /prix-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
-  - {path: /demande-etude, type: CONVERSION, locales: [fr]}
+  # NL déclaré : la mécanique i18n du formulaire est câblée (libellés en
+  # placeholder « À TRADUIRE PAR UN NATIF » — jamais de traduction automatique).
+  - {path: /demande-etude, type: CONVERSION, locales: [fr, nl]}
   - {path: /confidentialite, type: LEGAL, locales: [fr]}
   - {path: /conditions, type: LEGAL, locales: [fr]}

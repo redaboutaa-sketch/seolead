@@ -72,13 +72,13 @@ async def solar_site(session) -> Site:
     return site
 
 
-async def _capturer(session, site) -> CapturedLead:
+async def _capturer(session, site, *, language: str = "fr") -> CapturedLead:
     await capture_lead(
         session,
         submission=LeadSubmission(
             site_id="solar_be",
             conversion_type=ConversionType.ESTIMATE_REQUEST.value,
-            email="ada.lovelace@example.test", language="fr",
+            email="ada.lovelace@example.test", language=language,
             first_name="Ada", last_name="Lovelace", phone="+32 470 12 34 56",
             postcode="1000", qualification=dict(QUALIFICATION),
             consent_processing=True, consent_marketing=False,
@@ -245,6 +245,32 @@ class TestChargeCanonique:
         for interdit in ("monthly_bill_eur", "battery_interest", "tenant_id",
                          "service_account_id", "consent_marketing"):
             assert interdit not in plat, interdit
+
+    async def test_la_locale_choisie_voyage_jusqu_a_attribution_locale(
+            self, session, solar_site):
+        """Le trajet complet du choix de langue : formulaire NL → `language`
+        validé contre `supported_languages` → `lead.language` →
+        `attribution.locale` de la charge canonique. C'est le chemin que la
+        route `/nl/demande-etude` emprunte ; s'il casse, la plateforme reçoit
+        des leads néerlandophones étiquetés francophones."""
+        from app.models import LeadAttribution
+
+        lead = await _capturer(session, solar_site, language="nl")
+        assert lead.language == "nl"
+        attribution = (await session.execute(
+            select(LeadAttribution))).scalar_one()
+        assert attribution.language == "nl"
+        charge = construire_charge(lead, correlation_id="c-nl",
+                                   consent_version="v1",
+                                   attribution=attribution)
+        assert charge["attribution"]["locale"] == "nl"
+
+    async def test_une_langue_hors_site_retombe_sur_la_langue_par_defaut(
+            self, session, solar_site):
+        """`de` n'est pas dans `supported_languages`: la locale est corrigée,
+        jamais transmise telle quelle."""
+        lead = await _capturer(session, solar_site, language="de")
+        assert lead.language == "fr"
 
     async def test_une_reponse_absente_reste_absente(self, session, solar_site):
         """`UNKNOWN` est une réponse ; l'absence en est une autre."""
