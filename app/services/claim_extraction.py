@@ -88,6 +88,42 @@ _VERB_MARKER = re.compile(
 # Site-title furniture: "Page — Site", "Accueil | Domaine", "CREG : ...".
 _TITLE_SEPARATOR = re.compile(r"\s[|–—]\s|^\s*[A-ZÉÈÀ]{2,}\s*:")
 
+# ── Flattened navigation is not a claim ──────────────────────────────────────
+# A markdown extractor renders a site menu as one long line, joining what were
+# list items with " + " and " - ":
+#
+#   "Prime pour son habitation 2019 (jusqu'au 30/06/2023) Prime chauffage et eau
+#    chaude sanitaire (…) - Soutien à la production d'électricité verte
+#    + Entreprises - Audits et études"
+#
+# Nothing in that is true or false. But it carries the vocabulary of a subsidy
+# page, so it was classified SUBSIDY at HIGH risk, went UNSUPPORTED for want of a
+# national source, and the QA matcher — which compares content words — then
+# believed the draft asserted it. On 2026-08-30 it was the single blocking
+# finding standing between the pipeline and a publishable article.
+#
+# The signal is a " + " joining words. French prose almost never uses one; a
+# markdown list stripped of its bullets is full of them. A second joiner of
+# either kind is required as well, because a lone "panneaux + batterie" inside a
+# real sentence is not a menu.
+#
+# Dashes alone are deliberately NOT enough. "Le tarif prosumer - qui fait
+# contribuer les utilisateurs du réseau - est appliqué depuis 2020" is an
+# ordinary French aside with two of them, and rejecting it would throw away a
+# genuine grid-rule claim.
+#
+# Numeric ranges ("entre 5 - 10 ans") never count: a joiner must touch a letter.
+_PLUS_JOINER = re.compile(r"(?<=[^\W\d_])\s\+\s|\s\+\s(?=[^\W\d_])")
+_DASH_JOINER = re.compile(r"(?<=[^\W\d_])\s[-–—]\s(?=[^\W\d_])")
+
+
+def _is_flattened_list(text: str) -> bool:
+    """Whether this is a menu that lost its bullets rather than a proposition."""
+    plus = len(_PLUS_JOINER.findall(text))
+    if not plus:
+        return False
+    return plus + len(_DASH_JOINER.findall(text)) >= 2
+
 
 @dataclass(frozen=True)
 class AtomicClaim:
@@ -130,6 +166,8 @@ def _is_assertion(text: str) -> bool:
         return False
     # Needs at least a handful of real words.
     if len([w for w in stripped.split() if len(w) > 2]) < 5:
+        return False
+    if _is_flattened_list(stripped):
         return False
     return not _is_title_fragment(stripped)
 
