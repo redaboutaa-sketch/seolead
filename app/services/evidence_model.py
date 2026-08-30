@@ -131,6 +131,8 @@ class EvaluatedClaim:
     status: EvidenceStatus = EvidenceStatus.UNSUPPORTED
     reason: str = ""
     _claim_region: Region = Region.UNKNOWN
+    # Why the scope is what it is, when it was not read off the sentence.
+    _scope_note: str | None = None
     _conflict_kind: ConflictKind | None = None
     _conflicts: list[dict] = field(default_factory=list)
 
@@ -180,6 +182,8 @@ class EvaluatedClaim:
             "best_source_quality": self.best_quality.value,
             "has_dated_support": self.has_dated_support,
             "region": self._claim_region.value,
+            "regionally_determined": self.requirements.regionally_determined,
+            "scope_note": self._scope_note,
             "conflict_kind": self._conflict_kind.value if self._conflict_kind else None,
             "conflicts": self._conflicts,
             "evidence": [e.as_dict() for e in self.evidence],
@@ -254,12 +258,50 @@ def evaluate_claim(
 ) -> EvaluatedClaim:
     """Classify one claim against its candidate evidence."""
     requirements = requirements_for(claim.text, profile)
-    claim_region = detect_region(claim.text, default=default_region).region
+    stated_region = detect_region(claim.text).region
+    claim_region = (stated_region if stated_region is not Region.UNKNOWN
+                    else default_region)
     evaluated = EvaluatedClaim(claim=claim, requirements=requirements,
                                evidence=candidates)
-    evaluated._claim_region = claim_region
 
     supporting = [e for e in candidates if e.supports]
+
+    # ── Scope a region-less claim to the evidence that carries it ────────────
+    # Measured on 2026-08-30: twenty official sources asked the real payback
+    # question, and not one states a payback for Belgium as a whole. The regions
+    # set the terms — prosumer tariff, green certificates, premiums — and the
+    # regions publish the figures. Belgian solar profitability is not a national
+    # quantity, so synthesising one would fabricate a number nobody publishes.
+    #
+    # A sentence like "le retour sur investissement est de 8 ans" names no
+    # region. The market default then stamped it BE, and the scope rule refused
+    # every Walloon source that supported it — correctly, since a Walloon
+    # payback is not a Belgian one. Seventeen ROI claims died that way, on an
+    # article whose subject IS profitability.
+    #
+    # The scope rule does not move: regional evidence still cannot establish a
+    # country-wide claim. What changes is what the claim IS. When the market
+    # sets this category regionally and every supporting source sits in ONE
+    # region, the honest reading is that the sentence states that region's
+    # answer, not the country's. It becomes a regional claim, provable, and the
+    # writer is told to say which region — see `brief_service`.
+    #
+    # Two or more regions among the supporting sources changes nothing: that is
+    # not one claim in two places, it is two regional claims, and the article
+    # must break them out rather than average them.
+    scope_note: str | None = None
+    if stated_region is Region.UNKNOWN and requirements.regionally_determined:
+        evidence_regions = {e.region for e in supporting
+                            if e.region.is_subnational}
+        if len(evidence_regions) == 1:
+            claim_region = evidence_regions.pop()
+            scope_note = (
+                f"Claim names no region and {requirements.category.value} is set "
+                f"regionally in this market; scoped to {claim_region.value}, the "
+                f"only region its evidence covers. It must be written as such.")
+
+    evaluated._claim_region = claim_region
+    evaluated._scope_note = scope_note
     disagreeing = [e for e in candidates
                    if not e.supports and e.agrees_numerically is False]
 

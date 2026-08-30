@@ -127,6 +127,26 @@ claim_categories:
   ENERGY_PRICE: [prix de l'electricite, tarif electricite, prix du kwh]
   GUARANTEED_SAVINGS: [rendement garanti, economies garanties, economie garantie]
 
+# ── Ce que la Belgique détermine par région ─────────────────────────────────
+# Mesuré le 2026-08-30 : vingt sources officielles interrogées avec la vraie
+# question du retour sur investissement, et pas une ne porte sur le temps de
+# retour d'une installation résidentielle au niveau national. La rentabilité
+# solaire belge n'existe pas comme grandeur nationale — ce sont les régions qui
+# en fixent les termes (tarif prosumer, certificats verts, primes,
+# compensation) et qui publient des chiffres.
+#
+# La conséquence n'est pas d'assouplir la règle de portée : deux sources
+# régionales concordantes n'établissent pas une affirmation belge, elles
+# établissent deux affirmations régionales. La conséquence est éditoriale — ces
+# sujets s'écrivent EN PORTÉE RÉGIONALE, ventilés quand l'article vise le pays.
+regionally_determined_claims:
+  - ROI
+  - SUBSIDY
+  - GRID_RULE
+  - TARIFF
+  - GRID_FEE
+  - ELIGIBILITY
+
 # Requirements per category. Only overrides; anything absent uses the
 # cross-vertical default in app/services/claim_policy.py.
 authority_policy:

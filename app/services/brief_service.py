@@ -170,6 +170,62 @@ def _select_cta(intent: SearchIntent, profile: VerticalProfile) -> dict:
             "reason": "no CTA configured for this vertical — must be resolved before publication"}
 
 
+_SUBNATIONAL_PREFIX = "-"
+
+
+def regional_scope(required_facts: list[dict]) -> dict:
+    """What the writer must do about facts this market sets region by region.
+
+    Derived at prompt time, never stored: every input is already in
+    `required_facts`, and a `ContentBrief` row takes its columns one by one, so
+    a new payload key would need a migration to carry a view of data the row
+    already holds.
+
+    Belgian premiums, prosumer tariffs, green certificates and therefore
+    payback differ by region, and no national body publishes a country-wide
+    figure — measured, not assumed. A sentence stating one of these without
+    naming its region is false by omission, however well sourced the number is.
+
+    So the rule handed to the writer is not "be careful": it is a shape. Break
+    the subject out by region, each segment carrying the region that answers it.
+    A country-wide phrasing survives only when a genuinely national source says
+    so, or when the sentence itself carries the breakdown.
+    """
+    scoped = [f for f in required_facts
+              if f.get("regionally_determined") and f.get("region")]
+    by_region: dict[str, list[str]] = {}
+    for fact in scoped:
+        by_region.setdefault(str(fact["region"]), []).append(fact["fact"])
+
+    subnational = sorted(r for r in by_region if _SUBNATIONAL_PREFIX in r)
+    categories = sorted({str(f.get("category")) for f in scoped
+                         if f.get("category")})
+
+    return {
+        "applies_to_categories": categories,
+        "regions_with_evidence": sorted(by_region),
+        "subnational_regions_with_evidence": subnational,
+        "facts_by_region": by_region,
+        "rule": (
+            "These subjects are set region by region in this market. State them "
+            "in regional scope, naming the region in the same sentence as the "
+            "figure. When the article addresses the country, break the subject "
+            "out — « en Wallonie : X ; en Flandre : Y ; à Bruxelles : Z » — and "
+            "back each segment with that region's own fact."),
+        "forbidden": (
+            "Never state one region's figure as the country's, and never "
+            "average or merge figures from different regions into a single "
+            "national number: no source publishes that number."),
+        "country_wide_allowed_when": (
+            "a supplied fact is itself scoped to the whole country, or the "
+            "sentence carries the regional breakdown."),
+        "silent_regions": [
+            region for region in ("BE-WAL", "BE-VLG", "BE-BRU")
+            if region not in by_region
+        ],
+    }
+
+
 def build_brief_payload(
     package: dict,
     *,
@@ -190,12 +246,20 @@ def build_brief_payload(
         supported_facts = [f for f in (package.get("facts") or [])
                            if f.get("supported")]
 
+    # `region` and `regionally_determined` travel with each fact. They were
+    # computed, stored in the package, and dropped here — so the writer received
+    # "le retour sur investissement est de 8 ans" with nothing to say it came
+    # from a Walloon page, and wrote it as a Belgian fact. Carrying the scope is
+    # what lets the instruction below mean anything.
     required_facts = [
         {"fact": _claim_text(f), "source_ref": f.get("source_ref"),
          "observability": f.get("observability")
          or f.get("evidence_status"),
          "category": f.get("category"),
-         "evidence_status": f.get("evidence_status")}
+         "evidence_status": f.get("evidence_status"),
+         "region": f.get("region"),
+         "regionally_determined": bool(f.get("regionally_determined")),
+         "scope_note": f.get("scope_note")}
         for f in supported_facts[:_MAX_REQUIRED_FACTS]
     ]
 
