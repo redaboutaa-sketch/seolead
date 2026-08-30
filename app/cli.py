@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.enums import ApprovalState
+from app.core.enums import ApprovalState, ClaimCategory
 from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
@@ -54,6 +54,7 @@ from app.services import approval_service
 from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
 from app.services.pipeline import run_pipeline
+from app.services import authority_probe
 from app.services.claim_policy import requirements_for
 from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
 from app.services.provider_usage import UsageRecorder
@@ -190,6 +191,76 @@ async def cmd_authoritative_run(args: argparse.Namespace) -> int:
                "unresolved_high_risk_before": len(unresolved),
                "plan": plan.as_dict(), "run": run.as_dict(),
                "provider_usage": usage.summary()})
+    return EXIT_OK
+
+
+async def cmd_authority_probe(args: argparse.Namespace) -> int:
+    """Ask a set of authority domains one category's real question.
+
+    Read-only and answers two questions at once: what a candidate domain
+    actually publishes (before it is trusted to establish HIGH-risk claims), and
+    where — if anywhere — its pages carry a date. Nothing is persisted.
+    """
+    settings = get_settings()
+    profile = load_profile(args.vertical)
+    try:
+        category = ClaimCategory(args.category.upper())
+    except ValueError:
+        _emit({"error": "unknown claim category", "category": args.category})
+        return EXIT_ERROR
+
+    registry = authority_probe.registry_for_probe(
+        profile, include_pending=args.include_pending)
+    domains = authority_probe.domains_for(registry, category,
+                                          explicit=args.domain)
+    if not domains:
+        _emit({"error": "no domain speaks for this category",
+               "category": category.value})
+        return EXIT_BLOCKED
+
+    query = args.query or (profile.official_source_policy or {}).get(
+        "query_templates", {}).get(category.value)
+    if not query:
+        _emit({"error": "no query template for this category; pass --query",
+               "category": category.value})
+        return EXIT_BLOCKED
+
+    usage = UsageRecorder()
+    provider = TavilyResearchProvider(settings, usage=usage)
+    try:
+        result = await provider.research_restricted(
+            query=query, market=profile.market,
+            language=profile.default_language,
+            correlation_id=f"probe-{category.value.lower()}",
+            include_domains=domains)
+    except SeoLeadError as exc:
+        _emit({"error": getattr(exc, "code", "PROVIDER_ERROR"),
+               "detail": str(exc), "query": query, "domains": domains})
+        return EXIT_ERROR
+
+    rows = []
+    for source in result.sources:
+        entry = registry.lookup(source.url)
+        rows.append({
+            "url": source.url,
+            "title": source.title,
+            "domain": entry.domain if entry else None,
+            "in_registry": entry is not None,
+            "pending_ratification": bool(entry and entry.pending_ratification),
+            "speaks_for_category": bool(entry and entry.speaks_for(category)),
+            "dates": authority_probe.date_forensics(source),
+        })
+
+    _emit({
+        "vertical": profile.code, "category": category.value, "query": query,
+        "domains_queried": domains,
+        "include_pending": bool(args.include_pending),
+        "summary": authority_probe.summarize(rows),
+        "sources": rows,
+        "provider_usage": usage.summary(),
+        "note": ("Read-only. No package written, no registry modified. A domain "
+                 "marked pending_ratification is NOT active in the pipeline."),
+    })
     return EXIT_OK
 
 
@@ -901,6 +972,24 @@ def build_parser() -> argparse.ArgumentParser:
     usage = sub.add_parser("usage", help="provider usage and cost for a job")
     usage.add_argument("correlation_id")
     usage.set_defaults(func=cmd_usage_show)
+
+    authority = sub.add_parser(
+        "authority", help="the registry of domains trusted to establish claims")
+    authority_sub = authority.add_subparsers(dest="action", required=True)
+    probe = authority_sub.add_parser(
+        "probe", help="ask a category's real question of its domains — read-only")
+    probe.add_argument("--vertical", default="SOLAR_BE")
+    probe.add_argument("--category", required=True,
+                       help="claim category, e.g. ROI or SUBSIDY")
+    probe.add_argument("--domain", action="append",
+                       help="probe these domains instead of the category's "
+                            "(repeatable)")
+    probe.add_argument("--query", help="override the configured query template")
+    probe.add_argument("--include-pending", dest="include_pending",
+                       action="store_true",
+                       help="also probe candidates awaiting ratification; they "
+                            "stay inactive in the pipeline either way")
+    probe.set_defaults(func=cmd_authority_probe)
 
     credentials = sub.add_parser(
         "credentials", help="report CONFIGURED / NOT_CONFIGURED per provider")
