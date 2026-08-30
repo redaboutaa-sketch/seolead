@@ -233,12 +233,39 @@ def run_deterministic_qa(
     if required:
         used = sum(1 for f in required
                    if _fact_echoed(str(f.get("fact", "")), normalized_body))
+        # ── The substance floor ─────────────────────────────────────────
+        # This check already existed and had no teeth: its bar was a third of
+        # whatever happened to be supplied, and missing it was advisory. That is
+        # how a draft scored 100/100 on factual QA while saying almost nothing —
+        # every sentence traced to evidence, and there was barely any evidence
+        # in it. Traceability was certified; substance was not.
+        #
+        # The floor is now an absolute the owner ratifies, not a fraction of the
+        # supply, and it blocks. `minimum_supported_facts_used: 0` opts a
+        # vertical out entirely, which is what an unconfigured one gets.
+        floor = int(getattr(profile, "minimum_supported_facts_used", 0) or 0)
         if used == 0:
             findings.append(_finding(
                 "REQUIRED_FACTS_UNUSED",
                 f"None of the {len(required)} supported facts appear in the body",
                 blocking=True))
-        elif used < max(1, len(required) // 3):
+        elif floor and len(required) < floor:
+            # Not the writer's failure: the research never established enough to
+            # build on. Blocking all the same — the page would be padding
+            # whoever wrote it, and saying so names the real gap.
+            findings.append(_finding(
+                "INSUFFICIENT_SUPPORTED_EVIDENCE",
+                f"Only {len(required)} supported fact(s) were available, below "
+                f"the floor of {floor}; the research, not the draft, is what is "
+                f"missing", blocking=True))
+        elif floor and used < floor:
+            findings.append(_finding(
+                "REQUIRED_FACTS_UNDERUSED",
+                f"The body uses {used} supported fact(s) of {len(required)} "
+                f"supplied, below the floor of {floor}. A page that states a "
+                f"handful of what was established is padding around them.",
+                blocking=True))
+        elif not floor and used < max(1, len(required) // 3):
             findings.append(_finding(
                 "REQUIRED_FACTS_UNDERUSED",
                 f"Only {used} of {len(required)} supported facts appear in the body",

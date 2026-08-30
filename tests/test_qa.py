@@ -60,6 +60,11 @@ def _brief(**overrides) -> dict:
         "search_intent": "COMMERCIAL",
         "target_audience": "Propriétaires belges",
         "objective": "Générer des demandes de devis",
+        # Eight facts, each echoed by BODY. SOLAR_BE ratified a substance floor
+        # of eight — a page that states fewer than one supported fact per outline
+        # section is padding around them — so a fixture meant to model a
+        # PUBLISHABLE draft has to carry that many. Two of them modelled a page
+        # that the new floor rightly refuses.
         "required_facts": [
             {"fact": "Le prix dépend de la puissance installée, du type de toiture "
                      "et de la complexité de la pose.",
@@ -67,6 +72,23 @@ def _brief(**overrides) -> dict:
             {"fact": "Deux devis peuvent différer selon l'onduleur, la structure de "
                      "fixation et la distance au tableau électrique.",
              "source_ref": "s2", "observability": "OBSERVED"},
+            {"fact": "Comparez le matériel proposé, la garantie de pose et les "
+                     "travaux de raccordement.",
+             "source_ref": "s1", "observability": "OBSERVED"},
+            {"fact": "Demandez le détail poste par poste plutôt qu'un montant "
+                     "global.", "source_ref": "s1", "observability": "OBSERVED"},
+            {"fact": "Vérifiez ce qui est inclus dans chaque proposition avant de "
+                     "vous décider.", "source_ref": "s2",
+             "observability": "OBSERVED"},
+            {"fact": "Vérifiez la couverture d'assurance de l'installateur et les "
+                     "délais annoncés.", "source_ref": "s1",
+             "observability": "OBSERVED"},
+            {"fact": "Les conditions de raccordement au réseau varient d'un "
+                     "prestataire à l'autre.", "source_ref": "s2",
+             "observability": "OBSERVED"},
+            {"fact": "Un devis personnalisé donne une estimation adaptée à votre "
+                     "toiture et à votre consommation réelle.",
+             "source_ref": "s1", "observability": "OBSERVED"},
         ],
         "required_sources": [
             {"ref": "s1", "url": "https://example.invalid/a", "title": "A",

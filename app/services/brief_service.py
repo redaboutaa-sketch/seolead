@@ -28,7 +28,18 @@ from app.verticals.profile import VerticalProfile
 
 logger = logging.getLogger(__name__)
 
-_MAX_REQUIRED_FACTS = 12
+# The writer was handed 12 of the 109 supported claims of the run of
+# 2026-08-30 — eleven percent of what the research had established — and asked
+# to fill a seven-section guide plus a FAQ. The gap was designed in, and the
+# writer filled it the only ways it could: with generalities ("cela varie selon
+# plusieurs facteurs") or with figures it half-remembered from the passages.
+# That second habit is the `UNSUPPORTED_DRAFT_CLAIM` that failed the run at
+# score 67. It was never variance: it was an article asked for more than the
+# evidence supplied.
+#
+# Twenty-four is roughly three per outline section. Each is one sentence, so the
+# prompt grows by a few hundred tokens — cheap against a rerun.
+_MAX_REQUIRED_FACTS = 24
 _MAX_OUTLINE_SECTIONS = 9
 
 
@@ -173,6 +184,40 @@ def _select_cta(intent: SearchIntent, profile: VerticalProfile) -> dict:
 _SUBNATIONAL_PREFIX = "-"
 
 
+def _spread(facts: list[dict], limit: int) -> list[dict]:
+    """Pick facts that cover the subject, not the first `limit` in package order.
+
+    Slicing took whatever the package happened to list first, which is source
+    order — so the writer could receive twelve facts from one page about one
+    sub-topic and nothing about the rest, while ninety-seven established claims
+    sat unused. Round-robin over (category, region) buckets means every subject
+    the research actually resolved gets a turn before any subject gets a second.
+
+    Order within a bucket is left alone: the package already ranks by evidence
+    strength, and re-ranking here would silently override that.
+    """
+    if len(facts) <= limit:
+        return list(facts)
+
+    buckets: dict[tuple, list[dict]] = {}
+    for fact in facts:
+        key = (str(fact.get("category")), str(fact.get("region")))
+        buckets.setdefault(key, []).append(fact)
+
+    picked: list[dict] = []
+    queues = [iter(v) for _, v in sorted(buckets.items(), key=lambda kv: kv[0])]
+    while queues and len(picked) < limit:
+        for queue in list(queues):
+            nxt = next(queue, None)
+            if nxt is None:
+                queues.remove(queue)
+                continue
+            picked.append(nxt)
+            if len(picked) >= limit:
+                break
+    return picked
+
+
 def regional_scope(required_facts: list[dict]) -> dict:
     """What the writer must do about facts this market sets region by region.
 
@@ -260,7 +305,7 @@ def build_brief_payload(
          "region": f.get("region"),
          "regionally_determined": bool(f.get("regionally_determined")),
          "scope_note": f.get("scope_note")}
-        for f in supported_facts[:_MAX_REQUIRED_FACTS]
+        for f in _spread(supported_facts, _MAX_REQUIRED_FACTS)
     ]
 
     used_refs = {f["source_ref"] for f in required_facts}

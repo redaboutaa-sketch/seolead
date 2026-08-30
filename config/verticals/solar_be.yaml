@@ -139,6 +139,21 @@ claim_categories:
 # régionales concordantes n'établissent pas une affirmation belge, elles
 # établissent deux affirmations régionales. La conséquence est éditoriale — ces
 # sujets s'écrivent EN PORTÉE RÉGIONALE, ventilés quand l'article vise le pays.
+# ── Le plancher de substance ────────────────────────────────────────────────
+# Un brouillon a obtenu 100/100 en QA factuelle en n'employant qu'une poignée
+# d'affirmations étayées : chaque phrase traçait vers une preuve, et l'article
+# ne disait presque rien. Un seul chiffre, et une FAQ répondant « cela varie
+# selon plusieurs facteurs » à « quelle est la rentabilité moyenne ? ».
+#
+# La QA certifie la traçabilité. Ce nombre certifie qu'il y avait quelque chose
+# à tracer. L'outline d'un guide compte sept sections plus une FAQ ; une section
+# sous laquelle aucune affirmation étayée n'apparaît est du remplissage. Huit
+# est donc le plancher : une par section, en dessous duquel la page est
+# majoritairement la prose du rédacteur.
+#
+# Jugement éditorial, ratifié par le propriétaire — pas un seuil technique.
+minimum_supported_facts_used: 8
+
 regionally_determined_claims:
   - ROI
   - SUBSIDY
