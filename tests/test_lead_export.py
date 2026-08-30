@@ -72,7 +72,8 @@ async def solar_site(session) -> Site:
     return site
 
 
-async def _capturer(session, site, *, language: str = "fr") -> CapturedLead:
+async def _capturer(session, site, *, language: str = "fr",
+                    config=None) -> CapturedLead:
     await capture_lead(
         session,
         submission=LeadSubmission(
@@ -84,7 +85,8 @@ async def _capturer(session, site, *, language: str = "fr") -> CapturedLead:
             consent_processing=True, consent_marketing=False,
             attribution=dict(ATTRIBUTION),
             signals=SubmissionSignals(elapsed_ms=45_000)),
-        site=site, config=load_site("solar_be"), vertical_code="SOLAR_BE",
+        site=site, config=config or load_site("solar_be"),
+        vertical_code="SOLAR_BE",
         spam=AcceptAllSpamProtection())
     return (await session.execute(select(CapturedLead))).scalar_one()
 
@@ -248,14 +250,21 @@ class TestChargeCanonique:
 
     async def test_la_locale_choisie_voyage_jusqu_a_attribution_locale(
             self, session, solar_site):
-        """Le trajet complet du choix de langue : formulaire NL → `language`
-        validé contre `supported_languages` → `lead.language` →
-        `attribution.locale` de la charge canonique. C'est le chemin que la
-        route `/nl/demande-etude` emprunte ; s'il casse, la plateforme reçoit
-        des leads néerlandophones étiquetés francophones."""
+        """Le trajet complet du choix de langue : formulaire d'une seconde
+        locale → `language` validé contre `supported_languages` → `lead.language`
+        → `attribution.locale` de la charge canonique. S'il casse, la plateforme
+        reçoit des leads d'une langue étiquetés dans une autre.
+
+        La locale est DÉCLARÉE ici plutôt que lue du site : la campagne du
+        2026-08-31 est francophone, et le mécanisme ne doit pas être prouvé par
+        une décision commerciale qui peut changer demain. Ce test dit que le
+        chemin fonctionne dès qu'une seconde locale existe."""
         from app.models import LeadAttribution
 
-        lead = await _capturer(session, solar_site, language="nl")
+        bilingue = load_site("solar_be").model_copy(
+            update={"supported_languages": ["fr", "nl"]})
+        lead = await _capturer(session, solar_site, language="nl",
+                               config=bilingue)
         assert lead.language == "nl"
         attribution = (await session.execute(
             select(LeadAttribution))).scalar_one()
@@ -264,6 +273,25 @@ class TestChargeCanonique:
                                    consent_version="v1",
                                    attribution=attribution)
         assert charge["attribution"]["locale"] == "nl"
+
+    async def test_le_neerlandais_retombe_sur_le_francais_pour_cette_campagne(
+            self, session, solar_site):
+        """La conséquence assumée de la décision du 2026-08-31.
+
+        Le site ne déclare plus que `fr`. Un formulaire soumis en `nl` — par une
+        page en cache, un signet, un robot — est étiqueté `fr` plutôt que
+        transmis tel quel. Le marché flamand n'est pas adressé par cette
+        campagne, et la charge ne prétend pas le contraire."""
+        from app.models import LeadAttribution
+
+        lead = await _capturer(session, solar_site, language="nl")
+        assert lead.language == "fr"
+        attribution = (await session.execute(
+            select(LeadAttribution))).scalar_one()
+        charge = construire_charge(lead, correlation_id="c-fr",
+                                   consent_version="v1",
+                                   attribution=attribution)
+        assert charge["attribution"]["locale"] == "fr"
 
     async def test_une_langue_hors_site_retombe_sur_la_langue_par_defaut(
             self, session, solar_site):

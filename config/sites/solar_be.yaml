@@ -19,7 +19,27 @@ domain: monprojetsolaire.be
 
 market: BE
 default_language: fr
-supported_languages: [fr, nl]
+# ── Campagne FR uniquement ──────────────────────────────────────────────────
+# Décision du propriétaire, 2026-08-31 : cette campagne est francophone. Le
+# néerlandais servira à une future campagne énergie aux Pays-Bas, pas à
+# celle-ci.
+#
+# CONSÉQUENCE ASSUMÉE : le marché flamand n'est pas adressé par cette campagne.
+# Un visiteur néerlandophone en Belgique verra le site en français ; aucune
+# page ne lui est servie dans sa langue, et aucun lead flamand n'est capté par
+# ce site.
+#
+# Rien de la mécanique NL n'est supprimé — routes, i18n, libellés placeholders
+# « À TRADUIRE PAR UN NATIF » restent en place et resserviront. Retirer `nl`
+# d'ici suffit à ce que la route /nl/demande-etude cesse d'être servie et à ce
+# que la garde `pending_legal_review` cesse de compter des variantes de locale
+# qui ne sont plus offertes : une locale non supportée ne collecte aucun
+# consentement, donc son texte non validé ne peut plus en collecter non plus.
+#
+# Le jour où la campagne NL existe, la remettre ici suffit à tout rallumer — et
+# la garde se remettra à bloquer tant que les textes NL ne sont pas validés,
+# ce qui est exactement ce qu'on veut.
+supported_languages: [fr]
 
 staging: true
 
@@ -388,7 +408,7 @@ conversion:
 # Routes the site knows about. Internal links may only target a path listed here,
 # so a link cannot ship pointing at a page that does not exist.
 routes:
-  - {path: /, type: HOME, locales: [fr, nl]}
+  - {path: /, type: HOME, locales: [fr]}
   # The published page's own canonical is /prix-panneaux-solaires-belgique. This
   # entry said /prix-panneaux-solaires, so the declared route and the canonical
   # disagreed and the navigation linked to a 404. The configuration is what was
@@ -397,6 +417,6 @@ routes:
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
   # NL déclaré : la mécanique i18n du formulaire est câblée (libellés en
   # placeholder « À TRADUIRE PAR UN NATIF » — jamais de traduction automatique).
-  - {path: /demande-etude, type: CONVERSION, locales: [fr, nl]}
+  - {path: /demande-etude, type: CONVERSION, locales: [fr]}
   - {path: /confidentialite, type: LEGAL, locales: [fr]}
   - {path: /conditions, type: LEGAL, locales: [fr]}
