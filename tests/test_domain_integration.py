@@ -15,16 +15,23 @@ from app.site.config import SiteConfig, available_sites, load_site
 
 
 def _with_validated_consents(base: dict) -> dict:
-    """Simulate the day counsel-validated consent texts land.
+    """Simulate the day counsel-validated consent texts land, in every locale.
 
-    Leaving staging now ALSO requires that no consent case is still marked
-    `pending_legal_review` — a launch with placeholder consent text is refused
-    by the loader. Tests that model a launch must model that step too.
+    Leaving staging now ALSO requires that no consent case — base text or any
+    supported-locale variant — is still marked `pending_legal_review`: a launch
+    with placeholder consent text is refused by the loader. Tests that model a
+    launch must model that step too.
     """
-    fields = [
-        {k: v for k, v in field.items() if k != "pending_legal_review"}
-        for field in base["conversion"]["fields"]
-    ]
+    fields = []
+    for field in base["conversion"]["fields"]:
+        cleaned = {k: v for k, v in field.items() if k != "pending_legal_review"}
+        if cleaned.get("i18n"):
+            cleaned["i18n"] = {
+                locale: {k: v for k, v in variant.items()
+                         if k != "pending_legal_review"}
+                for locale, variant in cleaned["i18n"].items()
+            }
+        fields.append(cleaned)
     return {**base, "conversion": {**base["conversion"], "fields": fields}}
 
 DOMAIN = "monprojetsolaire.be"

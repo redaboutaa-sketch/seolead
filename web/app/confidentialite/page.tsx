@@ -8,9 +8,14 @@ export const metadata: Metadata = {
 };
 
 /**
- * Owner-approved text, version `solar-be-consent-v1.0-2026-08-17`.
+ * Owner-approved text, version `solar-be-privacy-v1.1-2026-08-30`.
  *
- * The controller, the contact address and the version are read from the site
+ * v1.1 (validated by the owner, data controller, on 2026-08-30) removes the
+ * sentence excluding transmission to commercial partners and adds the section
+ * « Transmission à notre partenaire installateur ». The processing-consent
+ * text and its version (`solar-be-consent-v1.0-2026-08-17`) are unchanged.
+ *
+ * The controller, the contact address and the versions are read from the site
  * configuration rather than repeated here: that configuration is the same value
  * recorded against every consent and sent to Prospect 360, so a page that
  * hardcoded them could drift from what a person actually consented to.
@@ -22,7 +27,10 @@ export default async function PrivacyPage() {
   const config = await getSiteConfig();
   const controller = config?.legal.data_controller ?? "BEAVER DATA GROUP";
   const contact = config?.legal.privacy_contact_email ?? "";
-  const version = config?.legal.consent_version ?? "—";
+  // The POLICY's own version. Distinct from `consent_version`, which
+  // identifies the processing-consent text recorded with each lead.
+  const version =
+    config?.legal.privacy_policy_version ?? config?.legal.consent_version ?? "—";
 
   return (
     <div className="container page">
@@ -125,10 +133,16 @@ export default async function PrivacyPage() {
           sécurité ou au traitement du service.
         </li>
       </ul>
+      <h2>Transmission à notre partenaire installateur</h2>
       <p>
-        Vos coordonnées ne sont pas transmises à des partenaires commerciaux
-        indépendants à des fins de prospection sans information préalable et,
-        lorsque la réglementation l&apos;exige, sans votre consentement spécifique.
+        Si vous y consentez expressément, nous transmettons à Solution SG, notre
+        partenaire installateur, vos coordonnées (nom, prénom, téléphone,
+        e-mail) et les caractéristiques de votre projet (code postal, type de
+        logement, toiture, consommation annuelle, échéance), dans le seul but
+        d&apos;organiser un rendez-vous relatif à votre projet solaire. BEAVER
+        DATA GROUP demeure responsable de ce traitement&nbsp;; Solution SG
+        n&apos;est pas autorisée à utiliser ces données à d&apos;autres fins.
+        Sans votre consentement, aucune donnée ne lui est transmise.
       </p>
 
       <h2>Durée de conservation</h2>

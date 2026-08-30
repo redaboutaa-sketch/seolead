@@ -32,8 +32,11 @@ const NL_TODO = "[NL — À TRADUIRE PAR UN NATIF] ";
 
 const FR_COPY: PageCopy = {
   heading: "Obtenir une estimation pour votre installation",
+  // Phrase mise à jour le 2026-08-30 avec la politique v1.1 : la transmission
+  // au partenaire existe désormais, conditionnée au consentement explicite —
+  // affirmer « aucun tiers » serait devenu faux.
   lede:
-    "Les questions ci-dessous servent à cadrer votre projet. Aucune donnée n'est transmise à un tiers : la demande est enregistrée pour qu'un interlocuteur vous réponde.",
+    "Les questions ci-dessous servent à cadrer votre projet. Vos données ne sont transmises à notre partenaire installateur qu'avec votre consentement explicite ; la demande est enregistrée pour qu'un interlocuteur vous réponde.",
   legalPendingLead: "Mentions légales en attente.",
   legalPending:
     "Le texte définitif de la politique de confidentialité doit être fourni ou validé par le propriétaire du site avant toute mise en ligne publique.",
@@ -48,7 +51,7 @@ const COPY: Record<string, PageCopy> = {
   fr: FR_COPY,
   nl: {
     heading: `${NL_TODO}Obtenir une estimation pour votre installation`,
-    lede: `${NL_TODO}Les questions ci-dessous servent à cadrer votre projet. Aucune donnée n'est transmise à un tiers : la demande est enregistrée pour qu'un interlocuteur vous réponde.`,
+    lede: `${NL_TODO}Les questions ci-dessous servent à cadrer votre projet. Vos données ne sont transmises à notre partenaire installateur qu'avec votre consentement explicite ; la demande est enregistrée pour qu'un interlocuteur vous réponde.`,
     legalPendingLead: `${NL_TODO}Mentions légales en attente.`,
     legalPending: `${NL_TODO}Le texte définitif de la politique de confidentialité doit être fourni ou validé par le propriétaire du site avant toute mise en ligne publique.`,
     stepsTitle: (count) => `${NL_TODO}Les ${count} étapes`,

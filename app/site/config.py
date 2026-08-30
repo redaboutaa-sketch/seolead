@@ -62,6 +62,11 @@ class LegalConfig(BaseModel):
     terms_path: str | None = None
     cookie_policy_path: str | None = None
     consent_version: str = "placeholder-v0"
+    # La version de la POLITIQUE affichée, distincte de `consent_version` (qui
+    # identifie le texte du consentement au traitement et voyage avec chaque
+    # lead). Mettre à jour la politique incrémente celle-ci sans toucher à
+    # celle-là : les consentements déjà recueillis restent traçables tels quels.
+    privacy_policy_version: str | None = None
     data_controller: str | None = None
     # Adresse d'exercice des droits. Publiée sur la page de confidentialité :
     # un responsable du traitement sans point de contact ne permet à personne
@@ -170,6 +175,7 @@ class SiteConfig(BaseModel):
         consent text still in the form, the loader refuses the configuration
         instead of letting a non-validated legal text collect real consent.
         """
+        known_channels = {c.value for c in ConsentChannel}
         for field in self.conversion.fields:
             if field.get("type") != "consent" or not field.get("key"):
                 continue
@@ -181,11 +187,23 @@ class SiteConfig(BaseModel):
                     f"consent field {key!r} has no resolvable purpose: declare "
                     f"consent_purpose as one of "
                     f"{sorted(p.value for p in ConsentPurpose)}")
-            channel = field.get("consent_channel")
-            if channel is not None and \
-                    channel not in {c.value for c in ConsentChannel}:
+            if field.get("consent_channel") is not None and \
+                    field.get("consent_channels") is not None:
                 raise ValueError(
-                    f"consent field {key!r} names unknown channel {channel!r}")
+                    f"consent field {key!r} declares both consent_channel and "
+                    f"consent_channels: one case names its channel(s) one way")
+            channels = field.get("consent_channels")
+            if channels is not None and (not isinstance(channels, list)
+                                         or not channels
+                                         or len(set(channels)) != len(channels)):
+                raise ValueError(
+                    f"consent field {key!r}: consent_channels must be a "
+                    f"non-empty list without duplicates")
+            for channel in (channels or [field.get("consent_channel")]):
+                if channel is not None and channel not in known_channels:
+                    raise ValueError(
+                        f"consent field {key!r} names unknown channel "
+                        f"{channel!r}")
             if field.get("required") and purpose != ConsentPurpose.PROCESSING.value:
                 raise ValueError(
                     f"consent field {key!r} ({purpose}) may not be required: "
@@ -196,6 +214,19 @@ class SiteConfig(BaseModel):
                     f"consent field {key!r} carries pending_legal_review and "
                     f"the site is not staging: a non-validated consent text "
                     f"must never collect real consent")
+            # A locale variant of a consent text is a legal text of its own.
+            # The base text being validated does not validate its translations:
+            # a supported locale whose variant is still pending blocks leaving
+            # staging exactly like a pending base text, because that locale's
+            # form would collect consent on a placeholder.
+            for locale in (self.supported_languages or []):
+                variant = (field.get("i18n") or {}).get(locale) or {}
+                if variant.get("pending_legal_review") and not self.staging:
+                    raise ValueError(
+                        f"consent field {key!r}: the {locale!r} text is "
+                        f"pending_legal_review and the site is not staging — "
+                        f"a non-validated consent text must never collect "
+                        f"real consent, in any supported locale")
         return self
 
     @model_validator(mode="after")
@@ -270,22 +301,36 @@ class SiteConfig(BaseModel):
         lands, the change is one YAML edit (label + version + drop
         `pending_legal_review`), and every new capture records the new version
         with no code change.
+
+        A field declaring `consent_channels` is ONE checkbox whose validated
+        text names SEVERAL channels: it expands to one case per channel, all
+        sharing the field's text version, each stored under a derived key
+        (`<field_key>:<channel>`) so every channel keeps its own row and its
+        own future revocation. `field_key` is what the submission answers;
+        `key` is what the storage records.
         """
         cases: list[dict] = []
         for field in self.conversion.fields:
             if field.get("type") != "consent" or not field.get("key"):
                 continue
             key = str(field["key"])
-            cases.append({
-                "key": key,
+            base = {
+                "field_key": key,
                 "purpose": field.get("consent_purpose")
                 or _LEGACY_CONSENT_PURPOSES[key],
-                "channel": field.get("consent_channel"),
                 "version": str(field.get("consent_version")
                                or self.legal.consent_version),
                 "required": bool(field.get("required")),
                 "pending_legal_review": bool(field.get("pending_legal_review")),
-            })
+            }
+            channels = field.get("consent_channels")
+            if channels:
+                for channel in channels:
+                    cases.append({**base, "key": f"{key}:{channel}",
+                                  "channel": channel})
+            else:
+                cases.append({**base, "key": key,
+                              "channel": field.get("consent_channel")})
         return cases
 
 

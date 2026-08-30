@@ -220,7 +220,10 @@ def _resolve_consents(submission: LeadSubmission, config: SiteConfig) -> list[di
               "consent_marketing": submission.consent_marketing}
     resolved: list[dict] = []
     for case in config.consent_definitions():
-        key = case["key"]
+        # The submission answers by FORM FIELD key; a multi-channel case
+        # expands into several rows that all carry that one answer — the
+        # visitor ticked one box whose text names every channel it covers.
+        key = case["field_key"]
         granted = given[key] if key in given else bool(legacy.get(key, False))
         resolved.append({**case, "granted": granted})
     return resolved

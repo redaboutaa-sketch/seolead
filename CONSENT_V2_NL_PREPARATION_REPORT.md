@@ -129,3 +129,59 @@ rien d'implémenté, à figer avec le côté plateforme via le propriétaire :
 Le jour où les textes 1–5 tombent, la mécanique de ce lot les reçoit sans
 changement de code : YAML pour les cases et leurs versions, pages légales pour
 la politique — c'est ce que cette préparation avait à garantir.
+
+---
+
+# Addendum 2026-08-30 — branchement des textes FR validés
+
+Le propriétaire, responsable de traitement, a validé le 2026-08-30 les textes
+FR des trois nouvelles cases, la mise à jour de la politique de
+confidentialité et la phrase de la page du formulaire. Ce lot les branche.
+La promesse du lot précédent est tenue : le branchement est du YAML et deux
+pages — plus une extension de mécanique que la forme validée exigeait (une
+case, deux canaux).
+
+## Ce qui a été branché — verdicts
+
+| Demande | Verdict | Preuve |
+|---|---|---|
+| Case 1 — FOLLOWUP_CONTACT, UNE case, DEUX entrées (PHONE + WHATSAPP, même texte, même version) | **FAIT** | Le champ `consent_followup_contact` déclare `consent_channels: [PHONE, WHATSAPP]` ; `consent_definitions()` l'étend en deux cas stockés sous `consent_followup_contact:PHONE` / `:WHATSAPP`, même version `solar-be-followup-contact-v1.0-2026-08-30`. Test : `test_une_case_deux_entrees_meme_texte_meme_version`. Les deux champs placeholder séparés ont été remplacés par cette case unique — c'est la forme que le texte validé impose. |
+| Case 2 — PARTNER_TRANSFER | **FAIT** | `solar-be-partner-transfer-v1.0-2026-08-30`, texte au caractère près. |
+| Case 3 — MARKETING canal WHATSAPP, remplace la case actuelle | **FAIT** | `solar-be-marketing-whatsapp-v1.0-2026-08-30`, `consent_channel: WHATSAPP`. L'ancienne case sans canal (Décision 2 : intransmissible) est remplacée ; la colonne héritée `consent_marketing` continue de refléter la case. |
+| PROCESSING inchangée | **TENU** | `solar-be-consent-v1.0-2026-08-17`, texte intouché, épinglé au caractère près. |
+| Politique de confidentialité | **FAIT** | Phrase d'exclusion (l.128-132) retirée ; section « Transmission à notre partenaire installateur » ajoutée avec le texte validé, au caractère près. La page affiche désormais SA version : `solar-be-privacy-v1.1-2026-08-30` (`legal.privacy_policy_version`, nouveau champ), distincte de la version du consentement au traitement qui reste v1.0-2026-08-17 — les consentements déjà recueillis restent traçables tels quels. |
+| Page du formulaire | **FAIT** | « Aucune donnée n'est transmise à un tiers » → « Vos données ne sont transmises à notre partenaire installateur qu'avec votre consentement explicite » (FR + base du placeholder NL). |
+| Identité légale | **FAIT** | `contact.*` renseigné (Beaver Data Group, 935097675, Lille, e-mail, téléphone, `lead_destination_email`). Le pied de page cessera d'afficher « coordonnées à confirmer ». |
+| NL reste en attente, PAR LOCALE | **FAIT — mécanique étendue** | `pending_legal_review` vit désormais aussi DANS le bloc `i18n.<locale>` : le texte de base FR est validé, la variante NL de chaque case reste en attente, et le chargeur refuse de quitter le staging tant qu'une locale servie collecterait un consentement sur un placeholder. Tests : `test_le_garde_nl_tient_toujours` + contre-preuve `test_le_fr_seul_ne_bloque_plus_le_staging`. |
+| noindex + bandeau | **INTOUCHÉS** | Aucun changement à `staging`, `allow_indexing`, au middleware ni au bandeau. |
+
+## Les preuves demandées
+
+- **Au caractère près** : `TEXTES_VERSIONNES` épingle chaque libellé affiché
+  contre son identifiant de version — les quatre textes (processing v1.0-08-17
+  compris). Test rouge si un caractère bouge sans nouvelle version.
+- **Mutation sur le garde de version** :
+  `test_muter_un_libelle_sans_changer_la_version_est_detecte` altère
+  « Solution SG » → « Solution XX » à version constante et prouve que le garde
+  le voit.
+- **Bonnes entrées** : purpose/canal/version vérifiés en base pour chaque case
+  (`test_every_defined_case…`, `test_la_case_marketing_emet…`).
+- **Deux entrées pour la case 1** : test dédié, listé ci-dessus.
+- **Gardes NL** : tenus, avec contre-preuve.
+
+Mesuré : backend **727 passed / 7 skipped** (721 avant) ; web **58 passed**,
+`tsc` + `eslint` propres, `next build` sert `/confidentialite`,
+`/demande-etude`, `/nl/demande-etude`.
+
+## Reste suspendu (mis à jour)
+
+1. **Variantes NL des quatre textes de consentement** — traduction par un
+   natif PUIS validation, une version par locale ; le garde par locale les
+   attend.
+2. **Libellés NL non juridiques** — toujours « À TRADUIRE PAR UN NATIF ».
+3. **Le passage en public** — geste ultérieur et distinct, inchangé :
+   `staging: false` + `allow_indexing: true` + env web + header Traefik. Le
+   garde par locale exigera d'abord le point 1 (ou le retrait du NL servi).
+4. **Contrat v2** — décisions propriétaire côté plateforme, inchangées ; les
+   nouvelles cases (dont `PARTNER_TRANSFER` accordé) attendent en base le
+   contrat qui les transportera.

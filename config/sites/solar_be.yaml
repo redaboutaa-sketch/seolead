@@ -31,13 +31,13 @@ locale_paths:
   nl: "/nl"
 
 contact:
-  # PLACEHOLDER — all owner input.
-  email: null
-  phone: null
-  address: null
-  company_name: null
-  company_number: null
-  lead_destination_email: null
+  # Fournis par le propriétaire le 2026-08-30. Plus un placeholder.
+  email: "reda.boutaa@gmail.com"
+  phone: "+33650855704"
+  address: "43 rue de Marquillies, 59000 Lille, France"
+  company_name: "Beaver Data Group"
+  company_number: "935097675"
+  lead_destination_email: "reda.boutaa@gmail.com"
 
 legal:
   # Texte approuvé par le propriétaire le 2026-08-17. La version est ENREGISTRÉE
@@ -47,6 +47,12 @@ legal:
   terms_path: /conditions
   cookie_policy_path: null
   consent_version: "solar-be-consent-v1.0-2026-08-17"
+  # Version de la POLITIQUE affichée sur /confidentialite. Incrémentée le
+  # 2026-08-30 (section « Transmission à notre partenaire installateur »
+  # ajoutée, phrase d'exclusion retirée — validé par le propriétaire,
+  # responsable de traitement). Distincte de consent_version, qui identifie le
+  # texte du consentement au traitement et reste v1.0-2026-08-17.
+  privacy_policy_version: "solar-be-privacy-v1.1-2026-08-30"
   data_controller: "BEAVER DATA GROUP"
   privacy_contact_email: "reda.boutaa@gmail.com"
   reviewed: true
@@ -138,8 +144,8 @@ conversion:
       title: "Vos coordonnées"
       description: "Pour vous transmettre l'estimation."
       fields: [first_name, last_name, email, phone, consent_processing,
-               consent_followup_phone, consent_followup_whatsapp,
-               consent_marketing, consent_partner_transfer]
+               consent_followup_contact, consent_marketing,
+               consent_partner_transfer]
       i18n:
         nl:
           title: "[NL — À TRADUIRE PAR UN NATIF] Vos coordonnées"
@@ -302,15 +308,21 @@ conversion:
     # necessary processing conditional on accepting the rest, which is not a
     # real choice.
     #
-    # The two historical cases below keep their approved text UNCHANGED (version
-    # solar-be-consent-v1.0-2026-08-17, via legal.consent_version). The three
-    # cases marked `pending_legal_review: true` are MECHANICS ONLY: their labels
-    # are placeholders awaiting counsel-validated wording, the loader refuses to
-    # let them leave staging, and the day the texts land the whole change is
-    # label + consent_version + dropping the flag — per case, in this file.
+    # TEXTES FR VALIDÉS par le propriétaire, responsable de traitement, le
+    # 2026-08-30 (locale fr-BE). Chaque texte est identifié par sa version ;
+    # le modifier, c'est frapper une nouvelle version — un test épingle chaque
+    # libellé au caractère près contre son identifiant.
+    #
+    # Les variantes NL restent `pending_legal_review` DANS leur bloc i18n :
+    # elles seront traduites par un locuteur natif PUIS validées — jamais
+    # traduites automatiquement, une version par locale. Le chargeur refuse de
+    # quitter le staging tant qu'une variante d'une locale servie est en
+    # attente.
     - key: consent_processing
       type: consent
       consent_purpose: PROCESSING
+      # INCHANGÉ — version solar-be-consent-v1.0-2026-08-17 via
+      # legal.consent_version.
       label: >-
         J'accepte que mes données personnelles soient traitées par BEAVER DATA
         GROUP, responsable du traitement de Solar Belgium, afin d'analyser ma
@@ -318,56 +330,60 @@ conversion:
         assurer le suivi de ma demande. J'ai pris connaissance de la Politique
         de confidentialité et je peux retirer mon consentement à tout moment.
       required: true
-      # La variante NL d'un texte de consentement est elle-même un texte
-      # juridique : elle vient du juriste, jamais d'une traduction automatique.
-      # Question ouverte (voir contrat v2) : une version par locale, ou une
-      # version couvrant ses traductions validées.
       i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Consentement au traitement de la demande (texte fr non modifié faisant foi)."}
-    - key: consent_followup_phone
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Consentement au traitement de la demande (texte fr non modifié faisant foi)."
+          pending_legal_review: true
+    # UNE case, DEUX entrées : le texte validé nomme les deux canaux, la case
+    # émet une ligne PHONE et une ligne WHATSAPP, même texte, même version.
+    - key: consent_followup_contact
       type: consent
       consent_purpose: FOLLOWUP_CONTACT
-      consent_channel: PHONE
-      consent_version: "solar-be-consent-followup-phone-v0.0-NON-VALIDE"
-      pending_legal_review: true
+      consent_channels: [PHONE, WHATSAPP]
+      consent_version: "solar-be-followup-contact-v1.0-2026-08-30"
       label: >-
-        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
-        déployer] Consentement au suivi de la demande par TÉLÉPHONE.
+        J'accepte d'être recontacté(e) par BEAVER DATA GROUP, par téléphone ou
+        par WhatsApp, au sujet de ma demande d'étude solaire, afin d'en
+        préciser les éléments et d'en recevoir les résultats. Ce consentement
+        ne porte que sur le suivi de ma demande. Je peux le retirer à tout
+        moment.
       required: false
       i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Suivi de la demande par téléphone."}
-    - key: consent_followup_whatsapp
-      type: consent
-      consent_purpose: FOLLOWUP_CONTACT
-      consent_channel: WHATSAPP
-      consent_version: "solar-be-consent-followup-whatsapp-v0.0-NON-VALIDE"
-      pending_legal_review: true
-      label: >-
-        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
-        déployer] Consentement au suivi de la demande par WHATSAPP.
-      required: false
-      i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Suivi de la demande par WhatsApp."}
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Suivi de la demande par téléphone ou WhatsApp (texte fr validé faisant foi)."
+          pending_legal_review: true
+    # Remplace l'ancienne case marketing sans canal (Décision 2 : elle était
+    # intransmissible). Nouveau texte, canal nommé, nouvelle version.
     - key: consent_marketing
       type: consent
       consent_purpose: MARKETING
-      label: "J'accepte de recevoir des informations sur les offres et conseils."
+      consent_channel: WHATSAPP
+      consent_version: "solar-be-marketing-whatsapp-v1.0-2026-08-30"
+      label: >-
+        J'accepte de recevoir par WhatsApp des informations et offres de
+        BEAVER DATA GROUP relatives aux solutions d'énergie, y compris les
+        offres de sa boutique partenaire. Je peux me désinscrire à tout
+        moment, notamment en répondant STOP.
       required: false
       i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Informations sur les offres et conseils (texte fr non modifié faisant foi)."}
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Informations et offres par WhatsApp (texte fr validé faisant foi)."
+          pending_legal_review: true
     - key: consent_partner_transfer
       type: consent
       consent_purpose: PARTNER_TRANSFER
-      consent_version: "solar-be-consent-partner-v0.0-NON-VALIDE"
-      pending_legal_review: true
+      consent_version: "solar-be-partner-transfer-v1.0-2026-08-30"
       label: >-
-        [PLACEHOLDER NON-VALIDÉ — texte en validation juridique, ne pas
-        déployer] Consentement à la transmission de la demande au partenaire
-        chargé de l'étude. La politique de confidentialité doit être mise à
-        jour AVANT toute activation.
+        J'accepte que mes coordonnées et les caractéristiques de mon projet
+        soient transmises à Solution SG, partenaire installateur de BEAVER
+        DATA GROUP, dans le seul but d'organiser un rendez-vous relatif à mon
+        projet solaire. BEAVER DATA GROUP demeure responsable de ce
+        traitement. Je peux retirer ce consentement à tout moment.
       required: false
       i18n:
-        nl: {label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Transmission de la demande au partenaire chargé de l'étude."}
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF ET À VALIDER JURIDIQUEMENT] Transmission de la demande au partenaire installateur (texte fr validé faisant foi)."
+          pending_legal_review: true
 
 # Routes the site knows about. Internal links may only target a path listed here,
 # so a link cannot ship pointing at a page that does not exist.
