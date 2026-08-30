@@ -15,13 +15,25 @@ from sqlalchemy import (Boolean, CheckConstraint, Float, ForeignKey, Index,
                         Integer, String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import Observability, RunStatus, SourceState
+from app.core.enums import (AuthorityRequirement, ClaimCategory,
+                            EvidenceStatus, FreshnessRequirement,
+                            Observability, RunStatus, SourceState)
 from app.db.base import (Base, JSONType, TZDateTime, UUIDType, created_column,
                          pk_column)
 
 _SOURCE_STATES = ", ".join(f"'{s.value}'" for s in SourceState)
 _OBSERVABILITY = ", ".join(f"'{o.value}'" for o in Observability)
 _RUN_STATUSES = ", ".join(f"'{s.value}'" for s in RunStatus)
+# Derived from the enums, never hand-copied. Migration 0003 spelled these
+# four allowlists out as literal tuples and the model declared none of them,
+# so the test schema (built by `create_all`) carried no such constraint at
+# all: four categories added in Phases 3.2–3.4 drifted past every test and
+# only failed against PostgreSQL, at write time, in production. Declaring
+# them here makes SQLite enforce exactly what PostgreSQL enforces.
+_CLAIM_CATEGORIES = ", ".join(f"'{c.value}'" for c in ClaimCategory)
+_EVIDENCE_STATUSES = ", ".join(f"'{s.value}'" for s in EvidenceStatus)
+_AUTHORITY = ", ".join(f"'{a.value}'" for a in AuthorityRequirement)
+_FRESHNESS = ", ".join(f"'{f.value}'" for f in FreshnessRequirement)
 
 
 class ResearchRun(Base):
@@ -111,6 +123,23 @@ class ResearchEvidence(Base):
     __table_args__ = (
         CheckConstraint(f"observability IN ({_OBSERVABILITY})",
                         name="ck_research_evidence_observability"),
+        # `IS NULL OR` because each column is nullable: an evidence row written
+        # before the claim layer existed carries none of them, and a NOT NULL
+        # constraint by the back door would refuse it.
+        CheckConstraint(
+            f"claim_category IS NULL OR claim_category IN ({_CLAIM_CATEGORIES})",
+            name="ck_research_evidence_category"),
+        CheckConstraint(
+            f"evidence_status IS NULL OR evidence_status IN ({_EVIDENCE_STATUSES})",
+            name="ck_research_evidence_status"),
+        CheckConstraint(
+            f"authority_requirement IS NULL OR "
+            f"authority_requirement IN ({_AUTHORITY})",
+            name="ck_research_evidence_authority"),
+        CheckConstraint(
+            f"freshness_requirement IS NULL OR "
+            f"freshness_requirement IN ({_FRESHNESS})",
+            name="ck_research_evidence_freshness"),
         Index("ix_research_evidence_source", "research_source_id"),
     )
 

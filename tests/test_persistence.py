@@ -12,7 +12,10 @@ import uuid
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.core.enums import ApprovalState, Observability, SourceState
+from app.core.enums import (ApprovalState, AuthorityRequirement,
+                            ClaimCategory, EvidenceStatus,
+                            FreshnessRequirement, Observability,
+                            SourceState)
 from app.models import (Approval, ContentBrief, ContentDraft, ResearchEvidence,
                         ResearchPackage, ResearchRun, ResearchSource, SeedKeyword,
                         Site, Vertical)
@@ -121,6 +124,86 @@ class TestResearchConstraints:
         await session.flush()
         session.add(ResearchEvidence(research_source_id=source.id, fact="f",
                                      evidence_type="reported", observability=value))
+        await session.commit()
+
+    @pytest.mark.parametrize("category", [c.value for c in ClaimCategory])
+    async def test_every_claim_category_the_classifier_can_emit_is_storable(
+            self, session, category):
+        """The regression this class of test exists for.
+
+        `TARIFF`, `GRID_FEE`, `MARKET_AVERAGE` and `OBSERVED_PRICE_RANGE` were
+        added to `ClaimCategory` across Phases 3.2–3.4 and never added to the
+        CHECK in migration 0003. A live v2 run classifying a price claim as
+        `OBSERVED_PRICE_RANGE` died mid-flush against PostgreSQL — the first run
+        able to reach evidence persistence, because DataForSEO had refused every
+        earlier SERP call. No test could catch it: those CHECKs lived only in
+        the migration, and the test schema is built from the models.
+        """
+        vertical = await _vertical(session)
+        run = await _run(session, vertical)
+        source = ResearchSource(research_run_id=run.id, source_type="web",
+                                status="ok")
+        session.add(source)
+        await session.flush()
+        session.add(ResearchEvidence(
+            research_source_id=source.id, fact="f", evidence_type="atomic_claim",
+            observability="ESTIMATED", claim_category=category))
+        await session.commit()
+
+    async def test_an_invented_claim_category_is_refused(self, session):
+        vertical = await _vertical(session)
+        run = await _run(session, vertical)
+        source = ResearchSource(research_run_id=run.id, source_type="web",
+                                status="ok")
+        session.add(source)
+        await session.flush()
+        session.add(ResearchEvidence(
+            research_source_id=source.id, fact="f", evidence_type="atomic_claim",
+            observability="ESTIMATED", claim_category="PROBABLY_A_PRICE"))
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+    def test_the_migration_allowlist_matches_the_enum(self):
+        """The guard against a third drift.
+
+        Migration 0009 spells its list out on purpose — a migration that
+        followed a live enum would change meaning on replay. That literal is
+        therefore compared here instead: adding a `ClaimCategory` without a
+        migration turns this red, which is the whole point.
+        """
+        import importlib.util
+        from pathlib import Path
+
+        chemin = Path(__file__).resolve().parents[1] / "migrations" / "versions" \
+            / "0009_claim_category_check.py"
+        spec = importlib.util.spec_from_file_location("m0009", chemin)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        assert set(module.CLAIM_CATEGORIES) == {c.value for c in ClaimCategory}, (
+            "migration 0009 and ClaimCategory disagree: a category the "
+            "classifier can emit would be refused by the database at write time")
+
+    @pytest.mark.parametrize("enum, column", [
+        (EvidenceStatus, "evidence_status"),
+        (AuthorityRequirement, "authority_requirement"),
+        (FreshnessRequirement, "freshness_requirement"),
+    ])
+    async def test_the_other_claim_vocabularies_are_storable_in_full(
+            self, session, enum, column):
+        """The three sibling allowlists were measured in sync when 0009 was
+        written. They are pinned here so they stay that way."""
+        vertical = await _vertical(session)
+        run = await _run(session, vertical)
+        source = ResearchSource(research_run_id=run.id, source_type="web",
+                                status="ok")
+        session.add(source)
+        await session.flush()
+        for value in enum:
+            session.add(ResearchEvidence(
+                research_source_id=source.id, fact="f",
+                evidence_type="atomic_claim", observability="ESTIMATED",
+                **{column: value.value}))
         await session.commit()
 
     async def test_published_at_may_be_null(self, session):
