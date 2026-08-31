@@ -99,9 +99,12 @@ seo:
   #
   # Derived from copy already on the page rather than written fresh: it asserts
   # nothing the site does not already say.
+  # Enrichie le 2026-08-31 (P1.2) : l'axe accessibilité financière, au
+  # conditionnel — « selon votre situation », jamais une promesse.
   default_meta_description: >-
     Photovoltaïque résidentiel en Belgique : décrivez votre projet en quelques
-    questions, et lisez des montants qui disent d'où ils viennent.
+    questions et lisez des montants qui disent d'où ils viennent. Selon votre
+    situation, des solutions de financement peuvent être étudiées.
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
@@ -518,6 +521,11 @@ routes:
   # stale here — the content has been published at the longer slug since Phase 4.
   - {path: /prix-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
+  # Landing financement (P1.1 de l'audit). Servie en staging pour construction
+  # et revue ; une fois le site public, elle ne se sert et ne s'indexe que
+  # lorsque le registre d'offre est publiable (validation propriétaire ET levée
+  # juridique) — la route est déclarée, la porte est dans la page.
+  - {path: /panneaux-solaires-sans-apport, type: LANDING_PAGE, locales: [fr]}
   # NL déclaré : la mécanique i18n du formulaire est câblée (libellés en
   # placeholder « À TRADUIRE PAR UN NATIF » — jamais de traduction automatique).
   - {path: /demande-etude, type: CONVERSION, locales: [fr]}

@@ -853,6 +853,72 @@ main { display: block; }
 .notice p:last-child { margin-bottom: 0; }
 .notice--placeholder { border-left-color: var(--warning-border); background: var(--warning-bg); }
 
+/* Ligne de financement du hero — présente sans dominer : la promesse du site
+ * reste les chiffres sourcés, l'accessibilité financière est un second axe. */
+.hero__financing {
+  font-size: 0.98rem;
+  color: var(--text-soft, inherit);
+  max-width: var(--measure);
+  margin-top: var(--space-3);
+}
+
+/* ══ Direct answer (answer-first, P2.2) ══════════════════════════════════ */
+
+.direct-answer {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--brand);
+  border-radius: var(--radius-md);
+  background: var(--brand-tint);
+  padding: var(--space-5);
+  margin-block: var(--space-6);
+  max-width: var(--measure);
+}
+.direct-answer__question {
+  font-size: 1.05rem;
+  margin: 0 0 var(--space-2);
+}
+.direct-answer__text p { margin: 0; }
+.direct-answer__text p + p { margin-top: var(--space-2); }
+
+/* ══ Landing financement ═════════════════════════════════════════════════ */
+
+.method-formula {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-5);
+  margin-block: var(--space-5);
+  max-width: 30rem;
+  font-variant-numeric: tabular-nums;
+}
+.method-formula p { margin: 0; padding: var(--space-1) 0; }
+.method-formula .method-formula__result {
+  border-top: 2px solid var(--border-strong);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  font-weight: 600;
+}
+.landing-steps { counter-reset: step; list-style: none; padding: 0; display: grid; gap: var(--space-3); }
+.landing-steps li {
+  counter-increment: step;
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+.landing-steps li::before {
+  content: counter(step);
+  flex: 0 0 auto;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+  font-weight: 700;
+}
+
 /* ══ Price evidence ══════════════════════════════════════════════════════ */
 
 .price-list { list-style: none; margin: var(--space-5) 0; padding: 0; display: grid; gap: var(--space-3); }
