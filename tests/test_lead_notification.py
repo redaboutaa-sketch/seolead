@@ -104,5 +104,84 @@ class TestFailureNeverCostsTheLead:
         assert any("NOT delivered" in r.message for r in caplog.records)
 
 
+class _StubSmtp:
+    """smtplib.SMTP factice — enregistre ce que le transport ferait."""
+
+    instances: list["_StubSmtp"] = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host, self.port = host, port
+        self.started_tls = False
+        self.login_args = None
+        self.messages = []
+        _StubSmtp.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def starttls(self):
+        self.started_tls = True
+
+    def login(self, username, password):
+        self.login_args = (username, password)
+
+    def send_message(self, message):
+        self.messages.append(message)
+
+
+class TestSmtpTransport:
+    @pytest.mark.asyncio
+    async def test_the_relay_receives_starttls_auth_and_the_message(self,
+                                                                    monkeypatch):
+        from app.site import lead_notification as ln
+        monkeypatch.setattr(ln.smtplib, "SMTP", _StubSmtp)
+        _StubSmtp.instances.clear()
+        notifier = ln.SmtpLeadNotifier(
+            host="smtp-relay.brevo.com", port=587,
+            username="login@smtp-brevo.com", password="secret",
+            sender="expediteur.verifie@example.org", starttls=True)
+        assert await notifier.send(LeadNotification(
+            to="dest@example.org", subject="s", body="b")) is True
+        smtp = _StubSmtp.instances[0]
+        assert (smtp.host, smtp.port) == ("smtp-relay.brevo.com", 587)
+        assert smtp.started_tls is True
+        assert smtp.login_args == ("login@smtp-brevo.com", "secret")
+        assert smtp.messages[0]["To"] == "dest@example.org"
+        assert smtp.messages[0]["From"] == "expediteur.verifie@example.org"
+
+    @pytest.mark.asyncio
+    async def test_without_a_sender_the_from_is_the_destination(self,
+                                                                monkeypatch):
+        # Un LOGIN SMTP n'est pas une identité d'expéditeur ; sans
+        # SEOLEAD_SMTP_SENDER, l'opérateur s'écrit depuis sa propre adresse.
+        from app.site import lead_notification as ln
+        monkeypatch.setattr(ln.smtplib, "SMTP", _StubSmtp)
+        _StubSmtp.instances.clear()
+        notifier = ln.SmtpLeadNotifier(
+            host="smtp-relay.brevo.com", port=587,
+            username="login@smtp-brevo.com", password="secret",
+            sender="", starttls=True)
+        await notifier.send(LeadNotification(
+            to="dest@example.org", subject="s", body="b"))
+        assert _StubSmtp.instances[0].messages[0]["From"] == "dest@example.org"
+
+
+def test_both_env_spellings_configure_the_transport(monkeypatch):
+    # L'ordre de mise en production a fourni SEOLEAD_SMTP_USER ; le code
+    # acceptait SEOLEAD_SMTP_USERNAME. Les deux graphies doivent porter.
+    from app.core.config import Settings
+    monkeypatch.setenv("SEOLEAD_SMTP_HOST", "smtp-relay.brevo.com")
+    monkeypatch.setenv("SEOLEAD_SMTP_USER", "court@smtp-brevo.com")
+    settings = Settings(_env_file=None)
+    assert settings.smtp_configured is True
+    assert settings.smtp_username == "court@smtp-brevo.com"
+    monkeypatch.delenv("SEOLEAD_SMTP_USER")
+    monkeypatch.setenv("SEOLEAD_SMTP_USERNAME", "long@smtp-brevo.com")
+    assert Settings(_env_file=None).smtp_username == "long@smtp-brevo.com"
+
+
 # La preuve que le DTO public ne transporte pas la destination de routage
 # vit dans tests/test_site_api.py, avec la fixture client de ce module.

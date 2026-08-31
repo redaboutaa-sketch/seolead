@@ -61,7 +61,11 @@ class SmtpLeadNotifier:
 
     async def send(self, notification: LeadNotification) -> bool:
         message = EmailMessage()
-        message["From"] = self._sender
+        # No configured sender identity → send FROM the destination: the
+        # operator notifying themselves from their own (relay-verified)
+        # address. An SMTP LOGIN is not a sender identity and relays refuse
+        # it as a From.
+        message["From"] = self._sender or notification.to
         message["To"] = notification.to
         message["Subject"] = notification.subject
         message.set_content(notification.body)
@@ -144,7 +148,7 @@ def default_notifier() -> LeadNotifier:
         return SmtpLeadNotifier(
             host=settings.smtp_host, port=settings.smtp_port,
             username=settings.smtp_username, password=settings.smtp_password,
-            sender=settings.smtp_sender or settings.smtp_username,
+            sender=settings.smtp_sender,
             starttls=settings.smtp_starttls)
     return LogOnlyLeadNotifier()
 

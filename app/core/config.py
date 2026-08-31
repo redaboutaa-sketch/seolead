@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,8 +90,16 @@ class Settings(BaseSettings):
     # the log says loudly that nobody was notified.
     smtp_host: str = Field("", alias="SEOLEAD_SMTP_HOST")
     smtp_port: int = Field(587, alias="SEOLEAD_SMTP_PORT")
-    smtp_username: str = Field("", alias="SEOLEAD_SMTP_USERNAME")
+    # Both spellings accepted: the operator's .env carries SEOLEAD_SMTP_USER
+    # (the name the go-live order used); the long form stays valid.
+    smtp_username: str = Field(
+        "", validation_alias=AliasChoices("SEOLEAD_SMTP_USER",
+                                         "SEOLEAD_SMTP_USERNAME"))
     smtp_password: str = Field("", alias="SEOLEAD_SMTP_PASSWORD")
+    # Optional: a Brevo-verified sender identity. When unset, the notifier
+    # falls back to sending FROM the destination address — the operator's own
+    # verified address — because an SMTP login like `9xxx@smtp-brevo.com` is
+    # not a sender identity and relays refuse it.
     smtp_sender: str = Field("", alias="SEOLEAD_SMTP_SENDER")
     smtp_starttls: bool = Field(True, alias="SEOLEAD_SMTP_STARTTLS")
 
