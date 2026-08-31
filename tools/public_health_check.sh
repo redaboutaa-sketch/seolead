@@ -65,11 +65,21 @@ if [ -n "$hdr" ]; then
 else
   echo "/                                          en-tête X-Robots-Tag: absent OK"
 fi
+# /preview a DEUX gardes légitimes selon d'où on regarde. En production,
+# la basicauth Traefik répond 401 à l'edge : la requête n'atteint jamais
+# l'application, rien n'est servi, rien n'est indexable — l'absence
+# d'en-tête sur ce 401 est correcte (mesuré le 2026-08-31 : exiger
+# l'en-tête ici a crié FAIL sur un site parfaitement fermé). En local,
+# sans Traefik, c'est le middleware Next qui répond, avec l'en-tête.
+# Ce qui est interdit : un préview SERVI (2xx/4xx applicatif) sans en-tête.
+pcode=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/preview/fr/x")
 phdr=$(curl -s -o /dev/null -w '%{header_json}' "$BASE/preview/fr/x" | grep -io '"x-robots-tag"' || true)
-if [ -n "$phdr" ]; then
+if [ "$pcode" = "401" ]; then
+  echo "/preview/*                                 401 basicauth à l'edge OK (jamais servi, donc jamais indexable)"
+elif [ -n "$phdr" ]; then
   echo "/preview/*                                 en-tête X-Robots-Tag: présent OK (jamais indexable)"
 else
-  echo "/preview/*                                 en-tête X-Robots-Tag ABSENT — FAIL"; FAIL=1
+  echo "/preview/*                                 servi ($pcode) SANS en-tête X-Robots-Tag ni 401 — FAIL"; FAIL=1
 fi
 
 echo "-- sitemap (aucun draft/pending, jamais la landing financement) --"
