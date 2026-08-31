@@ -172,6 +172,15 @@ _DEFAULT_POLICY: dict[ClaimCategory, tuple[str, AuthorityRequirement,
         ClaimRisk.LOW, AuthorityRequirement.SPECIALIST,
         FreshnessRequirement.NOT_REQUIRED, 1,
         "Technical characteristics are stable and specialist sources suffice."),
+    ClaimCategory.FINANCING_PROMISE: (
+        ClaimRisk.HIGH, AuthorityRequirement.OFFICIAL,
+        FreshnessRequirement.REQUIRED, 1,
+        "A promise about our own commercial offer — free, no upfront payment, "
+        "self-financing, application fees, instalments covered by savings. "
+        "Research can never establish it, because the source of an offer is the "
+        "company making it: the OFFICIAL bar keeps it unassertable from "
+        "retrieved pages, and the only legitimate path into a page is the "
+        "validated first-party offer registry."),
     ClaimCategory.GENERAL: (
         ClaimRisk.LOW, AuthorityRequirement.ANY,
         FreshnessRequirement.NOT_REQUIRED, 1,
@@ -191,6 +200,68 @@ _GUARANTEED_OUTCOME = re.compile(
     r"|(?:rendement|economie\w*|epargne|benefice|retour|savings?|returns?|roi|yield)"
     r"\W+(?:\w+\W+){0,3}?(?:garanti\w*|guaranteed|gegarandeerd)",
     re.IGNORECASE)
+
+# ── Financing promises ───────────────────────────────────────────────────────
+# Measured 2026-08-31 (audit §2): « Panneaux solaires gratuits : vous ne payez
+# rien », « sans apport », « s'autofinance » all classified GENERAL / LOW / ANY.
+# `_GUARANTEED_OUTCOME` only knows « garanti* », and the highest-consequence
+# commercial promise this vertical can make sailed under every bar.
+#
+# The vocabulary, and its deliberate edges:
+#   - « gratuitement » alone is NOT caught: « produire gratuitement de
+#     l'électricité » is a real SUPPORTED ledger claim about post-payback
+#     production, not an offer. It is caught only next to installé/posé/fourni.
+#   - « 0 € » must not match « 0,05 €/kWh » — a tariff is not a giveaway.
+#   - « sans aide ni subside » is a statement about public support, not about
+#     our offer, and stays untouched.
+# Every edge above is pinned by a regression corpus of real ledger texts.
+_FINANCING_PROMISE = re.compile(
+    r"\bsans\s+(?:apport|avance|epargne|mise\s+de\s+fonds"
+    r"|rien\s+(?:avancer|payer|debourser)"
+    r"|(?:investissement|economies?|capital)\s+(?:initial|de\s+depart|prealable))"
+    r"|\b(?:0|zero)\s*(?:€|eur(?:os?)?\b)(?![\d.,]\d)"
+    r"|\bgratuit(?:e|s|es)?\b"
+    r"|\b(?:installe|pose|fourni|place)\w*\s+gratuitement\b"
+    r"|\bgratuitement\s+(?:installe|pose|fourni|place)\w*"
+    r"|\bs'autofinance\w*\b|\bautofinanc\w+\b"
+    r"|\bmensualite\w*\b\W+(?:\w+\W+){0,10}?econom\w+"
+    r"|\beconom\w+\W+(?:\w+\W+){0,10}?mensualite\w*"
+    r"|\b(?:couvr|compens)\w+\W+(?:\w+\W+){0,4}?mensualite\w*"
+    r"|\brembours\w+\s+par\s+les?\s+econom\w+"
+    r"|\bfrais\s+de\s+dossier\b",
+    re.IGNORECASE)
+
+# What separates a controlled, conditional formulation from a promise. « Selon
+# le financement, …, les économies PEUVENT contribuer à compenser tout ou
+# partie de la mensualité » is a sentence this vertical is allowed to need;
+# « l'installation s'autofinance » is not. The subject is not banned — the
+# unconditional form of it is.
+_CONDITIONAL_MARKERS = re.compile(
+    r"\bselon\b|\ben\s+fonction\s+de\b|\bsous\s+conditions?\b"
+    r"|\bpeut\b|\bpeuvent\b|\bpourrai(?:t|ent)\b|\bpotentiellement\b"
+    r"|\bdans\s+certains\s+cas\b|\bsi\s|\bau\s+cas\s+par\s+cas\b"
+    r"|\btout\s+ou\s+partie\b|\beligib\w+\b",
+    re.IGNORECASE)
+
+
+def is_financing_promise(text: str) -> bool:
+    """Whether this text talks in financing-offer terms at all."""
+    return bool(_FINANCING_PROMISE.search(normalize_query(text or "")))
+
+
+def is_unconditional_financing_promise(text: str) -> bool:
+    """The blocking form: an offer promise with no conditional anywhere near it.
+
+    Used by SEO QA to refuse a generated sentence outright. Classification does
+    not make this distinction — conditional or not, a financing claim is
+    FINANCING_PROMISE and HIGH — because a conditional promise still needs the
+    offer registry behind it; this predicate only decides which failure the
+    operator is shown.
+    """
+    normalized = normalize_query(text or "")
+    return bool(_FINANCING_PROMISE.search(normalized)) and \
+        not _CONDITIONAL_MARKERS.search(normalized)
+
 
 # VAT mentioned as a PRICE QUALIFIER is not a claim about the tax rate.
 # "4 000 € TVAC", "1 000 € hors TVA" and "prix HTVA" are pricing statements; only
@@ -261,6 +332,15 @@ def classify_category(claim: str, profile: VerticalProfile) -> ClaimCategory:
     # phrased alongside pricing that would otherwise capture the claim.
     if _GUARANTEED_OUTCOME.search(normalized):
         return ClaimCategory.GUARANTEED_SAVINGS
+
+    # Financing-offer vocabulary outranks the per-vertical vocabulary for the
+    # same reason: « frais de dossier de 150 € » would otherwise fall to
+    # ELIGIBILITY or a price category, and « installation gratuite » to GENERAL.
+    # First-match order is what mislabelled a payback claim GRID_RULE on
+    # 2026-08-31; the categories that decide the strictest bars are checked
+    # before any dictionary is consulted.
+    if _FINANCING_PROMISE.search(normalized):
+        return ClaimCategory.FINANCING_PROMISE
 
     vat_is_price_qualifier = bool(_VAT_AS_PRICE_QUALIFIER.search(claim)) and \
         not _TAX_RATE.search(claim)

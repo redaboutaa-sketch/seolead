@@ -156,6 +156,12 @@ class ClaimCategory(StrEnum):
     MARKET_PRICE = "MARKET_PRICE"      # unqualified price mention — residual
     VENDOR_PRICE = "VENDOR_PRICE"      # a specific vendor's own displayed price
     PRODUCT_SPEC = "PRODUCT_SPEC"
+    # A promise about OUR commercial offer — no upfront payment, self-financing,
+    # application fees, monthly instalments covered by savings. Added 2026-08-31
+    # after measuring that « Panneaux solaires gratuits : vous ne payez rien »
+    # classified GENERAL/LOW. Research can never establish these: the only
+    # legitimate source is the validated first-party offer registry.
+    FINANCING_PROMISE = "FINANCING_PROMISE"
     GENERAL = "GENERAL"
 
 

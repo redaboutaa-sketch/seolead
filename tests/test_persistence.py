@@ -174,15 +174,24 @@ class TestResearchConstraints:
         import importlib.util
         from pathlib import Path
 
-        chemin = Path(__file__).resolve().parents[1] / "migrations" / "versions" \
-            / "0009_claim_category_check.py"
-        spec = importlib.util.spec_from_file_location("m0009", chemin)
+        # The NEWEST migration that spells the allowlist out is the one the
+        # live database ends on. This lookup finds it by content rather than by
+        # name, so the next category added without its migration still turns
+        # this red — which caught FINANCING_PROMISE on 2026-08-31, exactly as
+        # designed, until 0011 shipped beside it.
+        versions = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+        with_allowlist = sorted(
+            chemin for chemin in versions.glob("0*.py")
+            if "CLAIM_CATEGORIES:" in chemin.read_text(encoding="utf-8"))
+        assert with_allowlist, "no migration spells out CLAIM_CATEGORIES"
+        chemin = with_allowlist[-1]
+        spec = importlib.util.spec_from_file_location("m_categories", chemin)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
         assert set(module.CLAIM_CATEGORIES) == {c.value for c in ClaimCategory}, (
-            "migration 0009 and ClaimCategory disagree: a category the "
-            "classifier can emit would be refused by the database at write time")
+            f"{chemin.name} and ClaimCategory disagree: a category the "
+            f"classifier can emit would be refused by the database at write time")
 
     @pytest.mark.parametrize("enum, column", [
         (EvidenceStatus, "evidence_status"),
