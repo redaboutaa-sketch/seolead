@@ -153,21 +153,35 @@ def default_notifier() -> LeadNotifier:
     return LogOnlyLeadNotifier()
 
 
+# The queryable outcomes, recorded on the lead row by the caller. SENT means
+# the relay ACCEPTED the message — never that anyone read it.
+NOTIFICATION_SENT = "SENT"
+NOTIFICATION_FAILED = "FAILED"
+NOTIFICATION_NO_TRANSPORT = "NO_TRANSPORT"
+NOTIFICATION_NO_DESTINATION = "NO_DESTINATION"
+
+
 async def notify_lead(lead: CapturedLead, config: SiteConfig,
-                      notifier: LeadNotifier | None = None) -> bool:
+                      notifier: LeadNotifier | None = None) -> str:
     """Best-effort, after commit. Never raises: the lead is already stored,
-    and no notification failure may turn a captured lead into an error."""
+    and no notification failure may turn a captured lead into an error.
+
+    Returns the outcome as one of the NOTIFICATION_* states so the caller can
+    record it structurally — a grep of logs is not an operational process.
+    """
     try:
         notification = build_notification(lead, config)
         if notification is None:
-            return False
-        delivered = await (notifier or default_notifier()).send(notification)
+            return NOTIFICATION_NO_DESTINATION
+        chosen = notifier or default_notifier()
+        delivered = await chosen.send(notification)
         if delivered:
             logger.info("lead notification delivered",
                         extra={"lead_id": str(lead.id),
                                "destination": notification.to})
-        return delivered
+            return NOTIFICATION_SENT
+        return NOTIFICATION_NO_TRANSPORT
     except Exception:
         logger.exception("lead notification failed - lead is stored, "
                          "follow up manually", extra={"lead_id": str(lead.id)})
-        return False
+        return NOTIFICATION_FAILED

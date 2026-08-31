@@ -137,6 +137,16 @@ class CapturedLead(Base):
     export_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     exported_at: Mapped[object | None] = mapped_column(TZDateTime, nullable=True)
 
+    # The OPERATOR notification, recorded structurally rather than only in
+    # logs — « aucun lead ne doit rester oublié » needs a queryable state, not
+    # a grep. SENT means the SMTP relay accepted the message (not that anyone
+    # read it); FAILED, NO_TRANSPORT and NO_DESTINATION are the loud states
+    # `seolead leads report` surfaces for manual follow-up. Nullable because
+    # rows predating this column made no record.
+    notification_state: Mapped[str | None] = mapped_column(String(32),
+                                                           nullable=True)
+    notified_at: Mapped[object | None] = mapped_column(TZDateTime, nullable=True)
+
     # ── Export identity (TR-SL-01) ──────────────────────────────────────────
     # Prospect 360 reads `(tenant, source_system, external_correlation_id)` as
     # the identity of a deposit. It must therefore be minted ONCE, persisted

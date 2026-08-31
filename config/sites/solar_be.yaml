@@ -748,6 +748,11 @@ routes:
   # disagreed and the navigation linked to a 404. The configuration is what was
   # stale here — the content has been published at the longer slug since Phase 4.
   - {path: /prix-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
+  # La révision 2 approuvée (draft 8a1f6e46) se publie sous le slug de son
+  # brief — rentabilité, pas prix : deux intentions de recherche distinctes
+  # (voir KEYWORD_MAP). Déclarée ici pour que le footer la lie une fois
+  # publiée — une page au sitemap sans lien interne serait orpheline.
+  - {path: /rentabilite-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
   # Landing financement (P1.1 de l'audit). Servie en staging pour construction
   # et revue ; une fois le site public, elle ne se sert et ne s'indexe que

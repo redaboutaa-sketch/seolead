@@ -78,22 +78,35 @@ class TestDestinationIsConfiguration:
 
 class TestFailureNeverCostsTheLead:
     @pytest.mark.asyncio
-    async def test_a_transport_failure_returns_false_and_raises_nothing(self,
-                                                                        caplog):
+    async def test_a_transport_failure_is_FAILED_and_raises_nothing(self,
+                                                                    caplog):
         config = load_site("solar_be")
         with caplog.at_level("ERROR"):
-            delivered = await notify_lead(_Lead(), config,
-                                          notifier=_RecordingNotifier(fail=True))
-        assert delivered is False
+            outcome = await notify_lead(_Lead(), config,
+                                        notifier=_RecordingNotifier(fail=True))
+        assert outcome == "FAILED"
         assert any("lead is stored" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_the_recording_transport_receives_the_configured_to(self):
         config = load_site("solar_be")
         notifier = _RecordingNotifier()
-        assert await notify_lead(_Lead(), config, notifier=notifier) is True
+        assert await notify_lead(_Lead(), config, notifier=notifier) == "SENT"
         assert [n.to for n in notifier.sent] \
             == [config.organization.lead_destination_email]
+
+    @pytest.mark.asyncio
+    async def test_every_outcome_is_a_queryable_state(self):
+        """« Aucun lead oublié » vit dans ces états, pas dans un grep : sans
+        destination → NO_DESTINATION ; repli sans transport → NO_TRANSPORT."""
+        config = load_site("solar_be").model_copy(deep=True)
+        config.organization.lead_destination_email = None
+        assert await notify_lead(_Lead(), config,
+                                 notifier=_RecordingNotifier()) \
+            == "NO_DESTINATION"
+        assert await notify_lead(_Lead(), load_site("solar_be"),
+                                 notifier=LogOnlyLeadNotifier()) \
+            == "NO_TRANSPORT"
 
     @pytest.mark.asyncio
     async def test_the_log_only_fallback_does_not_pretend(self, caplog):

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
@@ -325,10 +326,15 @@ async def create_lead(site_id: str, payload: LeadRequest,
     # After commit, on purpose: the lead is safe in the database before anyone
     # is told about it, and no notification failure can turn a captured lead
     # into an error response. Destination = site configuration; transport =
-    # environment; both absent are loud log lines, never exceptions.
+    # environment; both absent are loud log lines, never exceptions. The
+    # outcome is recorded ON the row so `seolead leads report` can surface
+    # every lead whose notification did not go out.
     lead_row = await session.get(CapturedLead, uuid.UUID(result.lead_id))
     if lead_row is not None:
-        await notify_lead(lead_row, config)
+        outcome = await notify_lead(lead_row, config)
+        lead_row.notification_state = outcome
+        lead_row.notified_at = datetime.now(timezone.utc)
+        await session.commit()
 
     return {"lead_id": result.lead_id, "state": result.state,
             "destination": result.destination}
