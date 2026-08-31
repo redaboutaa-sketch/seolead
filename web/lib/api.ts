@@ -52,8 +52,39 @@ async function get<T>(path: string, extraHeaders: Record<string, string> = {},
   }
 }
 
+/**
+ * Last configuration the API actually served, kept in process memory.
+ *
+ * Why it exists: every page derives `robots` from the config, and the
+ * fail-closed rule renders `noindex` when the config is null. That rule is
+ * right for a site that has NEVER seen its config — and wrong for a healthy
+ * launched site during a two-second API restart: Google's live test hit
+ * exactly such a blip on 2026-08-31 and reported the page « exclue par la
+ * balise noindex » while every curl before and after showed `index, follow`.
+ *
+ * So: one retry, then fall back to the last value the API genuinely served.
+ * Nothing is invented — a value is only ever REUSED after having been true —
+ * and a cold-started process that has never fetched a config still renders
+ * fail-closed, exactly as before.
+ */
+let lastKnownConfig: SiteConfigDTO | null = null;
+
 export async function getSiteConfig(): Promise<SiteConfigDTO | null> {
-  return get<SiteConfigDTO>(`/site/v1/sites/${SITE_ID}`, {}, 300);
+  let config = await get<SiteConfigDTO>(`/site/v1/sites/${SITE_ID}`, {}, 300);
+  if (config === null) {
+    config = await get<SiteConfigDTO>(`/site/v1/sites/${SITE_ID}`, {}, 300);
+  }
+  if (config !== null) {
+    lastKnownConfig = config;
+    return config;
+  }
+  if (lastKnownConfig !== null) {
+    console.warn(
+      "site config fetch failed twice - serving last known good configuration",
+    );
+    return lastKnownConfig;
+  }
+  return null;
 }
 
 export async function getPublished(
