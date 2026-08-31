@@ -45,6 +45,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const published: { locale: string; url: string; updated_at: string | null }[] = [];
   for (const locale of config.supported_languages) {
     for (const item of await listPublished(locale)) {
+      // A page that tells crawlers to ignore it has no business in the
+      // sitemap — the same rule as /conditions. The live case: the article
+      // published during the soft launch (2026-08-13) carries its baked
+      // noindex until a newer version replaces it.
+      if (item.meta?.noindex) continue;
       published.push({
         locale,
         url: `${base}${contentPath(config, item)}`,

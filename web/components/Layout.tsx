@@ -7,6 +7,7 @@ const NAV_LABELS: Record<string, Record<string, string>> = {
   fr: {
     "/": "Accueil",
     "/prix-panneaux-solaires-belgique": "Prix",
+    "/rentabilite-panneaux-solaires-belgique": "Rentabilité",
     "/outils/estimation-solaire": "Estimation",
     "/demande-etude": "Demander une étude",
   },
