@@ -495,6 +495,10 @@ export const HOME_FAQ: {
       "l'effort net devient faible ou nul. Cela dépend de votre production, " +
       "de votre consommation, du prix de l'électricité et des conditions de " +
       "financement — c'est ce que l'étude personnalisée chiffre.",
+    link: {
+      path: "/panneaux-solaires-sans-apport",
+      label: "Les conditions d'un autofinancement approché",
+    },
   },
   {
     question: "Puis-je revenir sur mon consentement ?",
