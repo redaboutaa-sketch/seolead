@@ -15,6 +15,7 @@ refuses a configuration that claims otherwise.
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import date
 from functools import lru_cache
@@ -27,6 +28,21 @@ from app.core.enums import ConsentChannel, ConsentPurpose
 from app.core.errors import SeoLeadError
 
 SITE_DIR = Path(__file__).resolve().parents[2] / "config" / "sites"
+
+
+def _site_dir() -> Path:
+    """The directory site configs load from — overridable for LOCAL QA only.
+
+    `SEOLEAD_SITE_CONFIG_DIR` lets a pre-publication crawl serve a COPY of the
+    config with `staging` flipped, without touching the tracked file and
+    without any code path that could flip a gate in place. The override is a
+    directory of files the operator wrote, read by a process the operator
+    started; production deployments do not set it. `load_site` is cached per
+    process, so an override is a property of the stack it launched, never a
+    mid-flight switch.
+    """
+    override = os.environ.get("SEOLEAD_SITE_CONFIG_DIR")
+    return Path(override) if override else SITE_DIR
 
 # Purposes the two historical checkbox keys have always meant. Inference exists
 # for THEM only, so existing site files stay valid; any other consent field must
@@ -636,13 +652,14 @@ def _load(path: Path) -> SiteConfig:
 @lru_cache(maxsize=32)
 def load_site(site_id: str) -> SiteConfig:
     key = (site_id or "").strip().lower()
-    path = SITE_DIR / f"{key}.yaml"
+    path = _site_dir() / f"{key}.yaml"
     if not key or not path.exists():
         raise InvalidSite(f"unknown site {site_id!r}")
     return _load(path)
 
 
 def available_sites() -> list[str]:
-    if not SITE_DIR.exists():
+    directory = _site_dir()
+    if not directory.exists():
         return []
-    return sorted(p.stem for p in SITE_DIR.glob("*.yaml"))
+    return sorted(p.stem for p in directory.glob("*.yaml"))
