@@ -23,6 +23,7 @@ def offer_view(offer: OfferConfig) -> dict:
     on the consuming side."""
     return {
         "version": offer.version,
+        "status": offer.status,
         "publishable": offer.publishable,
         "pending_legal_review": offer.pending_legal_review,
         "registered_numbers": offer.registered_numbers(),

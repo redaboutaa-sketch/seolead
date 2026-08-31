@@ -192,6 +192,8 @@ export interface SiteConfigDTO {
     organization_schema: boolean;
     sitemap_enabled: boolean;
     allow_indexing: boolean;
+    // Search-console ownership tokens — owner-supplied, null emits nothing.
+    verification?: { google: string | null; bing: string | null };
   };
   // The first-party offer registry, already publication-gated by the API:
   // `facts` only ever carries owner-validated AND legally-cleared values, so

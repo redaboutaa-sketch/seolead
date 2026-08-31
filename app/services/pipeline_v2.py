@@ -740,7 +740,16 @@ async def run_pipeline_v2(
 
     seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
                        layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
-                       findings=seo["findings"],
+                       # Same pattern as CLAIM_LEDGER above: the offer-registry
+                       # version this verdict was judged against rides along as
+                       # an informational entry, so the row stays traceable
+                       # after the registry moves on to a new version.
+                       findings=seo["findings"] + [
+                           {"code": "OFFER_REGISTRY",
+                            "message": (f"judged against offer registry "
+                                        f"{seo['offer_registry']['version']}"),
+                            "blocking": False, "detail": "",
+                            "offer_registry": seo["offer_registry"]}],
                        blocking_issues=seo["blocking_issues"],
                        revision=1, engine_version=qa_service.ENGINE_VERSION)
     session.add(seo_row)

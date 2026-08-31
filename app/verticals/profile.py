@@ -15,9 +15,9 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field
 
+from app.core.strict_yaml import strict_load
 from app.core.enums import ContentType, PHASE2_CONTENT_TYPES
 from app.core.errors import InvalidVertical
 
@@ -138,7 +138,7 @@ def load_profile(code: str) -> VerticalProfile:
     path = PROFILE_DIR / f"{code.lower()}.yaml"
     if not path.is_file():
         raise InvalidVertical(f"no vertical profile for code {code!r}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = strict_load(path.read_text(encoding="utf-8"))
     profile = VerticalProfile.model_validate(data)
     if profile.code != code:
         raise InvalidVertical(

@@ -2,14 +2,25 @@ import type { Metadata } from "next";
 
 import { IconCheck } from "@/components/home/Icons";
 import { LeadForm } from "@/components/LeadForm";
-import { getSiteConfig } from "@/lib/api";
+import Link from "next/link";
 
-export const metadata: Metadata = {
-  title: "Cadrer votre projet solaire",
-  description:
-    "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
-  robots: { index: false, follow: false },
-};
+import { getSiteConfig } from "@/lib/api";
+import { pageMetadata } from "@/lib/metadata";
+import { FINANCING_PATH, financingLandingVisible, localizedPath } from "@/lib/site";
+
+// Robots follow the site-wide gate, like /demande-etude: the declared route
+// table feeds the sitemap, and a hardcoded noindex would contradict it at
+// flip time.
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getSiteConfig();
+  return pageMetadata({
+    config,
+    title: "Cadrer votre projet solaire",
+    description:
+      "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
+    path: "/outils/estimation-solaire",
+  });
+}
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +75,20 @@ export default async function EstimationTool() {
               </li>
             ))}
           </ul>
+          {/* Lien naturel vers la landing financement — même porte que la
+              landing elle-même : jamais un lien vers une page qui 404. */}
+          {financingLandingVisible(config) ? (
+            <div className="notice">
+              <p>
+                <strong>Pas d&apos;épargne à mobiliser&nbsp;?</strong> Selon
+                votre situation, différentes solutions de financement peuvent
+                être étudiées.{" "}
+                <Link href={localizedPath(config, config.default_language, FINANCING_PATH)}>
+                  Ce que « sans apport » veut vraiment dire
+                </Link>
+              </p>
+            </div>
+          ) : null}
         </aside>
 
         <div>

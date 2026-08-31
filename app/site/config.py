@@ -15,17 +15,34 @@ refuses a configuration that claims otherwise.
 """
 from __future__ import annotations
 
+import os
 import re
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.strict_yaml import strict_load
 from app.core.enums import ConsentChannel, ConsentPurpose
 from app.core.errors import SeoLeadError
 
 SITE_DIR = Path(__file__).resolve().parents[2] / "config" / "sites"
+
+
+def _site_dir() -> Path:
+    """The directory site configs load from — overridable for LOCAL QA only.
+
+    `SEOLEAD_SITE_CONFIG_DIR` lets a pre-publication crawl serve a COPY of the
+    config with `staging` flipped, without touching the tracked file and
+    without any code path that could flip a gate in place. The override is a
+    directory of files the operator wrote, read by a process the operator
+    started; production deployments do not set it. `load_site` is cached per
+    process, so an override is a property of the stack it launched, never a
+    mid-flight switch.
+    """
+    override = os.environ.get("SEOLEAD_SITE_CONFIG_DIR")
+    return Path(override) if override else SITE_DIR
 
 # Purposes the two historical checkbox keys have always meant. Inference exists
 # for THEM only, so existing site files stay valid; any other consent field must
@@ -110,6 +127,13 @@ class SeoConfig(BaseModel):
     sitemap_enabled: bool = True
     # Even when a domain exists, indexing stays off until the owner opens the gate.
     allow_indexing: bool = False
+    # Search-console ownership tokens (Google `google-site-verification`, Bing
+    # `msvalidate.01`), supplied by the owner from each console — NEVER invented.
+    # Null emits nothing. Verification proves ownership of the domain; it does
+    # not index anything and is safe (and useful) to set before allow_indexing:
+    # the consoles then show the noindex state instead of guessing at it.
+    verification: dict[str, str | None] = Field(
+        default_factory=lambda: {"google": None, "bing": None})
 
 
 class OfferFact(BaseModel):
@@ -122,7 +146,9 @@ class OfferFact(BaseModel):
 
     `value: null` is a fact that exists as a slot but has not been supplied:
     « Ne mets PAS 150 uniquement parce que cela apparaît dans notre brief. »
-    A fact is usable only once it carries a value AND a validation date.
+    A fact is usable only once it carries a value AND a validation date — and
+    only inside its validity window when one is declared: a fee that expired
+    yesterday is not our offer today, whoever validated it last year.
     """
 
     id: str
@@ -133,10 +159,49 @@ class OfferFact(BaseModel):
     # When the owner validated THIS value. Null value + a date, or a value with
     # no date, are both unusable — the pairing is the fact.
     validated_at: str | None = None
+    # The window in which this value IS the offer (ISO dates, inclusive).
+    # Null bound = unbounded on that side. Outside the window the fact goes
+    # silent on its own — nobody has to remember to take it down.
+    valid_from: str | None = None
+    valid_until: str | None = None
+
+    @model_validator(mode="after")
+    def _check_window(self) -> "OfferFact":
+        bounds = [_offer_date(self, "valid_from"), _offer_date(self, "valid_until")]
+        if all(bounds) and bounds[1] < bounds[0]:
+            raise ValueError(
+                f"offer fact {self.id!r}: valid_until precedes valid_from — "
+                f"a window that ends before it starts describes nothing")
+        _offer_date(self, "validated_at")
+        return self
 
     @property
     def usable(self) -> bool:
-        return self.value is not None and bool(self.validated_at)
+        if self.value is None or not self.validated_at:
+            return False
+        today = date.today()
+        start = _offer_date(self, "valid_from")
+        end = _offer_date(self, "valid_until")
+        if start and today < start:
+            return False
+        if end and today > end:
+            return False
+        return True
+
+
+def _offer_date(fact, field: str) -> date | None:
+    """Parse an ISO date field, naming the fact and field on failure. The
+    strict loader hands dates over as the strings they were written as; this
+    is where they must actually be dates."""
+    raw = getattr(fact, field)
+    if raw is None:
+        return None
+    try:
+        return date.fromisoformat(str(raw))
+    except ValueError as exc:
+        raise ValueError(
+            f"offer fact {getattr(fact, 'id', '?')!r}: {field}={raw!r} is not "
+            f"an ISO date (YYYY-MM-DD)") from exc
 
 
 class OfferLegalConfig(BaseModel):
@@ -151,6 +216,35 @@ class OfferLegalConfig(BaseModel):
     mandatory_disclosures: list[str] = Field(default_factory=list)
 
 
+class OfferRevision(BaseModel):
+    """One superseded version of the offer, kept forever.
+
+    « 150 € devient 190 € » n'est jamais une réécriture : c'est une nouvelle
+    version, et l'ancienne descend ici avec sa date. A version that appears in
+    history may never be the current version again — the loader refuses the
+    file — which is what makes overwriting the past structurally impossible
+    rather than merely discouraged.
+    """
+
+    version: str
+    status: str                              # what it was when superseded
+    superseded_at: str                       # ISO date — required, no silent past
+    note: str | None = None                  # « frais de dossier 150→190 »
+
+    @model_validator(mode="after")
+    def _check(self) -> "OfferRevision":
+        if self.status not in ("draft", "validated", "retired"):
+            raise ValueError(f"offer.history[{self.version!r}]: status "
+                             f"{self.status!r} is not draft|validated|retired")
+        try:
+            date.fromisoformat(self.superseded_at)
+        except ValueError as exc:
+            raise ValueError(
+                f"offer.history[{self.version!r}]: superseded_at="
+                f"{self.superseded_at!r} is not an ISO date") from exc
+        return self
+
+
 class OfferConfig(BaseModel):
     """The versioned first-party offer registry — the single source of truth for
     what Mon Projet Solaire may say about its own offer.
@@ -160,12 +254,21 @@ class OfferConfig(BaseModel):
     reach a public page — whoever writes the value, the owner who validates it,
     and the lawyer who lifts the review — and the code path that could skip one
     of them does not exist.
+
+    Lifecycle: draft → validated → retired, versions moving one way. Changing
+    a validated value means minting a NEW version and appending the old one to
+    `history`; the validators refuse a current version that history already
+    carries, duplicate history versions, and a retired offer presenting itself
+    as publishable.
     """
 
     version: str = "offer-v0-empty"
-    status: str = "draft"                    # draft | validated
+    status: str = "draft"                    # draft | validated | retired
     pending_legal_review: bool = True
     owner_validated_at: str | None = None
+    # Superseded versions, append-only, newest last. Never edited, never
+    # emptied — the registry's memory of what was once claimed.
+    history: list[OfferRevision] = Field(default_factory=list)
     facts: list[OfferFact] = Field(default_factory=list)
     financing: dict = Field(default_factory=dict)      # provider, conditions[]
     eligibility: dict = Field(default_factory=dict)    # criteria[]
@@ -179,9 +282,9 @@ class OfferConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "OfferConfig":
-        if self.status not in ("draft", "validated"):
-            raise ValueError(f"offer.status must be draft or validated, "
-                             f"got {self.status!r}")
+        if self.status not in ("draft", "validated", "retired"):
+            raise ValueError(f"offer.status must be draft, validated or "
+                             f"retired, got {self.status!r}")
         if self.status == "validated" and not self.owner_validated_at:
             raise ValueError(
                 "offer.status is validated but owner_validated_at is empty: a "
@@ -190,6 +293,22 @@ class OfferConfig(BaseModel):
             raise ValueError(
                 "offer.legal.reviewed_at is set without a reviewer: a legal "
                 "review must name who made it")
+        past = [rev.version for rev in self.history]
+        if len(past) != len(set(past)):
+            raise ValueError(
+                "offer.history carries the same version twice: history is "
+                "append-only, one entry per superseded version")
+        if self.version in past:
+            raise ValueError(
+                f"offer.version {self.version!r} already appears in history: "
+                f"a superseded version may never come back as the current "
+                f"one — mint a new version instead of rewriting the past")
+        duplicate_facts = {f.id for f in self.facts
+                           if [g.id for g in self.facts].count(f.id) > 1}
+        if duplicate_facts:
+            raise ValueError(
+                f"offer.facts declares the same id twice: "
+                f"{sorted(duplicate_facts)} — one fact, one id, one value")
         return self
 
     @property
@@ -521,7 +640,7 @@ class SiteConfig(BaseModel):
 
 def _load(path: Path) -> SiteConfig:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = strict_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise InvalidSite(f"site config {path.name} is not valid YAML: {exc}") from exc
     try:
@@ -533,13 +652,14 @@ def _load(path: Path) -> SiteConfig:
 @lru_cache(maxsize=32)
 def load_site(site_id: str) -> SiteConfig:
     key = (site_id or "").strip().lower()
-    path = SITE_DIR / f"{key}.yaml"
+    path = _site_dir() / f"{key}.yaml"
     if not key or not path.exists():
         raise InvalidSite(f"unknown site {site_id!r}")
     return _load(path)
 
 
 def available_sites() -> list[str]:
-    if not SITE_DIR.exists():
+    directory = _site_dir()
+    if not directory.exists():
         return []
-    return sorted(p.stem for p in SITE_DIR.glob("*.yaml"))
+    return sorted(p.stem for p in directory.glob("*.yaml"))

@@ -215,20 +215,35 @@ _GUARANTEED_OUTCOME = re.compile(
 #   - « sans aide ni subside » is a statement about public support, not about
 #     our offer, and stays untouched.
 # Every edge above is pinned by a regression corpus of real ledger texts.
+# The typographic apostrophe survives `normalize_query`, so every pattern that
+# crosses one accepts both spellings — « s’autofinance » escaped the first
+# version of this regex for exactly that reason.
+_APO = r"[’']"
 _FINANCING_PROMISE = re.compile(
-    r"\bsans\s+(?:apport|avance|epargne|mise\s+de\s+fonds"
-    r"|rien\s+(?:avancer|payer|debourser)"
-    r"|(?:investissement|economies?|capital)\s+(?:initial|de\s+depart|prealable))"
-    r"|\b(?:0|zero)\s*(?:€|eur(?:os?)?\b)(?![\d.,]\d)"
-    r"|\bgratuit(?:e|s|es)?\b"
-    r"|\b(?:installe|pose|fourni|place)\w*\s+gratuitement\b"
-    r"|\bgratuitement\s+(?:installe|pose|fourni|place)\w*"
-    r"|\bs'autofinance\w*\b|\bautofinanc\w+\b"
-    r"|\bmensualite\w*\b\W+(?:\w+\W+){0,10}?econom\w+"
-    r"|\beconom\w+\W+(?:\w+\W+){0,10}?mensualite\w*"
-    r"|\b(?:couvr|compens)\w+\W+(?:\w+\W+){0,4}?mensualite\w*"
-    r"|\brembours\w+\s+par\s+les?\s+econom\w+"
-    r"|\bfrais\s+de\s+dossier\b",
+    rf"\bsans\s+(?:apport|avance|epargne|mise\s+de\s+fonds"
+    rf"|rien\s+(?:avancer|payer|debourser)"
+    rf"|(?:investissement|economies?|capital)\s+(?:initial|de\s+depart|prealable)"
+    rf"|sortir\s+d{_APO}\s*argent"
+    rf"|debourser)"
+    rf"|\baucun\w*\s+(?:apport|epargne|avance|investissement|economie\w*"
+    rf"|mise\s+de\s+fonds|capital)"
+    rf"|\bpas\s+besoin\s+d{_APO}\s*(?:economie\w*|epargne|apport|argent|capital)"
+    rf"|\b(?:0|zero)\s*(?:€|eur(?:os?)?\b)(?![\d.,]\d)"
+    rf"|\bzero\s+(?:investissement|apport|avance|epargne|frais)"
+    rf"|\bne\s+(?:vous\s+)?coute\w*\s+rien"
+    rf"|\bgratuit(?:e|s|es)?\b"
+    rf"|\b(?:installe|pose|fourni|place)\w*\s+gratuitement\b"
+    rf"|\bgratuitement\s+(?:installe|pose|fourni|place)\w*"
+    rf"|\bs{_APO}\s*autofinance\w*\b|\bautofinanc\w+\b"
+    rf"|\bse\s+(?:rembours|financ|pai|pay)\w+\s+tout\w*\s+seul\w*"
+    rf"|\bmensualite\w*\b\W+(?:\w+\W+){{0,10}}?econom\w+"
+    rf"|\beconom\w+\W+(?:\w+\W+){{0,10}}?mensualite\w*"
+    rf"|\b(?:couvr|compens)\w+\W+(?:\w+\W+){{0,4}}?mensualite\w*"
+    rf"|\b(?:rembours|financ|pay|pai)\w+\s+par\s+"
+    rf"(?:les?\s+|la\s+|votre\s+|vos\s+)?(?:econom\w+|factur\w+)"
+    rf"|\b(?:factur|econom)\w+\W+(?:\w+\W+){{0,2}}?(?:financ|rembours)\w+"
+    rf"\W+(?:\w+\W+){{0,3}}?(?:installation|panneaux|projet|systeme)"
+    rf"|\bfrais\s+de\s+dossier\b",
     re.IGNORECASE)
 
 # What separates a controlled, conditional formulation from a promise. « Selon
