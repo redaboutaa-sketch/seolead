@@ -273,7 +273,11 @@ async def stage_content(
         cta=brief.cta_strategy or {},
         qa_provenance=gate.as_dict(),
         canonical_path=_canonical_path(config, locale, slug),
-        noindex=not config.is_indexable,
+        # Forced on, whatever the site-wide gate says: a STAGED page is never
+        # public (the preview route is its only surface, and that one forces
+        # its own noindex too). Publication recomputes this from the site's
+        # indexability — that is where the flag becomes real.
+        noindex=True,
         staged_at=utcnow(),
     )
     session.add(snapshot)
