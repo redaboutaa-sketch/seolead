@@ -722,7 +722,9 @@ async def run_pipeline_v2(
                                             f"{attempts[-1]['reason']}"),
                                 "blocking": False, "detail": "",
                                 "attempts": attempts}],
-                           blocking_issues=factual["blocking_issues"])
+                           blocking_issues=factual["blocking_issues"],
+                           revision=1,
+                           engine_version=factual_qa_v2.ENGINE_VERSION)
     session.add(factual_row)
     await session.flush()
     result.qa_review_ids.append(factual_row.id)
@@ -733,7 +735,8 @@ async def run_pipeline_v2(
     seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
                        layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
                        findings=seo["findings"],
-                       blocking_issues=seo["blocking_issues"])
+                       blocking_issues=seo["blocking_issues"],
+                       revision=1, engine_version=qa_service.ENGINE_VERSION)
     session.add(seo_row)
     await session.flush()
     result.qa_review_ids.append(seo_row.id)

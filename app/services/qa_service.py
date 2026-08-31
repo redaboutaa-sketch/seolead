@@ -32,6 +32,9 @@ from app.verticals.profile import VerticalProfile
 
 logger = logging.getLogger(__name__)
 
+# See `factual_qa_v2.ENGINE_VERSION`.
+ENGINE_VERSION = "seo_qa_v2"
+
 _PLACEHOLDER_PATTERNS = (
     re.compile(r"lorem ipsum", re.I),
     re.compile(r"\bTODO\b"),
