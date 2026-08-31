@@ -66,10 +66,29 @@ def date_forensics(source) -> dict:
                     seen.append(hit)
             found[label] = seen[:5]
 
+    # ── The words around the date ────────────────────────────────────────────
+    # The probe of 2026-08-30 reported that cwape.be/node/151 — « Les tarifs
+    # prosumer 2024-2025 » — carries `01/01/2025` and `31/12/2025` and comes back
+    # UNDATED with no signal at all. Which lead-in phrase the page uses decides
+    # whether that is a gap in the patterns or a page that really states
+    # nothing, and the report could not say: it listed the dates and threw away
+    # their sentence. A hypothesis that cannot be checked from the output is a
+    # hypothesis the next probe pays for again.
+    contexts: list[str] = []
+    for hits in found.values():
+        for hit in hits:
+            index = text.find(hit)
+            if index < 0:
+                continue
+            window = " ".join(text[max(0, index - 60):index + len(hit) + 40].split())
+            if window not in contexts:
+                contexts.append(window)
+
     freshness = assess_freshness(text, published_at=source.published_at,
                                  retrieved_at=source.retrieved_at,
                                  url=source.url)
     return {
+        "date_contexts": contexts[:6],
         # The provider's own field. Null on every official page of the live run.
         "provider_published_at": (source.published_at.isoformat()
                                   if source.published_at else None),

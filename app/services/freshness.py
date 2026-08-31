@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import StrEnum
 
 from app.services.intent import normalize_query
@@ -27,6 +27,7 @@ from app.services.intent import normalize_query
 
 class FreshnessStatus(StrEnum):
     DATED_CURRENT = "DATED_CURRENT"        # carries a date, within validity
+    DATED_FUTURE = "DATED_FUTURE"          # carries a date, not yet in force
     DATED_EXPIRED = "DATED_EXPIRED"        # carries a date, validity has passed
     UNDATED_CURRENT = "UNDATED_CURRENT"    # no date, but presents as in force
     UNDATED = "UNDATED"                    # no date, no signal either way
@@ -39,13 +40,21 @@ class FreshnessStatus(StrEnum):
         `UNDATED_CURRENT` can, with a caveat — an official portal describing a
         scheme in the present tense is meaningfully different from a page with no
         date and no signal. `HISTORICAL` and `DATED_EXPIRED` never can.
+
+        Neither can `DATED_FUTURE`, and it is the newest of these because it is
+        the one a reader would get wrong. A regulator publishing the tariff that
+        takes effect next January is stating something true, dated and official
+        — and a page that repeated it in the present tense would be telling a
+        household this year's bill is next year's number.
         """
         return self in (FreshnessStatus.DATED_CURRENT,
                         FreshnessStatus.UNDATED_CURRENT)
 
     @property
     def is_dated(self) -> bool:
-        return self in (FreshnessStatus.DATED_CURRENT, FreshnessStatus.DATED_EXPIRED)
+        return self in (FreshnessStatus.DATED_CURRENT,
+                        FreshnessStatus.DATED_FUTURE,
+                        FreshnessStatus.DATED_EXPIRED)
 
 
 # Pages that announce themselves as no longer in force.
@@ -85,6 +94,70 @@ _EFFECTIVE_UNTIL = re.compile(
     r"(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+\w+\s+\d{4})",
     re.IGNORECASE)
 _YEAR = re.compile(r"\b(20\d{2})\b")
+
+# ── A validity period written as one range ───────────────────────────────────
+# Both patterns above need a lead-in preposition, and the form a regulator
+# actually uses has none of them. CWaPE's page « Les tarifs prosumer 2024-2025 »
+# carries `01/01/2025` and `31/12/2025` in its text and came back UNDATED with
+# not a single signal, because "du X au Y" matches neither "à partir du" nor
+# "jusqu'au". The page that names the tariff's period was the one the pipeline
+# called undated.
+_DATE = (r"\d{1,2}(?:er)?[/\-.]\d{1,2}[/\-.]\d{2,4}"
+         r"|\d{4}-\d{2}-\d{2}"
+         r"|\d{1,2}(?:er)?\s+\w+\s+\d{4}")
+_EFFECTIVE_RANGE = re.compile(
+    rf"\bdu\s+({_DATE})\s+(?:au|jusqu'au)\s+({_DATE})"
+    rf"|\bvan\s+({_DATE})\s+tot(?:\s+en\s+met)?\s+({_DATE})",
+    re.IGNORECASE)
+
+# ── Reading the dates the page states ────────────────────────────────────────
+# `effective_from` and `effective_until` are still KEPT as the raw strings the
+# page used — that promise does not change, and a reviewer still reads what was
+# written. But a string cannot be compared to today, and the comparison is the
+# whole point: a rule in force since January and a rule taking effect next
+# January are opposite facts written almost identically.
+#
+# So the formats a Belgian regulator actually uses are parsed, and nothing else.
+# An unparseable date falls through to the behaviour that existed before it —
+# guessing at "au printemps 2026" would be inventing the very thing this module
+# refuses to invent.
+_MONTHS = {
+    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11,
+    "decembre": 12,
+    "januari": 1, "februari": 2, "maart": 3, "mei": 5, "juni": 6, "juli": 7,
+    "augustus": 8, "oktober": 10, "december": 12,
+}
+_NUMERIC_DATE = re.compile(r"^(\d{1,2})(?:er)?[/\-.](\d{1,2})[/\-.](\d{2,4})$")
+_ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_LONG_DATE = re.compile(r"^(\d{1,2})(?:er)?\s+(\w+)\s+(\d{4})$")
+
+
+def as_date(raw: str | None) -> date | None:
+    """The date a page stated, when it stated one this module can read."""
+    if not raw:
+        return None
+    text = normalize_query(raw).strip()
+    try:
+        iso = _ISO_DATE.match(text)
+        if iso:
+            return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+        numeric = _NUMERIC_DATE.match(text)
+        if numeric:
+            day, month, year = (int(g) for g in numeric.groups())
+            if year < 100:
+                year += 2000
+            return date(year, month, day)
+        long_form = _LONG_DATE.match(text)
+        if long_form:
+            month = _MONTHS.get(long_form.group(2))
+            if month:
+                return date(int(long_form.group(3)), month,
+                            int(long_form.group(1)))
+    except ValueError:
+        # 31/02/2025 and its kind. A page can be wrong; we do not repair it.
+        return None
+    return None
 
 
 @dataclass(frozen=True)
@@ -205,6 +278,13 @@ def assess(text: str, *, published_at: datetime | None = None,
             break
     effective_from = _first(_EFFECTIVE_FROM, text)
     effective_until = _first(_EFFECTIVE_UNTIL, text)
+    # A range fills whichever end the lead-in patterns did not.
+    span = _EFFECTIVE_RANGE.search(text)
+    if span:
+        groups = [g for g in span.groups() if g]
+        if len(groups) == 2:
+            effective_from = effective_from or groups[0].strip()
+            effective_until = effective_until or groups[1].strip()
     url_year = url_path_year(url)
 
     if historical:
@@ -228,14 +308,46 @@ def assess(text: str, *, published_at: datetime | None = None,
             effective_until, signals,
             f"Page presents as no longer in force ({historical}).")
 
+    # ── What the page says about its own validity ────────────────────────────
+    # Read before anything else that could contradict it, because a page states
+    # its validity on purpose and everything below is inference.
+    today = now.date()
+    from_date, until_date = as_date(effective_from), as_date(effective_until)
+
     # An expired validity period is the same refusal, stated by the page itself.
-    if effective_until:
+    if until_date and until_date < today:
+        return FreshnessAssessment(
+            FreshnessStatus.DATED_EXPIRED, published_at, None, effective_from,
+            effective_until, signals, f"Stated validity ended {effective_until}.")
+    if effective_until and until_date is None:
+        # Unreadable end date: fall back to the year, as before.
         years = [int(y) for y in _YEAR.findall(effective_until)]
         if years and max(years) < now.year:
             return FreshnessAssessment(
                 FreshnessStatus.DATED_EXPIRED, published_at, None, effective_from,
                 effective_until, signals,
                 f"Stated validity ended {effective_until}.")
+
+    # A rule that has not started yet. This refuses BEFORE the currency marker
+    # below, and deliberately: a regulator announcing next January's tariff
+    # writes about it in the present tense, and reading that as today's number
+    # is exactly the mistake — the page is right and the claim would be false.
+    if from_date and from_date > today:
+        return FreshnessAssessment(
+            FreshnessStatus.DATED_FUTURE, published_at, None, effective_from,
+            effective_until, signals,
+            f"Stated to take effect on {effective_from}, which has not arrived. "
+            f"The page describes a rule to come, not the present one.")
+
+    # In force since a date it states, and not yet ended. The strongest thing a
+    # regulator's page can carry — and until now it was parsed, recorded in the
+    # signals, and then ignored by every branch of the verdict.
+    if from_date and from_date <= today:
+        return FreshnessAssessment(
+            FreshnessStatus.DATED_CURRENT, published_at, None, effective_from,
+            effective_until, signals,
+            f"In force since {effective_from}"
+            + (f", until {effective_until}." if effective_until else "."))
 
     if published_at or updated_raw:
         return FreshnessAssessment(
@@ -261,10 +373,15 @@ def assess(text: str, *, published_at: datetime | None = None,
 
     # An old URL year hardens nothing mechanically — UNDATED already cannot
     # support a present-tense claim — but it turns "we know nothing" into "this
-    # issued in 2019", which is what an operator needs to see. Deliberately NOT
-    # a new status: `FreshnessStatus` sits under a database CHECK constraint,
-    # and a value added without its migration is the drift that cost a
-    # production outage on 2026-08-30.
+    # issued in 2019", which is what an operator needs to see.
+    #
+    # This used to say a new status was impossible because `FreshnessStatus`
+    # sits under a database CHECK constraint. It does not. `freshness_verdict`
+    # is a plain `String(32)`; the constrained column is `freshness_requirement`,
+    # a different enum. `DATED_FUTURE` was added above with no migration, and
+    # this case was decided on a premise that was never true. Left as UNDATED
+    # for now because nothing depends on separating it — but if that changes,
+    # the reason not to is gone.
     if url_year:
         return FreshnessAssessment(
             FreshnessStatus.UNDATED, None, None, effective_from, effective_until,
