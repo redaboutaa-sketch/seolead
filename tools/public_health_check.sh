@@ -10,6 +10,20 @@ set -u
 BASE="${1:-https://monprojetsolaire.be}"
 FAIL=0
 
+# Après un `up -d --force-recreate`, Traefik ne route pas tant que le
+# conteneur web n'est pas passé `healthy` (~30 s) : tout répond 404 pendant
+# cette fenêtre. Mesuré le 2026-08-31 — la santé lancée trop tôt a crié FAIL
+# sur un site parfaitement sain. On attend donc le routeur avant de juger.
+tries=0
+until [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/robots.txt")" = "200" ]; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 12 ]; then
+    echo "AVERTISSEMENT: $BASE/robots.txt ne répond pas 200 après 60 s — le routeur est peut-être réellement en panne; les lignes ci-dessous jugent l'état actuel."
+    break
+  fi
+  sleep 5
+done
+
 check() { # path expected_code label
   code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$1")
   if [ "$code" = "$2" ]; then verdict="OK"; else verdict="FAIL"; FAIL=1; fi
