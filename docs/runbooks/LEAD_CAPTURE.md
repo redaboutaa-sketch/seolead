@@ -80,10 +80,17 @@ and a WHATSAPP row carrying the same answer, the same text and the same version.
 | consent_key | purpose | channel | text_version |
 |---|---|---|---|
 | `consent_processing` | PROCESSING | — | `solar-be-consent-v1.0-2026-08-17` |
-| `consent_followup_contact` | FOLLOWUP_CONTACT | PHONE | `solar-be-followup-contact-v1.0-2026-08-30` |
-| `consent_followup_contact` | FOLLOWUP_CONTACT | WHATSAPP | `solar-be-followup-contact-v1.0-2026-08-30` |
+| `consent_followup_contact:PHONE` | FOLLOWUP_CONTACT | PHONE | `solar-be-followup-contact-v1.0-2026-08-30` |
+| `consent_followup_contact:WHATSAPP` | FOLLOWUP_CONTACT | WHATSAPP | `solar-be-followup-contact-v1.0-2026-08-30` |
 | `consent_marketing` | MARKETING | WHATSAPP | `solar-be-marketing-whatsapp-v1.0-2026-08-30` |
 | `consent_partner_transfer` | PARTNER_TRANSFER | — | `solar-be-partner-transfer-v1.0-2026-08-30` |
+
+The two follow-up keys carry their channel as a suffix, and that is not
+decoration. `LeadConsent.consent_key` stores `case["key"]`, which for a
+multi-channel case is `field_key:CHANNEL` — the form field key alone would
+break the `(captured_lead_id, consent_key)` uniqueness the moment a case
+emits two rows. A checklist written from the field key instead reports two
+false misses; this one was.
 
 **PROCESSING carries a 17/08 version, and that is correct.** Its text was not
 touched by the validation of 2026-08-30 — the YAML says so in place — so it
@@ -94,6 +101,19 @@ been changed without anyone deciding to.
 An unticked box is a row with `granted = false`. A refusal is a fact with legal
 weight, and it is what lets an export say "marketing: not consented" instead of
 guessing. A case the form never offered has no row at all.
+
+### Verified once, on 2026-08-31
+
+Lead `6b062901`, submitted from `/demande-etude` at 09:14:31 UTC: one
+`captured_lead` in `PENDING_EXPORT`, five `lead_consent` rows, every purpose,
+channel and version as tabulated above — PROCESSING on the 17/08 text, the four
+others on the 30/08 ones. The legacy pair on `captured_lead` agrees with the
+per-case rows (`consent_version` 17/08, `consent_marketing` true), which is the
+guarantee export contract v1 rests on.
+
+All five answers were `granted = true`, so the recorded-refusal path — a case
+shown, declined, and written as a row rather than omitted — is covered by the
+test suite and has still never been exercised by a real visitor.
 
 ```sql
 SELECT c.consent_key, c.purpose, c.channel, c.granted, c.text_version,
