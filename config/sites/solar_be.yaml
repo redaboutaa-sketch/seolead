@@ -126,8 +126,11 @@ seo:
     # construction : publié dans le HTML de chaque page. Ne jamais le
     # retirer — Google re-vérifie périodiquement.
     google: "tMnffPZeT4Mc9jfbKIEMfy2BIm1lpW8f0pDLsds0Za8"
-    # Bing : import depuis Search Console (aucun jeton nécessaire).
-    bing: null
+    # Fourni par le propriétaire depuis Bing Webmaster Tools le 2026-08-31
+    # (méthode « Balise META HTML », name="msvalidate.01"). Public par
+    # construction, comme le jeton Google. Ne jamais le retirer après la
+    # vérification — Bing exige que la balise reste en place.
+    bing: "6ABF0F25FEA82FEA3D1171505A2C5D35"
 
 # ── Registre d'offre de première partie ─────────────────────────────────────
 # LA source de vérité pour ce que Mon Projet Solaire affirme de sa propre offre.
