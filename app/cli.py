@@ -43,7 +43,8 @@ from app.core.errors import SeoLeadError
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker
 from app.models import (Approval, CapturedLead, ContentBrief, ContentDraft,
-                        LeadAttribution, ProviderUsage, PublishedContent,
+                        LeadAttribution, LeadConsent, ProviderUsage,
+                        PublishedContent,
                         QAReview, ResearchPackage, SeedKeyword, SeoOpportunity,
                         Site, SerpQuestionRow, SerpResultRow, SerpSnapshotRow,
                         Vertical)
@@ -988,11 +989,26 @@ async def cmd_leads_report(args: argparse.Namespace) -> int:
         by_notification = (await session.execute(
             select(CapturedLead.notification_state, sa_func.count())
             .group_by(CapturedLead.notification_state))).all()
+        # SENT est sorti par le relais ; MANUAL_FOLLOWUP_DONE est sorti par un
+        # humain (`leads followup`). Tout le reste attend quelqu'un.
         needs_followup = (await session.execute(
             select(CapturedLead)
             .where((CapturedLead.notification_state.is_(None))
-                   | (CapturedLead.notification_state != "SENT"))
+                   | (CapturedLead.notification_state.notin_(
+                       ["SENT", "MANUAL_FOLLOWUP_DONE"])))
             .order_by(CapturedLead.created_at.desc()).limit(100))).scalars().all()
+    now = datetime.now(timezone.utc)
+
+    def _age_hours(created) -> float | None:
+        if created is None:
+            return None
+        # SQLite (QA) rend l'instant naïf, mais il EST en UTC : chaque
+        # écriture passe par `utcnow()` (created_column). PostgreSQL (prod)
+        # rend l'offset. Les deux se comparent donc au même « maintenant ».
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return round((now - created).total_seconds() / 3600, 1)
+
     _emit({
         "leads_by_state": {state: count for state, count in by_state},
         "notifications": {(state or "UNRECORDED"): count
@@ -1003,6 +1019,9 @@ async def cmd_leads_report(args: argparse.Namespace) -> int:
             "state": lead.state,
             "notification_state": lead.notification_state or "UNRECORDED",
             "notified_at": lead.notified_at,
+            # Le SLA en une colonne : depuis combien d'heures ce lead attend
+            # qu'un humain ou une machine fasse quelque chose.
+            "age_hours": _age_hours(lead.created_at),
         } for lead in needs_followup],
         "note": ("SENT = accepté par le relais SMTP, pas « lu ». UNRECORDED = "
                  "lead antérieur à la colonne (migration 0013) ou notification "
@@ -1047,6 +1066,118 @@ async def cmd_leads_list(args: argparse.Namespace) -> int:
                 "search_intent": attribution.search_intent,
             }} for lead, attribution in rows]
     _emit({"status": target or "ALL", "count": len(items), "leads": items})
+    return EXIT_OK
+
+
+async def _find_lead(session, raw_id: str):
+    """One lead, par UUID complet ou préfixe non ambigu.
+
+    Les rapports et les échanges opérateur citent souvent un préfixe court
+    (« 6b062901 ») ; exiger l'UUID complet ici ne ferait que provoquer les
+    erreurs de copier-coller déjà vues au go-live. Retourne le lead, ou la
+    liste des identifiants candidats (vide = introuvable, >1 = ambigu).
+    """
+    try:
+        lead = await session.get(CapturedLead, uuid.UUID(raw_id))
+        return lead if lead is not None else []
+    except ValueError:
+        pass
+    prefix = raw_id.strip().lower()
+    if len(prefix) < 4:  # un préfixe trop court matcherait n'importe quoi
+        return []
+    ids = (await session.execute(select(CapturedLead.id))).scalars().all()
+    matches = [i for i in ids if str(i).lower().startswith(prefix)]
+    if len(matches) == 1:
+        return await session.get(CapturedLead, matches[0])
+    return [str(m) for m in matches]
+
+
+async def cmd_leads_show(args: argparse.Namespace) -> int:
+    """UN lead, complet, pour un acte opérateur délibéré (rappel manuel).
+
+    `leads list` masque les coordonnées parce qu'on le lance machinalement ;
+    cette commande est son pendant explicite : elle affiche l'email et le
+    téléphone d'UN lead nommé, sur l'hôte, pour que l'opérateur puisse
+    rappeler. Sa sortie contient des données personnelles : elle ne va ni
+    dans Git, ni dans une PR, ni dans un rapport, ni dans un log partagé.
+    """
+    async with get_sessionmaker()() as session:
+        found = await _find_lead(session, args.lead_id)
+        if not isinstance(found, CapturedLead):
+            _emit({"status": "AMBIGUOUS" if found else "NOT_FOUND",
+                   "query": args.lead_id, "matches": found})
+            return EXIT_ERROR
+        lead = found
+        consents = (await session.execute(
+            select(LeadConsent)
+            .where(LeadConsent.captured_lead_id == lead.id)
+            .order_by(LeadConsent.consent_key))).scalars().all()
+        attribution = (await session.execute(
+            select(LeadAttribution)
+            .where(LeadAttribution.captured_lead_id == lead.id))
+        ).scalars().first()
+    _emit({
+        "lead_id": str(lead.id), "state": lead.state,
+        "conversion_type": lead.conversion_type,
+        "first_name": lead.first_name, "last_name": lead.last_name,
+        "email": lead.email, "phone": lead.phone,
+        "postcode": lead.postcode, "language": lead.language,
+        "created_at": lead.created_at,
+        "qualification": lead.qualification,
+        "consents": [{
+            "key": c.consent_key, "purpose": c.purpose, "channel": c.channel,
+            "granted": c.granted, "text_version": c.text_version,
+            "granted_at": c.granted_at,
+        } for c in consents],
+        "attribution": None if attribution is None else {
+            "landing_path": attribution.landing_path,
+            "page_path": attribution.page_path,
+        },
+        "notification_state": lead.notification_state or "UNRECORDED",
+        "notified_at": lead.notified_at,
+        "note": ("Données personnelles : usage opérateur uniquement — jamais "
+                 "dans Git, une PR, un rapport ou un log partagé."),
+    })
+    return EXIT_OK
+
+
+async def cmd_leads_followup(args: argparse.Namespace) -> int:
+    """Consigner qu'un HUMAIN a traité le lead (rappel manuel effectué).
+
+    Le rappel manuel est la sortie prévue pour les états FAILED / UNRECORDED :
+    une fois le contact réellement pris, ce marquage retire le lead de la
+    liste `needs_manual_followup` du report — sans quoi elle ne se vide
+    jamais et devient du bruit. `notification_state` passe à
+    MANUAL_FOLLOWUP_DONE ; `notified_at` reçoit l'instant du marquage si la
+    machine n'avait rien envoyé (c'est le moment où l'obligation « aucun
+    lead oublié » a été réellement satisfaite, par un humain). Qui et
+    pourquoi sont conservés sur le lead (clé réservée `_manual_followup`
+    de `qualification` — pas de migration pour un cas opérationnel simple).
+    """
+    async with get_sessionmaker()() as session:
+        found = await _find_lead(session, args.lead_id)
+        if not isinstance(found, CapturedLead):
+            _emit({"status": "AMBIGUOUS" if found else "NOT_FOUND",
+                   "query": args.lead_id, "matches": found})
+            return EXIT_ERROR
+        lead = found
+        previous = lead.notification_state or "UNRECORDED"
+        now = datetime.now(timezone.utc)
+        lead.notification_state = "MANUAL_FOLLOWUP_DONE"
+        if lead.notified_at is None:
+            lead.notified_at = now
+        # Réaffectation complète : muter le dict en place échappe au
+        # détecteur de changement de la colonne JSON.
+        lead.qualification = {**(lead.qualification or {}),
+                              "_manual_followup": {
+                                  "recorded_by": args.by,
+                                  "note": args.note,
+                                  "recorded_at": now.isoformat()}}
+        await session.commit()
+    _emit({"status": "RECORDED", "lead_id": str(lead.id),
+           "previous_notification_state": previous,
+           "notification_state": "MANUAL_FOLLOWUP_DONE",
+           "recorded_by": args.by})
     return EXIT_OK
 
 
@@ -1316,6 +1447,20 @@ def build_parser() -> argparse.ArgumentParser:
     leads_list = leads_sub.add_parser("list")
     leads_list.add_argument("--status", default="")
     leads_list.set_defaults(func=cmd_leads_list)
+    leads_show = leads_sub.add_parser(
+        "show", help="ONE lead in full, for a deliberate operator action")
+    leads_show.add_argument("lead_id",
+                            help="full UUID or unambiguous prefix")
+    leads_show.set_defaults(func=cmd_leads_show)
+    leads_followup = leads_sub.add_parser(
+        "followup", help="record that a human handled the lead manually")
+    leads_followup.add_argument("lead_id",
+                                help="full UUID or unambiguous prefix")
+    leads_followup.add_argument("--by", required=True,
+                                help="who made the manual contact")
+    leads_followup.add_argument("--note", default="",
+                                help="short operational note (no PII needed)")
+    leads_followup.set_defaults(func=cmd_leads_followup)
     leads_export = leads_sub.add_parser("export")
     leads_export.add_argument("--limit", default=50)
     leads_export.add_argument("--dry-run", action="store_true")
