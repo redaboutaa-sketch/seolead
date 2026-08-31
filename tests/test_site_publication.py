@@ -572,10 +572,12 @@ class TestSiteConfiguration:
         config = load_site("solar_be")
         assert config.brand_name == "Mon Projet Solaire"
         assert config.brand_name_is_placeholder is False
-        # Fournis par le propriétaire le 2026-08-30.
+        # Fournis par le propriétaire le 2026-08-30 ; téléphone corrigé le
+        # 2026-08-31 — le numéro communiqué à l'origine était erroné à la
+        # source, le propriétaire a confirmé celui-ci depuis le footer public.
         assert config.contact.company_name == "Beaver Data Group"
         assert config.contact.company_number == "935097675"
-        assert config.contact.phone == "+33650855704"
+        assert config.contact.phone == "+33659855704"
         assert config.contact.email == "reda.boutaa@gmail.com"
         assert config.contact.lead_destination_email == "reda.boutaa@gmail.com"
         # Le texte légal a été FOURNI et approuvé par le propriétaire le

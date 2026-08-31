@@ -54,8 +54,12 @@ locale_paths:
 
 contact:
   # Fournis par le propriétaire le 2026-08-30. Plus un placeholder.
+  # Téléphone corrigé le 2026-08-31 : le numéro communiqué le 2026-08-30
+  # était erroné à la source (« 50 » pour « 59 ») — le propriétaire l'a
+  # repéré sur le footer public et a confirmé le bon numéro, identique à
+  # organization.phone fourni le 2026-08-31.
   email: "reda.boutaa@gmail.com"
-  phone: "+33650855704"
+  phone: "+33659855704"
   address: "43 rue de Marquillies, 59000 Lille, France"
   company_name: "Beaver Data Group"
   company_number: "935097675"
