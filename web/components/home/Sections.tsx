@@ -100,7 +100,8 @@ export function Hero({ config, locale }: Ctx) {
           {financingLandingVisible(config) ? (
             <p className="hero__financing">
               Pas d&apos;épargne à mobiliser&nbsp;? Selon votre situation,
-              différentes solutions de financement peuvent être étudiées.{" "}
+              une installation avec batterie peut être mise à disposition
+              sans achat immédiat.{" "}
               <Link href={localizedPath(config, locale, FINANCING_PATH)}>
                 Découvrir les solutions sans apport
               </Link>
@@ -478,10 +479,10 @@ export const HOME_FAQ: {
   {
     question: "Faut-il disposer d'un apport pour installer des panneaux solaires ?",
     answer:
-      "Pas nécessairement. Selon votre situation et le montage de financement " +
-      "retenu, le projet peut être réalisé sans mobiliser votre épargne au " +
-      "départ — certains frais peuvent rester à votre charge, et ils vous " +
-      "sont confirmés avant tout engagement.",
+      "Pas nécessairement. Selon votre situation et la solution retenue, " +
+      "l'installation peut être mise à disposition sans acheter l'ensemble " +
+      "immédiatement — certains frais peuvent rester à votre charge, et ils " +
+      "vous sont confirmés avant tout engagement.",
     link: {
       path: "/panneaux-solaires-sans-apport",
       label: "Ce que « sans apport » veut vraiment dire",
@@ -491,10 +492,10 @@ export const HOME_FAQ: {
     question: "Une installation photovoltaïque peut-elle s'autofinancer ?",
     answer:
       "Elle peut s'en approcher, sans que ce soit garanti : si les économies " +
-      "d'électricité mensuelles atteignent la mensualité du financement, " +
-      "l'effort net devient faible ou nul. Cela dépend de votre production, " +
-      "de votre consommation, du prix de l'électricité et des conditions de " +
-      "financement — c'est ce que l'étude personnalisée chiffre.",
+      "d'électricité mensuelles atteignent le coût mensuel de la solution " +
+      "retenue, l'effort net devient faible ou nul. Cela dépend de votre " +
+      "production, de votre consommation, du prix de l'électricité et des " +
+      "conditions du contrat — c'est ce que l'étude personnalisée chiffre.",
     link: {
       path: "/panneaux-solaires-sans-apport",
       label: "Les conditions d'un autofinancement approché",

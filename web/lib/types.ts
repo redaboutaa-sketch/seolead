@@ -225,6 +225,11 @@ export interface OfferDTO {
 export interface OrganizationDTO {
   legal_name: string | null;
   bce_number: string | null;
+  // Generic company registration (the operator is French — SIREN); the API
+  // also computes registration_number = bce_number ?? company_number.
+  company_number: string | null;
+  registration_number: string | null;
+  activities: string[];
   address: {
     street: string | null;
     postal_code: string | null;

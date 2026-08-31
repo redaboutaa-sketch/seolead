@@ -49,9 +49,15 @@ export function organizationNode(config: SiteConfigDTO | null): Node | null {
   return {
     "@type": org.local_business_schema_ready ? "LocalBusiness" : "Organization",
     "@id": `${base}/#organization`,
+    // The OPERATOR'S identity: `name` is the brand the public sees,
+    // `legalName` + `identifier` are the entity behind it (Beaver Data Group,
+    // SIREN — `registration_number` covers BCE and SIREN alike). Nothing of
+    // the solution provider (SG Solution) belongs in this node: its legal
+    // identity was never supplied, and a name in copy does not license a
+    // fabricated entity in structured data.
     name: config.brand_name,
     legalName: org.legal_name,
-    identifier: org.bce_number,
+    identifier: org.registration_number ?? org.bce_number,
     url: base,
     ...(org.local_business_schema_ready
       ? {

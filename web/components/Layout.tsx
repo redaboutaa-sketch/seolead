@@ -173,6 +173,19 @@ export function Footer({
               sur des sources consultées plutôt que sur des moyennes annoncées
               sans origine.
             </p>
+            {/* L'opérateur, nommé sur chaque page dès que son identité est
+                fournie : la marque est un service, l'entité derrière a un nom
+                et un numéro — la distinction des entités est un invariant. */}
+            {config?.organization.legal_name ? (
+              <p className="site-footer__operator">
+                {brandName(config)} est un service exploité par{" "}
+                {config.organization.legal_name}
+                {config.organization.registration_number
+                  ? ` (n° ${config.organization.registration_number})`
+                  : ""}
+                .
+              </p>
+            ) : null}
           </div>
 
           {pages.length > 0 ? (
