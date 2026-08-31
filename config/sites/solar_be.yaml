@@ -101,10 +101,14 @@ seo:
   # nothing the site does not already say.
   # Enrichie le 2026-08-31 (P1.2) : l'axe accessibilité financière, au
   # conditionnel — « selon votre situation », jamais une promesse.
+  # Reformulée le 2026-08-31 (modèle SG Solution) : plus de « solutions de
+  # financement » — le contrat n'est pas qualifié juridiquement, la copie ne
+  # le qualifie pas non plus.
   default_meta_description: >-
     Photovoltaïque résidentiel en Belgique : décrivez votre projet en quelques
     questions et lisez des montants qui disent d'où ils viennent. Selon votre
-    situation, des solutions de financement peuvent être étudiées.
+    situation, une installation avec batterie peut être mise à disposition
+    sans achat immédiat.
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still

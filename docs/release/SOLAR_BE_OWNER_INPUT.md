@@ -1,93 +1,65 @@
-# SOLAR_BE — Données propriétaire requises avant publication
+# SOLAR_BE — Données propriétaire : fournies / restantes
 
-**Statut : À REMPLIR par le propriétaire.** Ce document est la liste exhaustive
-des données que le système attend du propriétaire. Aucune valeur n'a été
-inventée : chaque champ vide ci-dessous est vide dans la configuration
-(`config/sites/solar_be.yaml`), et le site est construit pour rester
-non-publiable tant que les champs marqués REQUIS ne sont pas fournis.
-Remplir ce document ne publie rien : les valeurs doivent ensuite être
-reportées dans la configuration, puis les portes du runbook
-(`SOLAR_BE_PUBLICATION_RUNBOOK.md`) franchies dans l'ordre.
+Version 2 (2026-08-31). La version 1 listait l'identité de l'opérateur comme
+blocker — elle est FOURNIE et intégrée. Ce document tient désormais deux
+registres : ce qui est acquis (ne plus le redemander), et ce qui bloque
+encore, qui concerne presque exclusivement **SG Solution**.
 
-Légende — **REQUIS** : la publication est bloquée sans lui. **OPTIONNEL** :
-le site fonctionne sans, la fonctionnalité correspondante reste silencieuse.
-**Public** : la valeur apparaîtra sur le site ou dans son balisage.
-**Valid. juridique** : la valeur doit passer par la revue juridique
-(`docs/legal/SOLAR_BE_FINANCING_REVIEW.md`) avant d'être servie.
+## 1. FOURNI — intégré à la configuration (ne plus demander)
 
-## 1. Identité de l'organisation (`organization:`)
-
-| Champ | Statut | Où c'est utilisé | Public | Valid. juridique | Valeur à fournir |
-|---|---|---|---|---|---|
-| `legal_name` | REQUIS pour le schéma Organization ; sans lui, aucun schéma n'est émis | JSON-LD Organization/LocalBusiness, cohérence des mentions | Oui | Non, mais voir Q10 du pack juridique (trois noms coexistent) | ______ |
-| `bce_number` | REQUIS pour le schéma Organization | JSON-LD `identifier`, mentions légales | Oui | Non | ______ |
-| `address.street` / `postal_code` / `city` | REQUIS pour LocalBusiness (le schéma local reste muet sans adresse complète) | JSON-LD LocalBusiness | Oui | Non | ______ |
-| `phone` **ou** `email` | REQUIS pour LocalBusiness (l'un des deux) | JSON-LD, page contact | Oui | Non | ______ |
-| `service_areas` | OPTIONNEL | JSON-LD `areaServed`, ciblage éditorial | Oui | Non | ______ |
-| `logo_path` | OPTIONNEL | JSON-LD `logo`, og:image | Oui | Non | ______ |
-| `installer_partner` | OPTIONNEL | Page « méthode », confiance | Oui | Oui si présenté comme partenaire contractuel | ______ |
-| `certifications` | OPTIONNEL | Réassurance (RESCert, etc.) — publiées seulement si vérifiables | Oui | Non | ______ |
-| `same_as` | OPTIONNEL | JSON-LD `sameAs` (profils officiels) | Oui | Non | ______ |
-
-**Décision propriétaire ouverte — les trois noms.** BEAVER DATA GROUP (responsable
-de traitement dans la politique de confidentialité), Mon Projet Solaire (marque
-du site), Solar Belgium (titre de la page confidentialité). Le schéma
-Organization ne sera émis qu'avec UN `legal_name` assumé ; la relation
-marque ↔ entité légale doit être énoncée quelque part de public (footer ou
-mentions). À trancher : ______
-
-## 2. Registre d'offre (`offer:`) — chaque fait, avec sa date
-
-Le registre est la SEULE source de ce que le site peut affirmer sur l'offre.
-Un fait sans valeur **et** sans date de validation n'existe pas pour le site ;
-la QA bloque tout chiffre d'offre qui n'y figure pas. « Ne mets PAS 150
-uniquement parce que cela apparaît dans notre brief. »
-
-| Fait (`facts[].id`) | Statut | Où c'est utilisé | Public | Valid. juridique | Valeur | validated_at | valid_from/valid_until |
-|---|---|---|---|---|---|---|---|
-| `application_fee_eur` | REQUIS si des frais de dossier existent ; sinon écrire explicitement 0 | Landing §4 (« frais de dossier de X € »), FAQ | Oui | **Oui** | ______ | ______ | ______ |
-| `upfront_payment_required` | REQUIS (true/false) | Cohérence du discours « sans apport » | Oui | **Oui** | ______ | ______ | ______ |
-| `financing_term_months` | OPTIONNEL (requis si l'exemple chiffré est publié) | Exemple chiffré | Oui | **Oui** | ______ | ______ | ______ |
-| `monthly_instalment_example_eur` | OPTIONNEL (requis si l'exemple chiffré est publié) | Exemple chiffré | Oui | **Oui** | ______ | ______ | ______ |
-| `financing.provider` | REQUIS pour la revue juridique (identité du partenaire financier) | Pack juridique Q1 ; publication du nom = décision distincte | À décider | **Oui** | ______ | — | — |
-| `worked_example` | OPTIONNEL — UNE installation réelle (production, mensualité, économie constatée), jamais générée | Landing §5 (formule remplie) | Oui | **Oui** | ______ | ______ | — |
-| `eligibility.criteria` | OPTIONNEL (la landing énonce déjà les critères génériques) | Landing §8 | Oui | Oui | ______ | — | — |
-| `geography.service_areas` | OPTIONNEL | Landing, JSON-LD | Oui | Non | ______ | — | — |
-
-Puis, dans l'ordre et sans sauter d'étape :
-
-1. `offer.version` : passer de `solar-be-offer-v0.1-draft` à une version
-   assumée (ex. `solar-be-offer-v1.0`).
-2. `offer.status: validated` + `owner_validated_at: <date ISO>` — l'acte
-   explicite du propriétaire.
-3. La revue juridique remplit `legal.reviewed_at`, `legal.reviewer`,
-   `legal.mandatory_disclosures` et lève `pending_legal_review` (voir pack
-   juridique). **Les deux verrous sont indépendants ; il faut les deux.**
-4. Tout changement ultérieur d'une valeur = NOUVELLE version + entrée dans
-   `history` (le chargeur refuse la réécriture silencieuse).
-
-## 3. SEO / consoles (`seo.verification:`)
-
-| Champ | Statut | Où c'est utilisé | Public | Valeur |
-|---|---|---|---|---|
-| `verification.google` | OPTIONNEL mais recommandé AVANT l'indexation (prouve la propriété, n'indexe rien) | balise `google-site-verification` | Oui (balise) | ______ |
-| `verification.bing` | OPTIONNEL | balise `msvalidate.01` | Oui (balise) | ______ |
-
-À copier depuis Google Search Console / Bing Webmaster Tools (méthode
-« balise HTML », valeur `content` uniquement). Jamais inventés.
-
-## 4. Textes légaux du site
-
-| Élément | Statut | Où | Valid. juridique |
+| Donnée | Valeur | Où c'est intégré | Statut |
 |---|---|---|---|
-| Conditions d'utilisation | REQUIS avant indexation de `/conditions` (la page affiche « texte légal en attente » et reste noindex en dur) | `/conditions` | Oui |
-| Mentions légales complètes (éditeur, siège, BCE, contact) | REQUIS avant publication | footer / page dédiée | Oui |
-| Politique cookies | OPTIONNEL tant qu'aucun cookie non essentiel n'existe (état actuel : aucun) | `legal.cookie_policy_path` (null) | Oui si ajoutée |
+| Opérateur — dénomination | Beaver Data Group | `organization.legal_name` | **SUPPLIED** |
+| Numéro d'entreprise | 935097675 (SIREN) | `organization.company_number` | **SUPPLIED** |
+| Adresse | 43 rue de Marquillies, 59000 Lille, FR | `organization.address` | **SUPPLIED** |
+| Email | reda.boutaa.seolead@gmail.com | `organization.email` | **SUPPLIED** |
+| Téléphone | +33659855704 | `organization.phone` | **SUPPLIED** |
+| Destination des leads | reda.boutaa.seolead@gmail.com | `organization.lead_destination_email` (lu par la couche de notification, jamais codé en dur) | **SUPPLIED** |
+| Rôle de l'opérateur | acquisition, SEO/Prospect 360, qualification, rendez-vous, transmission | `organization.activities` + landing « Qui fait quoi » + footer | **SUPPLIED** |
+| Mon Projet Solaire | marque/service exploité par Beaver Data Group (pas une entité) | footer, JSON-LD (name=marque, legalName=entité) | **SUPPLIED** |
+| Offre SG Solution — les faits | 25 ans, 0,27 €/kWh fixe annoncé, 150 € uniques, panneaux+batterie, pas de crédit bancaire classique requis, rachat −4 %/an annoncé, propriété au terme, éligibilité (tarif social/amiante/électricité), alternative sans tarif | registre `sg-solution-solar-25y-v0.1-draft`, tous datés 2026-08-31 | **SUPPLIED — non publiable tant que revue juridique + validation de statut manquent** |
+| Positionnement cible | panneaux + batterie, y compris difficultés d'accès au crédit / budget insuffisant | registre (owner_supplied_positioning) + pack juridique Q12 | **SUPPLIED — la formulation publique reste soumise au juriste** |
 
-## 5. Ce que le propriétaire n'a PAS à fournir
+Également acquis, à ne plus vérifier : déploiement RC1, migrations 0011/0012,
+vérification de production.
 
-- Les chiffres de production/économie « types » : le site refuse par
-  construction d'en afficher sans étude — ne pas en fournir de génériques.
-- Les jetons ou clés d'API : aucun secret ne va dans le dépôt.
-- Les textes de la landing : écrits, sous politique d'affirmations ; c'est la
-  revue juridique qui tranche leur maintien, pas une réécriture propriétaire.
+## 2. BLOCKERS RESTANTS — SG Solution (à fournir par le propriétaire)
+
+Sans ces éléments, la revue juridique ne peut pas conclure et les faits
+« fixe/garanti » resteront sans preuve contractuelle
+(`offer.evidence.contract_reference: null`).
+
+| # | Donnée | Utilisée pour | Statut |
+|---|---|---|---|
+| 1 | Dénomination légale exacte de SG Solution | mentions, consentement de transmission, JSON-LD éventuel | ______ |
+| 2 | Numéro d'entreprise (BCE ou équivalent) | idem | ______ |
+| 3 | Siège social | idem | ______ |
+| 4 | Site web, email public, téléphone public | « qui fait quoi », mentions | ______ |
+| 5 | Entité contractante avec le client final | pack juridique §1 | ______ |
+| 6 | Identité de l'installateur + certifications (RESCert le cas échéant) | landing, confiance — RIEN n'est publié d'ici là | ______ |
+| 7 | Rôle « fournisseur d'énergie » de SG Solution (statut/autorisations pour l'offre alternative) | pack juridique Q22 | ______ |
+| 8 | Propriétaire de l'installation PENDANT le contrat | qualification juridique | ______ |
+| 9 | Contrat type SG Solution | `evidence.contract_reference` — condition des formulations « fixe/garanti » | ______ |
+| 10 | Conditions générales | idem | ______ |
+| 11 | Formule contractuelle exacte du rachat (assiette, méthode, plancher, HT/TTC, date de calcul) | pack juridique Q19-20 — aucune projection n'est calculée sans elle | ______ |
+| 12 | Preuve contractuelle du 0,27 €/kWh et du caractère fixe 25 ans | pack juridique Q13-16 | ______ |
+| 13 | Preuve contractuelle du transfert de propriété au terme | pack juridique Q21 | ______ |
+| 14 | Tarif de l'offre alternative (si communication souhaitée) | aujourd'hui : `fallback_offer.tariff.amount: null`, AUCUN prix généré | ______ |
+
+## 3. Blockers restants — hors SG Solution
+
+| # | Donnée | Utilisée pour | Statut |
+|---|---|---|---|
+| 15 | Revue juridique du modèle réel (matrice L-1…L-20) | lever `pending_legal_review` — voir `docs/legal/SOLAR_BE_FINANCING_REVIEW.md` | ______ |
+| 16 | Décision propriétaire : approuver/rejeter `/prix-panneaux-solaires-belgique` révision 2 | premier contenu publié (portes déterministes PASS, approbation PENDING) | ______ |
+| 17 | Conditions d'utilisation du site | `/conditions` (placeholder noindex) | ______ |
+| 18 | Identifiants SMTP (SEOLEAD_SMTP_* dans .env de l'hôte) | livraison effective des notifications de leads — sans eux, chaque lead produit un WARNING « NOT delivered » dans les logs | ______ |
+| 19 | Jetons Search Console / Bing (`seo.verification.*`) | avant l'indexation, recommandé | ______ |
+| 20 | Titre « – Solar Belgium » de /confidentialite : à confirmer ou reformuler avec le juriste | cohérence des noms | ______ |
+
+## 4. Ce que le propriétaire n'a toujours PAS à fournir
+
+- Des chiffres « types » de production/économie : refusés par construction.
+- Des données de revenus/solvabilité des visiteurs : non collectées
+  (minimisation — aucun besoin à l'étape lead).
+- Des secrets dans le dépôt : jamais.

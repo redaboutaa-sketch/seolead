@@ -19,6 +19,18 @@ canonique, jamais une réponse concurrente. Vérifié sur l'état RC1 :
 | Que deviennent mes données ? | `/confidentialite` (politique v1.1) | FAQ accueil (courte, lie la politique) | Non |
 | Puis-je revenir sur mon consentement ? | FAQ accueil (réponse complète, sujet court) | Formulaire (cases + textes de consentement) | Non |
 
+**Ajouts SG Solution (2026-08-31)** — les questions d'entités, chacune avec
+UNE source canonique :
+
+| Question | Source canonique | Occurrences secondaires | Conflit ? |
+|---|---|---|---|
+| Qui exploite Mon Projet Solaire ? | Footer (toutes pages) : « service exploité par Beaver Data Group (n° 935097675) » | Landing « Qui fait quoi » ; JSON-LD Organization (legalName) | Non — même identité partout |
+| Quel est le rôle de Beaver Data Group ? | Landing « Qui fait quoi » : acquisition, qualification, consentements, rendez-vous, transmission — ni installateur, ni fournisseur, ni décisionnaire | `organization.activities` en config | Non |
+| Qui propose la solution énergétique ? | Landing « Qui fait quoi » : SG Solution | Étapes du parcours (landing) | Non |
+| Qui décide de l'éligibilité finale ? | Landing §4 (« La décision finale appartient à SG Solution ») + FAQ « Suis-je certain d'être accepté ? » | Aide du formulaire (préqualification) | Non — partout : SG Solution, après analyse |
+| Qui vérifie la faisabilité technique ? | Landing, étapes 5 (« SG Solution analyse le dossier et vérifie la faisabilité technique ») | — | Non |
+| Qui installe ? | **PERSONNE n'est nommé** — l'identité de l'installateur n'est pas fournie, donc aucune page ne la donne | — | Non (absence volontaire, blocker Owner Pack §2.6) |
+
 Discipline pour la suite : tout nouvel article qui toucherait une de ces
 questions répond en une phrase et lie la canonique — la QA `--explain` et la
 table ci-dessus servent de référence de duplication.
