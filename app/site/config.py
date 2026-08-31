@@ -15,6 +15,7 @@ refuses a configuration that claims otherwise.
 """
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -111,6 +112,168 @@ class SeoConfig(BaseModel):
     allow_indexing: bool = False
 
 
+class OfferFact(BaseModel):
+    """One first-party fact about OUR offer — a fee, a term, a condition's value.
+
+    First-party is the whole point of the type: this is what WE assert about our
+    own offer, as opposed to a `researched_fact`, which is what a retrieved page
+    asserts about the world. The research pipeline may never mint one of these —
+    the only writers are this configuration file and the owner who validates it.
+
+    `value: null` is a fact that exists as a slot but has not been supplied:
+    « Ne mets PAS 150 uniquement parce que cela apparaît dans notre brief. »
+    A fact is usable only once it carries a value AND a validation date.
+    """
+
+    id: str
+    label: str
+    value: str | int | float | bool | None = None
+    unit: str | None = None
+    provenance: str = "first_party"
+    # When the owner validated THIS value. Null value + a date, or a value with
+    # no date, are both unusable — the pairing is the fact.
+    validated_at: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        return self.value is not None and bool(self.validated_at)
+
+
+class OfferLegalConfig(BaseModel):
+    """The lawyer's half of the offer. Nothing here is generated."""
+
+    reviewed_at: str | None = None
+    reviewer: str | None = None
+    # Mentions the lawyer requires on any page describing the offer (consumer
+    # credit advertising carries mandatory wording in Belgium). Rendered
+    # verbatim when present; their absence while pending is what keeps the
+    # landing unpublishable.
+    mandatory_disclosures: list[str] = Field(default_factory=list)
+
+
+class OfferConfig(BaseModel):
+    """The versioned first-party offer registry — the single source of truth for
+    what Mon Projet Solaire may say about its own offer.
+
+    Fail-closed from birth: `status: draft` + `pending_legal_review: true` and
+    every fact valueless. Three independent people must act before a figure can
+    reach a public page — whoever writes the value, the owner who validates it,
+    and the lawyer who lifts the review — and the code path that could skip one
+    of them does not exist.
+    """
+
+    version: str = "offer-v0-empty"
+    status: str = "draft"                    # draft | validated
+    pending_legal_review: bool = True
+    owner_validated_at: str | None = None
+    facts: list[OfferFact] = Field(default_factory=list)
+    financing: dict = Field(default_factory=dict)      # provider, conditions[]
+    eligibility: dict = Field(default_factory=dict)    # criteria[]
+    geography: dict = Field(default_factory=dict)      # service_areas[]
+    guarantees: list[str] = Field(default_factory=list)
+    restrictions: list[str] = Field(default_factory=list)
+    # The realistic worked example (production, instalment, saving) — supplied
+    # by the owner from a real case, NEVER generated. Null until then.
+    worked_example: dict | None = None
+    legal: OfferLegalConfig = Field(default_factory=OfferLegalConfig)
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> "OfferConfig":
+        if self.status not in ("draft", "validated"):
+            raise ValueError(f"offer.status must be draft or validated, "
+                             f"got {self.status!r}")
+        if self.status == "validated" and not self.owner_validated_at:
+            raise ValueError(
+                "offer.status is validated but owner_validated_at is empty: a "
+                "validation without a date is a validation nobody made")
+        if self.legal.reviewed_at and not self.legal.reviewer:
+            raise ValueError(
+                "offer.legal.reviewed_at is set without a reviewer: a legal "
+                "review must name who made it")
+        return self
+
+    @property
+    def legally_reviewed(self) -> bool:
+        return not self.pending_legal_review and bool(self.legal.reviewed_at)
+
+    @property
+    def publishable(self) -> bool:
+        """Whether offer facts may appear on a PUBLIC page.
+
+        Owner validation AND legal review, independently. Staging may display
+        the structure earlier; publication may not.
+        """
+        return (self.status == "validated"
+                and bool(self.owner_validated_at)
+                and self.legally_reviewed)
+
+    @property
+    def usable_facts(self) -> list[OfferFact]:
+        """Facts a page may render — and only when the offer is publishable."""
+        if not self.publishable:
+            return []
+        return [f for f in self.facts if f.usable]
+
+    def registered_numbers(self) -> set[str]:
+        """Digit-strings of every usable fact value, for the QA guard.
+
+        Empty while the offer is not publishable — which makes the guard
+        fail-closed: with no registry to check against, ANY figure presented as
+        our offer is an invention.
+        """
+        numbers: set[str] = set()
+        for fact in self.usable_facts:
+            digits = re.sub(r"\D", "", str(fact.value))
+            if digits:
+                numbers.add(digits)
+        return numbers
+
+
+class OrganizationAddress(BaseModel):
+    street: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    country: str = "BE"
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.street and self.postal_code and self.city)
+
+
+class OrganizationConfig(BaseModel):
+    """The identity data an Organization/LocalBusiness schema would assert.
+
+    Every field starts null because none of it may be invented: the banner still
+    says « Marque et coordonnées à confirmer », and three names currently
+    coexist (BEAVER DATA GROUP, Mon Projet Solaire, Solar Belgium). Structured
+    data that asserts things nobody supplied is fabrication with a schema — the
+    readiness predicates below are what keeps that sentence true mechanically.
+    """
+
+    legal_name: str | None = None
+    bce_number: str | None = None
+    address: OrganizationAddress = Field(default_factory=OrganizationAddress)
+    phone: str | None = None
+    email: str | None = None
+    service_areas: list[str] = Field(default_factory=list)
+    logo_path: str | None = None
+    installer_partner: str | None = None
+    certifications: list[str] = Field(default_factory=list)
+    same_as: list[str] = Field(default_factory=list)
+
+    @property
+    def organization_schema_ready(self) -> bool:
+        """The minimum an `Organization` node may honestly assert: who, legally,
+        and under what registration. A brand name alone names nobody."""
+        return bool(self.legal_name and self.bce_number)
+
+    @property
+    def local_business_schema_ready(self) -> bool:
+        """`LocalBusiness` also claims a place and a way to reach it."""
+        return (self.organization_schema_ready and self.address.complete
+                and bool(self.phone or self.email))
+
+
 class AnalyticsConfig(BaseModel):
     """First-party only in Phase 4. No vendor tag is configured or emitted."""
 
@@ -135,6 +298,8 @@ class SiteConfig(BaseModel):
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     conversion: ConversionConfig
     seo: SeoConfig = Field(default_factory=SeoConfig)
+    offer: OfferConfig = Field(default_factory=OfferConfig)
+    organization: OrganizationConfig = Field(default_factory=OrganizationConfig)
 
     # Route definitions the site may link to. A link target absent from here is a
     # 404 waiting to happen, so the renderer refuses to emit it.
@@ -227,6 +392,26 @@ class SiteConfig(BaseModel):
                         f"pending_legal_review and the site is not staging — "
                         f"a non-validated consent text must never collect "
                         f"real consent, in any supported locale")
+        return self
+
+    @model_validator(mode="after")
+    def _check_option_values(self) -> "SiteConfig":
+        """No form option may carry a boolean value.
+
+        YAML 1.1 reads `value: YES` as `true`, and the first real lead stored
+        `battery_interest: true` because of exactly that. A choice value is an
+        enum token the API, the analytics and a future export all read as a
+        string; a boolean that happens to round-trip is a corruption with a
+        delay on it.
+        """
+        for field in self.conversion.fields:
+            for option in field.get("options") or []:
+                if isinstance(option.get("value"), bool):
+                    raise ValueError(
+                        f"field {field.get('key')!r}: option value "
+                        f"{option.get('value')!r} is a boolean — quote it in "
+                        f"the YAML (\"YES\"/\"NO\"), YAML 1.1 reads the bare "
+                        f"word as a bool")
         return self
 
     @model_validator(mode="after")

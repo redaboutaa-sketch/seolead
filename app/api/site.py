@@ -137,6 +137,35 @@ async def get_site_config(site_id: str) -> dict:
         "legal": config.legal.model_dump(),
         "conversion": config.conversion.model_dump(),
         "seo": config.seo.model_dump(),
+        # The first-party offer, publication-gated at the source: `facts` only
+        # ever carries values the owner validated AND the lawyer cleared
+        # (`usable_facts` is empty otherwise), so the renderer cannot show an
+        # unvalidated figure even by mistake. The flags travel so the landing
+        # can hide itself and the sitemap can exclude it.
+        "offer": {
+            "version": config.offer.version,
+            "status": config.offer.status,
+            "pending_legal_review": config.offer.pending_legal_review,
+            "publishable": config.offer.publishable,
+            "facts": [
+                {"id": f.id, "label": f.label, "value": f.value, "unit": f.unit}
+                for f in config.offer.usable_facts
+            ],
+            "financing": config.offer.financing,
+            "eligibility": config.offer.eligibility,
+            "geography": config.offer.geography,
+            "mandatory_disclosures": config.offer.legal.mandatory_disclosures,
+        },
+        # Identity for structured data. The readiness flags are computed here —
+        # the renderer emits Organization/LocalBusiness only when they are true,
+        # so a half-filled block can never become a half-true schema.
+        "organization": {
+            **config.organization.model_dump(),
+            "organization_schema_ready":
+                config.organization.organization_schema_ready,
+            "local_business_schema_ready":
+                config.organization.local_business_schema_ready,
+        },
         "routes": config.routes,
     }
 

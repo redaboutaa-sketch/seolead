@@ -27,6 +27,7 @@ from typing import Iterable
 from app.core.enums import QAStatus
 from app.core.errors import SeoLeadError
 from app.providers.llm.base import LLMCapability, LLMProvider, LLMRequest
+from app.services import claim_policy
 from app.services.intent import normalize_query
 from app.verticals.profile import VerticalProfile
 
@@ -414,11 +415,83 @@ async def run_llm_qa(
 # Its additions are advisory unless they indicate the page answers a different
 # question than the one it targets.
 
+# ── Financing promises and offer figures ────────────────────────────────────
+# Two failures, two findings, found by the audit of 2026-08-31:
+#
+# UNCONDITIONAL_FINANCING_PROMISE — « L'installation s'autofinance. » The
+# subject is not banned; the promissive, condition-free form of it is. « Selon
+# le financement, …, les économies peuvent contribuer à compenser tout ou
+# partie de la mensualité » carries its conditions and passes this check (it
+# still answers to the claim ledger like any other sentence).
+#
+# UNREGISTERED_OFFER_FACT — « Les frais de dossier sont de 150 €. » A figure
+# presented as OUR offer must exist, validated, in the first-party offer
+# registry. The research pipeline can never establish our own offer, so with
+# no registry — or a registry not yet publishable — ANY such figure is an
+# invention, and the guard blocks on principle rather than on comparison.
+_OFFER_SENTENCE = re.compile(
+    r"frais\s+de\s+dossier|acompte|\bapport\b"
+    r"|(?:notre|nos|chez\s+nous|proposons)\W+(?:\w+\W+){0,6}?mensualite"
+    r"|mensualite\W+(?:\w+\W+){0,6}?(?:notre|nos|chez\s+nous|proposons)",
+    re.IGNORECASE)
+_SENTENCE_SPLIT_QA = re.compile(r"(?<=[.!?])\s+|\n+")
+# `_NUMBER_PATTERN` above deliberately ignores figures under four digits (page
+# counts, years of warranty). Offer figures live exactly there — 150 € of fees,
+# 240 months of term — so the offer check reads its own pattern.
+_OFFER_NUMBER = re.compile(r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,})")
+
+
+def _financing_findings(body: str, offer: dict | None) -> list[dict]:
+    findings: list[dict] = []
+    registered = set((offer or {}).get("registered_numbers") or set())
+    version = (offer or {}).get("version") or "absent"
+
+    for sentence in (s.strip() for s in _SENTENCE_SPLIT_QA.split(body)):
+        if not sentence:
+            continue
+
+        # The registry is consulted FIRST, because a validated offer fact
+        # stated plainly is not a promise: « Les frais de dossier sont de
+        # 150 € » with 150 validated in the registry is the page doing its
+        # job. The same sentence with no registry behind it is an invention,
+        # and gets the finding that names the actual defect.
+        numbers = {_digits(m.group(1))
+                   for m in _OFFER_NUMBER.finditer(sentence)}
+        numbers.discard("")
+        if numbers and _OFFER_SENTENCE.search(normalize_query(sentence)):
+            strays = numbers - registered
+            if strays:
+                findings.append(_finding(
+                    "UNREGISTERED_OFFER_FACT",
+                    f"The draft states a figure as our own offer that the "
+                    f"first-party offer registry ({version}) does not carry "
+                    f"as a validated fact. Research cannot establish our "
+                    f"offer; only the registry can, and it does not.",
+                    blocking=True, detail=sentence[:240]))
+            continue
+
+        if claim_policy.is_unconditional_financing_promise(sentence):
+            findings.append(_finding(
+                "UNCONDITIONAL_FINANCING_PROMISE",
+                "The draft makes a financing-offer promise with no condition "
+                "attached. The subject is allowed; the unconditional form of "
+                "it is not — no offer is unconditional, and a page saying so "
+                "is wrong before it is checked.",
+                blocking=True, detail=sentence[:240]))
+    return findings
+
+
 def run_seo_qa_v2(
     draft: dict, brief: dict, package: dict, profile: VerticalProfile,
-    *, existing_titles: Iterable[str] = (),
+    *, existing_titles: Iterable[str] = (), offer: dict | None = None,
 ) -> dict:
-    """Phase 2 checks, plus SERP-aware coverage and fit. Actionable findings."""
+    """Phase 2 checks, plus SERP-aware coverage and fit. Actionable findings.
+
+    `offer` is the first-party offer registry view (`app.site.offer.offer_view`)
+    for the vertical's site: which figures a draft may present as OUR offer.
+    None is treated exactly like an empty registry — fail-closed — because a
+    missing registry must never read as permission.
+    """
     base = run_deterministic_qa(draft, brief, package, profile,
                                 existing_titles=existing_titles)
     findings = list(base["findings"])
@@ -427,6 +500,8 @@ def run_seo_qa_v2(
     title = (draft.get("title") or "").strip()
     if not body:
         return base
+
+    findings.extend(_financing_findings(body, offer))
 
     normalized_body = normalize_query(body)
     normalized_title = normalize_query(title)
