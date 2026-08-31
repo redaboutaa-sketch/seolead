@@ -44,6 +44,7 @@ from app.services import (brief_service, draft_retry, draft_service,
                           package_builder_v3, qa_service, serp_analysis)
 from app.services.intent import classify_intent, normalize_query
 from app.services.provider_usage import JobBudget, UsageRecorder
+from app.site.offer import offer_for_vertical
 from app.services.relevance import (RelevanceDecision, RelevanceStatus,
                                     query_that_fetched, score_source,
                                     semantic_review)
@@ -649,6 +650,10 @@ async def run_pipeline_v2(
     # retried and why.
     existing_titles = await title_registry.competing_titles_for_keyword(
         session, keyword.id)
+    # The first-party offer registry of this vertical's site: which figures a
+    # draft may present as OUR offer. None reads as an empty registry —
+    # fail-closed — never as permission.
+    offer = offer_for_vertical(vertical.code)
     attempts: list[dict] = []
     previous_findings: list[dict] | None = None
     draft_payload = llm_response = factual = seo = None
@@ -675,7 +680,8 @@ async def run_pipeline_v2(
 
         factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
         seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload,
-                                       profile, existing_titles=existing_titles)
+                                       profile, existing_titles=existing_titles,
+                                       offer=offer)
         blocking_now = factual["blocking_issues"] + seo["blocking_issues"]
         decision = draft_retry.decide(blocking_now, attempt=attempt)
         attempts.append({**decision.as_dict(),
@@ -734,7 +740,16 @@ async def run_pipeline_v2(
 
     seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
                        layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
-                       findings=seo["findings"],
+                       # Same pattern as CLAIM_LEDGER above: the offer-registry
+                       # version this verdict was judged against rides along as
+                       # an informational entry, so the row stays traceable
+                       # after the registry moves on to a new version.
+                       findings=seo["findings"] + [
+                           {"code": "OFFER_REGISTRY",
+                            "message": (f"judged against offer registry "
+                                        f"{seo['offer_registry']['version']}"),
+                            "blocking": False, "detail": "",
+                            "offer_registry": seo["offer_registry"]}],
                        blocking_issues=seo["blocking_issues"],
                        revision=1, engine_version=qa_service.ENGINE_VERSION)
     session.add(seo_row)

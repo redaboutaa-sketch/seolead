@@ -90,6 +90,13 @@ class TestSiteConfigEndpoint:
                               headers={"X-Internal-Key": KEY})
         assert response.status_code == 404
 
+    def test_verification_tokens_are_exposed_and_null_until_supplied(self, client):
+        """Les jetons Search Console voyagent avec la config SEO ; null tant
+        que le propriétaire n'a rien collé — rien n'est jamais inventé ici."""
+        body = client.get("/site/v1/sites/solar_be",
+                          headers={"X-Internal-Key": KEY}).json()
+        assert body["seo"]["verification"] == {"google": None, "bing": None}
+
 
 class TestPreviewToken:
     def test_preview_needs_its_own_second_secret(self, client):

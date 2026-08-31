@@ -1,11 +1,24 @@
 import type { Metadata } from "next";
 
 import { getSiteConfig } from "@/lib/api";
+import { pageMetadata } from "@/lib/metadata";
 
-export const metadata: Metadata = {
-  title: "Protection de vos données personnelles – Solar Belgium",
-  robots: { index: false, follow: false },
-};
+// The title keeps the wording of the owner-approved policy (including its
+// « Solar Belgium » naming — the three-name question is an open owner
+// decision, not the renderer's to settle). The description states what the
+// page contains without adding any legal assertion of its own.
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getSiteConfig();
+  return pageMetadata({
+    config,
+    title: "Protection de vos données personnelles – Solar Belgium",
+    description:
+      "Politique de confidentialité : quelles données le formulaire " +
+      "d'estimation collecte, dans quel but, combien de temps elles sont " +
+      "conservées et comment exercer vos droits.",
+    path: "/confidentialite",
+  });
+}
 
 /**
  * Owner-approved text, version `solar-be-privacy-v1.1-2026-08-30`.

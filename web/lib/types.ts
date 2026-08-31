@@ -94,6 +94,7 @@ export interface PublishedContentDTO {
   };
   version: number;
   state: string;
+  published_at: string | null;
   updated_at: string | null;
   preview?: boolean;
 }
@@ -191,8 +192,54 @@ export interface SiteConfigDTO {
     organization_schema: boolean;
     sitemap_enabled: boolean;
     allow_indexing: boolean;
+    // Search-console ownership tokens — owner-supplied, null emits nothing.
+    verification?: { google: string | null; bing: string | null };
   };
+  // The first-party offer registry, already publication-gated by the API:
+  // `facts` only ever carries owner-validated AND legally-cleared values, so
+  // the renderer cannot show an unvalidated figure even by mistake.
+  offer: OfferDTO;
+  organization: OrganizationDTO;
   routes: { path: string; type: string; locales: string[] }[];
+}
+
+export interface OfferFactDTO {
+  id: string;
+  label: string;
+  value: string | number | boolean | null;
+  unit: string | null;
+}
+
+export interface OfferDTO {
+  version: string;
+  status: string;
+  pending_legal_review: boolean;
+  publishable: boolean;
+  facts: OfferFactDTO[];
+  financing: { provider?: string | null; conditions?: string[] };
+  eligibility: { criteria?: string[] };
+  geography: { service_areas?: string[] };
+  mandatory_disclosures: string[];
+}
+
+export interface OrganizationDTO {
+  legal_name: string | null;
+  bce_number: string | null;
+  address: {
+    street: string | null;
+    postal_code: string | null;
+    city: string | null;
+    country: string;
+  };
+  phone: string | null;
+  email: string | null;
+  service_areas: string[];
+  logo_path: string | null;
+  installer_partner: string | null;
+  certifications: string[];
+  same_as: string[];
+  organization_schema_ready: boolean;
+  local_business_schema_ready: boolean;
 }
 
 export interface LeadPayload {

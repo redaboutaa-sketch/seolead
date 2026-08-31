@@ -99,14 +99,111 @@ seo:
   #
   # Derived from copy already on the page rather than written fresh: it asserts
   # nothing the site does not already say.
+  # Enrichie le 2026-08-31 (P1.2) : l'axe accessibilité financière, au
+  # conditionnel — « selon votre situation », jamais une promesse.
   default_meta_description: >-
     Photovoltaïque résidentiel en Belgique : décrivez votre projet en quelques
-    questions, et lisez des montants qui disent d'où ils viennent.
+    questions et lisez des montants qui disent d'où ils viennent. Selon votre
+    situation, des solutions de financement peuvent être étudiées.
   organization_schema: false      # no real organisation data supplied yet
   sitemap_enabled: true
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
   # requires `staging: false` as well. Owner decision only.
   allow_indexing: false
+  # Jetons de vérification Search Console / Bing Webmaster — fournis par le
+  # propriétaire depuis chaque console, JAMAIS inventés. Null n'émet rien.
+  # Poser le jeton avant allow_indexing est sûr et utile : la console prouve
+  # la propriété et montre l'état noindex au lieu de le deviner.
+  verification:
+    google: null
+    bing: null
+
+# ── Registre d'offre de première partie ─────────────────────────────────────
+# LA source de vérité pour ce que Mon Projet Solaire affirme de sa propre offre.
+# Chaque valeur est null TANT QUE le propriétaire ne l'a pas fournie ET validée :
+# « 150 € » n'y figure pas parce qu'un brief le mentionne — il y entrera avec
+# une date de validation, ou n'y entrera pas. La garde QA refuse tout chiffre
+# d'offre absent d'ici, et la landing financement reste non publiable tant que
+# pending_legal_review est vrai (publicité pour un crédit à la consommation :
+# mentions obligatoires et statut à faire valider — voir
+# docs/seo/AUDIT_SEO_AEO_GEO_2026-08-31.md §3).
+offer:
+  version: "solar-be-offer-v0.1-draft"
+  status: draft            # draft | validated | retired
+  pending_legal_review: true
+  owner_validated_at: null
+  # Versions remplacées, jamais réécrites : « 150 € devient 190 € » = nouvelle
+  # version ci-dessus, ancienne version ajoutée ICI avec sa date. Le chargeur
+  # refuse un fichier dont la version courante figure déjà dans l'historique.
+  history: []
+  # valid_from / valid_until (dates ISO, incluses) : la fenêtre pendant
+  # laquelle la valeur EST l'offre. Hors fenêtre, le fait se tait tout seul.
+  facts:
+    - id: application_fee_eur
+      label: "Frais de dossier (€)"
+      value: null
+      unit: EUR
+      validated_at: null
+      valid_from: null
+      valid_until: null
+    - id: upfront_payment_required
+      label: "Apport initial exigé"
+      value: null
+      unit: null
+      validated_at: null
+      valid_from: null
+      valid_until: null
+    - id: financing_term_months
+      label: "Durée de financement (mois)"
+      value: null
+      unit: MONTHS
+      validated_at: null
+      valid_from: null
+      valid_until: null
+    - id: monthly_instalment_example_eur
+      label: "Mensualité de l'exemple validé (€)"
+      value: null
+      unit: EUR
+      validated_at: null
+      valid_from: null
+      valid_until: null
+  financing:
+    provider: null          # identité du partenaire financier — décision propriétaire
+    conditions: []
+  eligibility:
+    criteria: []
+  geography:
+    service_areas: []
+  guarantees: []
+  restrictions: []
+  # Exemple chiffré réaliste : UNE installation réelle, fournie par le
+  # propriétaire (production, mensualité, économie constatée). Jamais généré.
+  worked_example: null
+  legal:
+    reviewed_at: null
+    reviewer: null
+    mandatory_disclosures: []
+
+# ── Identité de l'organisation ───────────────────────────────────────────────
+# Rien n'est inventé : tant que legal_name + n° BCE manquent, aucun schéma
+# Organization n'est émis ; LocalBusiness exige en plus l'adresse complète et
+# un moyen de contact. Trois noms coexistent aujourd'hui (BEAVER DATA GROUP /
+# Mon Projet Solaire / Solar Belgium) — trancher est une décision propriétaire.
+organization:
+  legal_name: null
+  bce_number: null
+  address:
+    street: null
+    postal_code: null
+    city: null
+    country: "BE"
+  phone: null
+  email: null
+  service_areas: []
+  logo_path: null
+  installer_partner: null
+  certifications: []
+  same_as: []
 
 conversion:
   primary_cta: ESTIMATE_REQUEST
@@ -156,7 +253,7 @@ conversion:
           description: "[NL — À TRADUIRE PAR UN NATIF] Facultatif — utile pour affiner l'estimation."
     - key: timing
       title: "Votre échéance"
-      fields: [project_timeframe]
+      fields: [project_timeframe, financing_interest]
       i18n:
         nl:
           title: "[NL — À TRADUIRE PAR UN NATIF] Votre échéance"
@@ -266,14 +363,18 @@ conversion:
       required: false
       i18n:
         nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Une batterie domestique vous intéresse-t-elle ?"}
+      # YES/NO SONT CITÉS. YAML 1.1 lit `value: YES` comme le booléen true, et
+      # cette case a réellement stocké `battery_interest: true` dans la
+      # qualification de la première demande — le chargeur refuse désormais
+      # toute option booléenne pour que l'erreur ne revienne pas.
       options:
-        - value: YES
+        - value: "YES"
           label: "Oui"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
-        - value: MAYBE
+        - value: "MAYBE"
           label: "Peut-être"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Peut-être"}}
-        - value: NO
+        - value: "NO"
           label: "Non"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
     - key: project_timeframe
@@ -295,6 +396,32 @@ conversion:
         - value: EXPLORING
           label: "Je me renseigne"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je me renseigne"}}
+    # Qualification métier du positionnement financement (P1.2 de l'audit).
+    # Facultative : une case de qualification n'est jamais un péage. Les
+    # libellés ne promettent rien — « étudier » un financement n'est pas
+    # l'accorder.
+    - key: financing_interest
+      type: choice
+      label: "Souhaitez-vous étudier une solution de financement ?"
+      required: false
+      help: "Sans engagement — cela nous aide à préparer une estimation adaptée."
+      i18n:
+        nl:
+          label: "[NL — À TRADUIRE PAR UN NATIF] Souhaitez-vous étudier une solution de financement ?"
+          help: "[NL — À TRADUIRE PAR UN NATIF] Sans engagement."
+      options:
+        - value: "YES"
+          label: "Oui, je veux en savoir plus"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: "NO"
+          label: "Non, je financerais moi-même"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
+        - value: "ALREADY_FINANCED"
+          label: "J'ai déjà une solution de financement"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] J'ai déjà une solution"}}
+        - value: "UNSURE"
+          label: "Je ne sais pas encore"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas encore"}}
     - key: first_name
       type: text
       label: "Prénom"
@@ -415,6 +542,11 @@ routes:
   # stale here — the content has been published at the longer slug since Phase 4.
   - {path: /prix-panneaux-solaires-belgique, type: LANDING_PAGE, locales: [fr]}
   - {path: /outils/estimation-solaire, type: TOOL, locales: [fr]}
+  # Landing financement (P1.1 de l'audit). Servie en staging pour construction
+  # et revue ; une fois le site public, elle ne se sert et ne s'indexe que
+  # lorsque le registre d'offre est publiable (validation propriétaire ET levée
+  # juridique) — la route est déclarée, la porte est dans la page.
+  - {path: /panneaux-solaires-sans-apport, type: LANDING_PAGE, locales: [fr]}
   # NL déclaré : la mécanique i18n du formulaire est câblée (libellés en
   # placeholder « À TRADUIRE PAR UN NATIF » — jamais de traduction automatique).
   - {path: /demande-etude, type: CONVERSION, locales: [fr]}

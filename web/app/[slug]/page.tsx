@@ -6,7 +6,9 @@ import { Breadcrumbs } from "@/components/Layout";
 import { PriceEvidenceBlock } from "@/components/PriceEvidence";
 import { Prose } from "@/components/Prose";
 import { getPublished, getSiteConfig } from "@/lib/api";
-import { localizedPath } from "@/lib/site";
+import { contentPath, localizedPath } from "@/lib/site";
+import { articleNode, graph, websiteNode } from "@/lib/jsonld";
+import { pageMetadata } from "@/lib/metadata";
 
 export const revalidate = 300;
 
@@ -21,25 +23,19 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const content = await getPublished(locale, slug);
   if (!content) return { robots: { index: false, follow: false } };
 
-  const indexable = config?.indexable && !content.meta.noindex;
-  return {
+  // Shared builder (P2.4): OG url/site_name, twitter card and article dates
+  // come from one place. The per-content noindex still overrides.
+  return pageMetadata({
+    config,
     title: content.meta.title,
-    description: content.meta.description ?? undefined,
-    // Absolute when the site has a configured origin, relative otherwise. Never
-    // resolved against the request host.
-    alternates: content.meta.canonical_url ?? content.meta.canonical_path
-      ? { canonical: content.meta.canonical_url ?? content.meta.canonical_path }
-      : undefined,
-    robots: indexable
-      ? { index: true, follow: true }
-      : { index: false, follow: false, nocache: true },
-    openGraph: {
-      title: content.meta.title,
-      description: content.meta.description ?? undefined,
-      type: "article",
-      locale,
-    },
-  };
+    description: content.meta.description,
+    path: contentPath(config, content),
+    type: "article",
+    locale,
+    noindex: content.meta.noindex,
+    publishedTime: content.published_at,
+    modifiedTime: content.updated_at,
+  });
 }
 
 export default async function ContentPage({ params }: Params) {
@@ -68,8 +64,7 @@ export function ContentView({
   const unresolved =
     content.price_evidence?.core_answer_status === "CORE_QUESTION_UNRESOLVED";
 
-  const breadcrumbJsonLd = {
-    "@context": "https://schema.org",
+  const breadcrumbNode = {
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Accueil",
@@ -77,6 +72,14 @@ export function ContentView({
       { "@type": "ListItem", position: 2, name: content.title },
     ],
   };
+  // Article with its real dates, WebSite for the graph anchor, breadcrumb as
+  // before. Still no Organization unless the registry is ready, and no author:
+  // none exists, and an invented byline is fabrication with a schema.
+  const jsonLd = graph(
+    websiteNode(config),
+    articleNode(config, content, contentPath(config, content)),
+    breadcrumbNode,
+  );
 
   return (
     <>
@@ -110,15 +113,12 @@ export function ContentView({
         <TrustSection />
       </article>
 
-      {/*
-        Only BreadcrumbList. No Organization (no real company data supplied), no
-        LocalBusiness (no address), no AggregateRating (no reviews). Structured
-        data that asserts things nobody supplied is fabrication with a schema.
-      */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
-      />
+      {jsonLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLd }}
+        />
+      ) : null}
     </>
   );
 }

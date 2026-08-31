@@ -64,6 +64,7 @@ from app.services.provider_usage import UsageRecorder
 from app.services.research_planner import plan_authoritative_research
 from app.services.research_cache import freshness_policy
 from app.services.region import detect_region, region_for_market
+from app.site.offer import offer_for_vertical
 from app.verticals.profile import available_profiles, load_profile
 
 EXIT_OK = 0
@@ -565,8 +566,10 @@ async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
         existing_titles = await title_registry.competing_titles(session, draft)
 
         factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
-        seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload,
-                                       profile, existing_titles=existing_titles)
+        seo = qa_service.run_seo_qa_v2(
+            draft_payload, brief_payload, payload, profile,
+            existing_titles=existing_titles,
+            offer=offer_for_vertical(profile.code))
 
         # What the gates said when the draft was produced, for the comparison
         # that is the point of the command.

@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
 
 import { RequestStudyPage } from "@/components/RequestStudyPage";
+import { getSiteConfig } from "@/lib/api";
+import { pageMetadata } from "@/lib/metadata";
 
-export const metadata: Metadata = {
-  title: "Demander une estimation",
-  description:
-    "Quelques questions sur votre logement et votre toiture pour cadrer une estimation d'installation photovoltaïque.",
-  robots: { index: false, follow: false },
-};
+// Robots follow the site-wide gate: this route is in the declared route table,
+// so the sitemap lists it once the site is indexable — a hardcoded noindex
+// here would then contradict the sitemap (found by the pre-publication crawl).
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getSiteConfig();
+  return pageMetadata({
+    config,
+    title: "Demander une estimation",
+    description:
+      "Quelques questions sur votre logement et votre toiture pour cadrer une estimation d'installation photovoltaïque.",
+    path: "/demande-etude",
+  });
+}
 
 export const dynamic = "force-dynamic";
 

@@ -433,9 +433,11 @@ class TestPricePageRendering:
         snapshot = await self._stage(session, solar_site)
         dto = to_dto(snapshot, load_site("solar_be"))
         assert "qa_provenance" not in dto
+        # `published_at` joined on 2026-08-31 for the Article schema's
+        # datePublished — a date, not a QA internal.
         assert set(dto) == {"slug", "locale", "type", "search_intent", "title",
                             "meta", "sections", "price_evidence", "cta",
-                            "version", "state", "updated_at"}
+                            "version", "state", "published_at", "updated_at"}
 
 
 # ─── Sanitization ────────────────────────────────────────────────────────────

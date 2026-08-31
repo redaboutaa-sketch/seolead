@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { isKnownRoute, localizedPath } from "@/lib/site";
+import { FINANCING_PATH, financingLandingVisible, isKnownRoute, localizedPath } from "@/lib/site";
 import type { PublishedContentDTO, SiteConfigDTO } from "@/lib/types";
 
 import { HeroVisual } from "./HeroVisual";
@@ -94,6 +94,18 @@ export function Hero({ config, locale }: Ctx) {
             sources consultées&nbsp;— quand une source ne précise pas, nous le
             disons plutôt que de le supposer.
           </p>
+          {/* Positionnement financement (P1.2) — secondaire et conditionnel :
+              « selon votre situation », « peuvent être étudiées ». Jamais une
+              promesse ; la page dédiée porte le sujet, le hero le signale. */}
+          {financingLandingVisible(config) ? (
+            <p className="hero__financing">
+              Pas d&apos;épargne à mobiliser&nbsp;? Selon votre situation,
+              différentes solutions de financement peuvent être étudiées.{" "}
+              <Link href={localizedPath(config, locale, FINANCING_PATH)}>
+                Découvrir les solutions sans apport
+              </Link>
+            </p>
+          ) : null}
           <div className="hero__actions">
             <PrimaryCta config={config} locale={locale} />
             <SecondaryCta config={config} locale={locale} />
@@ -415,13 +427,89 @@ export function QualificationCta({ config, locale }: Ctx) {
 /* ── FAQ ────────────────────────────────────────────────────────────────── */
 
 /**
- * Four questions, each answerable from something that exists.
- *
- * No fifth question was added to round the number out. The 24-month figure is
+ * Six questions, each answerable from something that exists — the two
+ * financing entries answer from the dedicated landing's validated copy, short
+ * answer first, and none was added to round a number out. The 24-month figure is
  * the retention period stated in the owner-approved privacy text; the "no
  * savings figure" answer is the reasoning already published on
  * /outils/estimation-solaire.
  */
+/**
+ * The FAQ as DATA, because it now has two consumers that must never disagree:
+ * the rendered `<details>` list below, and the FAQPage JSON-LD the homepage
+ * emits. One structure, two projections — a schema whose answers drifted from
+ * the visible page would be exactly the fabrication the JSON-LD module refuses.
+ *
+ * `answer` is plain text (what the schema carries); `link` is a rendering
+ * detail appended to the visible entry only.
+ */
+export const HOME_FAQ: {
+  question: string;
+  answer: string;
+  link?: { path: string; label: string };
+}[] = [
+  {
+    question: "Est-ce vraiment gratuit et sans engagement ?",
+    answer:
+      "Oui. Il n'y a ni paiement ni contrat à aucune étape. Répondre aux " +
+      "questions ne vous engage à rien et ne déclenche aucune commande.",
+  },
+  {
+    question: "Que deviennent les informations que je transmets ?",
+    answer:
+      "Elles servent à analyser votre demande et à y répondre. Elles sont " +
+      "conservées au maximum 24 mois à compter de votre dernière interaction, " +
+      "et vos coordonnées ne sont pas cédées à des partenaires commerciaux " +
+      "indépendants à des fins de prospection sans votre information préalable.",
+    link: { path: "__privacy__", label: "Politique de confidentialité" },
+  },
+  {
+    question: "Pourquoi n'affichez-vous pas mes économies directement ?",
+    answer:
+      "Parce qu'une estimation de rentabilité dépend de l'ensoleillement de " +
+      "votre adresse, de l'orientation et de l'inclinaison de votre toit, de " +
+      "votre profil de consommation et des tarifs en vigueur. Tant que ces " +
+      "données ne sont pas intégrées de façon vérifiable, afficher un montant " +
+      "serait une invention.",
+  },
+  // Les deux entrées financement (P1.2). Réponse courte d'abord, forme
+  // conditionnelle, jamais la promesse — la politique d'affirmations vaut
+  // aussi pour la copie écrite à la main.
+  {
+    question: "Faut-il disposer d'un apport pour installer des panneaux solaires ?",
+    answer:
+      "Pas nécessairement. Selon votre situation et le montage de financement " +
+      "retenu, le projet peut être réalisé sans mobiliser votre épargne au " +
+      "départ — certains frais peuvent rester à votre charge, et ils vous " +
+      "sont confirmés avant tout engagement.",
+    link: {
+      path: "/panneaux-solaires-sans-apport",
+      label: "Ce que « sans apport » veut vraiment dire",
+    },
+  },
+  {
+    question: "Une installation photovoltaïque peut-elle s'autofinancer ?",
+    answer:
+      "Elle peut s'en approcher, sans que ce soit garanti : si les économies " +
+      "d'électricité mensuelles atteignent la mensualité du financement, " +
+      "l'effort net devient faible ou nul. Cela dépend de votre production, " +
+      "de votre consommation, du prix de l'électricité et des conditions de " +
+      "financement — c'est ce que l'étude personnalisée chiffre.",
+    link: {
+      path: "/panneaux-solaires-sans-apport",
+      label: "Les conditions d'un autofinancement approché",
+    },
+  },
+  {
+    question: "Puis-je revenir sur mon consentement ?",
+    answer:
+      "Oui, à tout moment. Le consentement au traitement de votre demande et " +
+      "celui à recevoir des informations commerciales sont deux cases " +
+      "distinctes ; aucune n'est pré-cochée, et refuser la seconde n'empêche " +
+      "pas votre demande d'être traitée.",
+  },
+];
+
 export function Faq({ config, locale }: Ctx) {
   const privacyPath = config?.legal.privacy_policy_path ?? "/confidentialite";
   return (
@@ -432,47 +520,28 @@ export function Faq({ config, locale }: Ctx) {
           <h2 id="faq">Ce que vous vous demandez sans doute</h2>
         </div>
         <div className="faq">
-          <details>
-            <summary>Est-ce vraiment gratuit et sans engagement&nbsp;?</summary>
-            <p>
-              Oui. Il n&apos;y a ni paiement ni contrat à aucune étape. Répondre
-              aux questions ne vous engage à rien et ne déclenche aucune commande.
-            </p>
-          </details>
-          <details>
-            <summary>Que deviennent les informations que je transmets&nbsp;?</summary>
-            <p>
-              Elles servent à analyser votre demande et à y répondre. Elles sont
-              conservées au maximum 24&nbsp;mois à compter de votre dernière
-              interaction, et vos coordonnées ne sont pas cédées à des partenaires
-              commerciaux indépendants à des fins de prospection sans votre
-              information préalable.{" "}
-              {isKnownRoute(config, privacyPath) ? (
-                <Link href={localizedPath(config, locale, privacyPath)}>
-                  Politique de confidentialité
-                </Link>
-              ) : null}
-            </p>
-          </details>
-          <details>
-            <summary>Pourquoi n&apos;affichez-vous pas mes économies directement&nbsp;?</summary>
-            <p>
-              Parce qu&apos;une estimation de rentabilité dépend de
-              l&apos;ensoleillement de votre adresse, de l&apos;orientation et de
-              l&apos;inclinaison de votre toit, de votre profil de consommation et
-              des tarifs en vigueur. Tant que ces données ne sont pas intégrées de
-              façon vérifiable, afficher un montant serait une invention.
-            </p>
-          </details>
-          <details>
-            <summary>Puis-je revenir sur mon consentement&nbsp;?</summary>
-            <p>
-              Oui, à tout moment. Le consentement au traitement de votre demande
-              et celui à recevoir des informations commerciales sont deux cases
-              distinctes&nbsp;; aucune n&apos;est pré-cochée, et refuser la
-              seconde n&apos;empêche pas votre demande d&apos;être traitée.
-            </p>
-          </details>
+          {HOME_FAQ.map(({ question, answer, link }) => {
+            const target = link?.path === "__privacy__" ? privacyPath : link?.path;
+            return (
+              <details key={question}>
+                <summary>{question}</summary>
+                <p>
+                  {answer}
+                  {target && link &&
+                  (target === FINANCING_PATH
+                    ? financingLandingVisible(config)
+                    : isKnownRoute(config, target)) ? (
+                    <>
+                      {" "}
+                      <Link href={localizedPath(config, locale, target)}>
+                        {link.label}
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
+              </details>
+            );
+          })}
         </div>
       </div>
     </section>
