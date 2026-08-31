@@ -121,7 +121,12 @@ seo:
   # Poser le jeton avant allow_indexing est sûr et utile : la console prouve
   # la propriété et montre l'état noindex au lieu de le deviner.
   verification:
-    google: null
+    # Fourni par le propriétaire depuis Search Console le 2026-08-31
+    # (propriété « Préfixe d'URL », méthode balise HTML). Public par
+    # construction : publié dans le HTML de chaque page. Ne jamais le
+    # retirer — Google re-vérifie périodiquement.
+    google: "tMnffPZeT4Mc9jfbKIEMfy2BIm1lpW8f0pDLsds0Za8"
+    # Bing : import depuis Search Console (aucun jeton nécessaire).
     bing: null
 
 # ── Registre d'offre de première partie ─────────────────────────────────────
