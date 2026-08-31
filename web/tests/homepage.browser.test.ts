@@ -187,13 +187,13 @@ describe("accessibility — the properties the redesign could have broken", () =
   it("labels every visible field on the qualification form", async () => {
     if (!available) return;
     const { context, page } = await open(FORM_PATH, 1440);
-    // The honeypot is excluded on purpose: it is hidden from humans and from
+    // The decoy field is excluded on purpose: it is hidden from humans and from
     // assistive technology by design, and only a bot ever fills it.
     const unlabelled = await page
       .locator(".lead-form input:not([type=hidden])")
       .evaluateAll((nodes) =>
         nodes
-          .filter((node) => !node.closest(".honeypot"))
+          .filter((node) => !node.closest(".form-aux"))
           .filter((node) => {
             const id = node.getAttribute("id");
             const hasLabel = id ? !!document.querySelector(`label[for="${id}"]`) : false;

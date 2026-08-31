@@ -889,7 +889,7 @@ main { display: block; }
 /* ══ Form ════════════════════════════════════════════════════════════════ */
 
 /*
- * Chrome only. Steps, fields, validation, payload, honeypot and timing floor are
+ * Chrome only. Steps, fields, validation, payload, the decoy field and the
  * defined in config/sites/solar_be.yaml and components/LeadForm.tsx and are NOT
  * this file's business — US-SL-01 is presentation-only.
  */
@@ -1029,7 +1029,9 @@ main { display: block; }
   border-top: 1px solid var(--border);
 }
 .form-status { margin-top: var(--space-4); }
-.honeypot {
+/* Off-screen, sized to nothing. Named for what it is to a reader of this file
+ * and not for what it does, because the class name ships to the browser. */
+.form-aux {
   position: absolute;
   left: -9999px;
   width: 1px;

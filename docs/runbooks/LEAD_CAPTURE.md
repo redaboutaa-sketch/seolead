@@ -22,13 +22,30 @@ whatever its state says.
 
 ## If a submission was rejected
 
-The API returns 422 with a reason that names fields, never values:
+The API returns 422. What the **visitor** sees and what **you** see are no
+longer the same thing, and that is deliberate.
+
+A refusal by the spam defences carries the code `SUBMISSION_REFUSED` and the
+message *« Votre demande n'a pas pu être enregistrée. Merci de réessayer. »* —
+nothing more. Naming the defence that fired tells a bot what to change, and told
+the owner, on 2026-08-30, a word he could do nothing with. The reason lives in
+the API log:
+
+```bash
+docker logs seolead_api 2>&1 | grep "lead submission rejected"
+```
+
+| Logged reason | Meaning |
+|---|---|
+| `honeypot field was filled` | the decoy field was not empty |
+| `submitted in Nms, under the 2500ms floor` | submitted faster than a human reads |
+| `more than 5 submissions in 60 minutes` | rate limit |
+
+Validation refusals are still shown to the visitor, because they are things a
+visitor can act on:
 
 | Message | Meaning |
 |---|---|
-| `honeypot field was filled` | automated submission |
-| `submitted in Nms, under the 2500ms floor` | automated submission |
-| `more than 5 submissions in 60 minutes` | rate limit |
 | `consent to process the request is required` | consent box unchecked |
 | `not a usable email address` | failed server-side validation |
 | `missing required answer(s): …` | a required configured field was empty |
