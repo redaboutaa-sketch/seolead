@@ -149,17 +149,28 @@ describe("CSP policy — strength is preserved", () => {
     expect(scriptSrc, "script-src must not use a wildcard").not.toContain("*");
   }, 30_000);
 
-  it("leaves the indexing refusal untouched", async () => {
+  it("indexing signals agree: no blanket header, meta is the authority", async () => {
     if (!reachable) return;
+    // Lancé le 2026-08-31 : les pages publiques ne portent PLUS d'en-tête
+    // X-Robots-Tag — c'est lui qui a contredit la meta au lancement et fait
+    // refuser chaque demande d'indexation. La meta (pilotée par la config,
+    // fail-closed) est l'unique autorité ici.
     for (const path of ["/", "/confidentialite"]) {
       const page = await load(path);
-      expect(page.headers.get("x-robots-tag")).toBe(
-        "noindex, nofollow, noarchive, nosnippet",
-      );
+      expect(page.headers.get("x-robots-tag")).toBeNull();
       expect(page.html).toContain('name="robots"');
     }
+    // Les surfaces jamais indexables gardent l'en-tête, inconditionnellement.
+    const preview = await fetch(`${BASE}/preview/fr/nimporte-quoi`);
+    expect(preview.headers.get("x-robots-tag")).toBe(
+      "noindex, nofollow, noarchive, nosnippet",
+    );
+    // L'invariant est « /preview n'est jamais crawlable » : site lancé →
+    // `Disallow: /preview/` explicite ; stack fail-closed (config
+    // inaccessible) → `Disallow: /` qui le couvre aussi. Les deux formes
+    // le respectent ; aucune autre n'est admise.
     const robots = await fetch(`${BASE}/robots.txt`).then((r) => r.text());
-    expect(robots).toContain("Disallow: /");
+    expect(robots).toMatch(/^Disallow: \/(?:preview\/)?\s*$/m);
   }, 30_000);
 });
 

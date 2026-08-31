@@ -19,17 +19,20 @@ import type { NextConfig } from "next";
  */
 
 /**
- * Indexing is refused at the HTTP layer unless explicitly enabled at build time.
+ * X-Robots-Tag lives ONLY on the routes that must never be indexable —
+ * /preview (unpublished content behind a token) and /api (machinery) —
+ * unconditionally, whatever any configuration says.
  *
- * Fail-closed on purpose. `SiteConfig.allow_indexing` already gates robots.txt and
- * the per-page meta tag, but those are rendered by the app; this header is emitted
- * for every response including static assets and error pages, and it is the one
- * that a misconfigured route cannot bypass.
- *
- * Turning it off requires BOTH this env var and the SiteConfig flag — two
- * independent switches, matching the three-condition design of `is_indexable`.
+ * The public routes carry no blanket header anymore. The build-time env
+ * switch that used to gate one (deliberately not named here: a test pins
+ * its absence from this file) was a second
+ * source of truth beside the site config, and on launch night (2026-08-31)
+ * it split exactly as a second source of truth does: HTML said
+ * `index, follow`, HTTP said noindex, and Google refused every indexation
+ * request on the stricter signal. Per-page metadata — derived from the
+ * site config, fail-closed by construction — is now the ONE authority for
+ * public routes; robots.txt and the sitemap answer to the same config.
  */
-const allowIndexing = process.env.SEOLEAD_ALLOW_INDEXING === "true";
 
 /**
  * Compression is the edge's job, not the app's.
@@ -107,16 +110,18 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
           },
-          ...(allowIndexing
-            ? []
-            : [
-                {
-                  key: "X-Robots-Tag",
-                  value: "noindex, nofollow, noarchive, nosnippet",
-                },
-              ]),
         ],
       },
+      // The permanent noindex surfaces — see the comment above.
+      ...["/preview/:path*", "/api/:path*"].map((source) => ({
+        source,
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow, noarchive, nosnippet",
+          },
+        ],
+      })),
     ];
   },
 };

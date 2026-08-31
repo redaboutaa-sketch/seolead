@@ -82,10 +82,15 @@ component that tried to read them fails the build.
 **Indexability** — may a crawler keep it?
 
 1. `domain` set — ✅ done
-2. `staging: false` — *no*
-3. `seo.allow_indexing: true` — *no*
-4. `SEOLEAD_ALLOW_INDEXING=true` at build time, removing the fail-closed
-   `X-Robots-Tag` — *no*
+2. `staging: false` — ✅ done (lancement du 2026-08-31, autorisation propriétaire)
+3. `seo.allow_indexing: true` — ✅ done (idem)
+4. ~~`SEOLEAD_ALLOW_INDEXING=true` at build time~~ — **cette condition
+   n'existe plus** (2026-08-31). Le commutateur d'environnement était une
+   seconde source de vérité à côté de la config : au lancement il est resté
+   non défini, l'en-tête `X-Robots-Tag: noindex` a contredit la meta
+   `index, follow`, et Google a refusé chaque demande d'indexation. La
+   config du site pilote seule l'indexation ; l'en-tête HTTP ne subsiste
+   que sur `/preview` et `/api`, inconditionnellement.
 
 The three gates are independent. The site currently serves one published page at
 its real URL while remaining entirely non-indexable — a soft launch. Opening the

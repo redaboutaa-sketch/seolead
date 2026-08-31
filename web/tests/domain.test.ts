@@ -54,13 +54,31 @@ describe("indexing gate", () => {
     expect(config.staging).toBe(true);
   });
 
-  it("the X-Robots-Tag header is fail-closed in next.config", () => {
-    // Reading the source is the point: the guarantee is that the DEFAULT is
-    // noindex, and only an explicit env var removes the header.
+  it("the X-Robots-Tag header guards preview and api, and ONLY them", () => {
+    // Reading the source is the point. The guarantee changed on launch night
+    // (2026-08-31): the env-var switch was a second source of truth beside
+    // the site config and split against it — HTML said index, HTTP said
+    // noindex, Google refused every indexation request. The header is now
+    // UNCONDITIONAL on the never-indexable surfaces and ABSENT everywhere
+    // else; per-page metadata (config-driven, fail-closed) is the one
+    // authority for public routes.
     const source = readFileSync(new URL("../next.config.ts", import.meta.url), "utf-8");
-    expect(source).toContain('process.env.SEOLEAD_ALLOW_INDEXING === "true"');
     expect(source).toContain("X-Robots-Tag");
-    expect(source).toMatch(/allowIndexing\s*\?\s*\[\]/);
+    expect(source).toContain('"/preview/:path*"');
+    expect(source).toContain('"/api/:path*"');
+    expect(source).not.toContain("SEOLEAD_ALLOW_INDEXING");
+    const middleware = readFileSync(
+      new URL("../middleware.ts", import.meta.url), "utf-8");
+    expect(middleware).toContain('["/preview", "/api"]');
+    expect(middleware).not.toContain("SEOLEAD_ALLOW_INDEXING");
+    // The third — and on the wire, the decisive — ex-source: Traefik stamped
+    // the same noindex header on every edge response via a customResponseHeader
+    // label the launch runbook said to remove and nobody did. The app image was
+    // irrelevant as long as this line existed.
+    const overlay = readFileSync(
+      new URL("../../infra/traefik/docker-compose.public.yml", import.meta.url),
+      "utf-8");
+    expect(overlay).not.toContain("customResponseHeaders.X-Robots-Tag");
   });
 
   it("robots.ts disallows everything unless the site is indexable", () => {

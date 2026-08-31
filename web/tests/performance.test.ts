@@ -125,9 +125,9 @@ describe.skipIf(!reachable)("search-engine readiness, minus the deliberate refus
     }, 30_000);
   }
 
-  it("still refuses indexing", async () => {
+  it("the public page carries no X-Robots-Tag — meta is the one authority", async () => {
     const res = await raw("/");
-    expect(res.headers["x-robots-tag"]).toBe("noindex, nofollow, noarchive, nosnippet");
+    expect(res.headers["x-robots-tag"]).toBeUndefined();
   }, 30_000);
 });
 

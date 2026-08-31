@@ -6,14 +6,24 @@
 |---|---|---|
 | `robots.txt` | `User-Agent: * / Disallow: /` | allow, with `/preview/` and `/api/` disallowed |
 | page `<meta robots>` | `noindex, nofollow, nocache` | `index, follow` |
-| `X-Robots-Tag` header | `noindex, nofollow, noarchive, nosnippet` | absent |
-| Traefik response header | same, added at the edge | removed with the overlay edit |
+| `X-Robots-Tag` header | *(supprimé — voir ci-dessous)* | `/preview` et `/api` seulement, inconditionnel |
+| Traefik response header | *(supprimé — voir ci-dessous)* | aucun |
 | `sitemap.xml` | empty | PUBLISHED URLs only |
 
-The `X-Robots-Tag` header is **fail-closed**: it is emitted unless
-`SEOLEAD_ALLOW_INDEXING=true` is set at build time. It covers every response
-including static assets and error pages — responses the application's own meta tag
-never reaches.
+**Correction du 2026-08-31 (jour du lancement).** L'en-tête `X-Robots-Tag`
+n'est plus un signal site-wide, dans l'app comme à l'edge. Il existait en
+trois exemplaires — un commutateur d'environnement build-time dans
+`next.config.ts`, le même dans `middleware.ts`, et un `customResponseHeaders`
+Traefik dans l'overlay public — chacun une source de vérité indépendante de
+la config. Au lancement, la config a ouvert meta/robots.txt/sitemap, les
+trois en-têtes sont restés en noindex, et Google — qui suit le signal le
+plus strict — a refusé chaque demande d'indexation pendant que tous nos
+contrôles ne lisaient que la meta. Désormais : la meta par page (dérivée de
+la config, fail-closed) est **l'unique** autorité pour les routes publiques ;
+l'en-tête HTTP est posé par le middleware Next sur `/preview` et `/api`
+uniquement, quoi que dise la configuration. Un test source
+(`web/tests/domain.test.ts`) épingle l'absence des trois anciennes sources,
+et le contrôle de santé public lit les DEUX signaux.
 
 "Indexable" is three independent conditions — a domain is set, `staging` is false,
 and `seo.allow_indexing` is true — because a single flag is one accidental commit
