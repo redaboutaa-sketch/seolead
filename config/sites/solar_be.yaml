@@ -120,85 +120,193 @@ seo:
 
 # ── Registre d'offre de première partie ─────────────────────────────────────
 # LA source de vérité pour ce que Mon Projet Solaire affirme de sa propre offre.
-# Chaque valeur est null TANT QUE le propriétaire ne l'a pas fournie ET validée :
-# « 150 € » n'y figure pas parce qu'un brief le mentionne — il y entrera avec
-# une date de validation, ou n'y entrera pas. La garde QA refuse tout chiffre
-# d'offre absent d'ici, et la landing financement reste non publiable tant que
-# pending_legal_review est vrai (publicité pour un crédit à la consommation :
-# mentions obligatoires et statut à faire valider — voir
-# docs/seo/AUDIT_SEO_AEO_GEO_2026-08-31.md §3).
+# Chaque valeur y figure parce que le propriétaire l'a FOURNIE (2026-08-31),
+# jamais parce qu'un brief la mentionne. Fournie n'est PAS approuvée
+# juridiquement : l'offre reste draft + pending_legal_review, donc AUCUN de ces
+# chiffres n'est publiable (usable_facts vide, garde QA fail-closed) tant que
+# les deux verrous — validation propriétaire du statut ET revue juridique —
+# ne sont pas levés.
+#
+# Correspondance avec le cycle de vie RC1 (une seule mécanique, pas deux) :
+#   fact_id → facts[].id · offer_id/offer_version → version · value → value
+#   source → provenance (first_party = fourni par le propriétaire)
+#   owner_status → validated_at (date de fourniture par le propriétaire)
+#   legal_status → pending_legal_review + legal.* (au niveau de l'offre)
+#   valid_from/valid_until → sur chaque fait.
+#
+# QUALIFICATION JURIDIQUE INCONNUE : ce modèle n'est décrit nulle part comme un
+# crédit, un PPA, un leasing, une location-vente ou une fourniture d'énergie.
+# Provisoirement : « solution SG Solution » / « contrat SG Solution ». La
+# qualification appartient au juriste (docs/legal/SOLAR_BE_FINANCING_REVIEW.md).
 offer:
-  version: "solar-be-offer-v0.1-draft"
+  version: "sg-solution-solar-25y-v0.1-draft"
   status: draft            # draft | validated | retired
   pending_legal_review: true
   owner_validated_at: null
-  # Versions remplacées, jamais réécrites : « 150 € devient 190 € » = nouvelle
-  # version ci-dessus, ancienne version ajoutée ICI avec sa date. Le chargeur
-  # refuse un fichier dont la version courante figure déjà dans l'historique.
-  history: []
-  # valid_from / valid_until (dates ISO, incluses) : la fenêtre pendant
-  # laquelle la valeur EST l'offre. Hors fenêtre, le fait se tait tout seul.
+  # L'ancienne version (modèle « financement » hypothétique, emplacements
+  # vides) est remplacée, pas réécrite.
+  history:
+    - version: "solar-be-offer-v0.1-draft"
+      status: draft
+      superseded_at: "2026-08-31"
+      note: "Modèle crédit hypothétique remplacé par l'offre SG Solution (owner-supplied)."
+  provider:
+    name: "SG Solution"
+    role: "commercial_solution_provider"
+    # Identité légale, adresse, site, contacts publics : NON FOURNIS.
+    # Aucun schéma Organization SG Solution n'est émis d'ici là.
   facts:
-    - id: application_fee_eur
-      label: "Frais de dossier (€)"
-      value: null
-      unit: EUR
-      validated_at: null
+    - id: contract_duration_years
+      label: "Durée du contrat SG Solution (années)"
+      value: 25
+      unit: YEARS
+      validated_at: "2026-08-31"
       valid_from: null
       valid_until: null
-    - id: upfront_payment_required
-      label: "Apport initial exigé"
-      value: null
+    - id: energy_tariff_eur_per_kwh
+      label: "Tarif de l'électricité produite (€/kWh)"
+      value: 0.27
+      unit: EUR_PER_KWH
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+    - id: energy_tariff_fixed
+      label: "Tarif annoncé fixe sur la durée du contrat"
+      # Claim contractuel HIGH : « fixe / garanti 25 ans » exige une preuve
+      # contractuelle (evidence.contract_reference) et un verdict juridique
+      # avant toute formulation publique.
+      value: true
       unit: null
-      validated_at: null
+      validated_at: "2026-08-31"
       valid_from: null
       valid_until: null
-    - id: financing_term_months
-      label: "Durée de financement (mois)"
-      value: null
-      unit: MONTHS
-      validated_at: null
-      valid_from: null
-      valid_until: null
-    - id: monthly_instalment_example_eur
-      label: "Mensualité de l'exemple validé (€)"
-      value: null
+    - id: administrative_fee_eur
+      label: "Frais administratifs uniques à la signature (€)"
+      value: 150
       unit: EUR
-      validated_at: null
+      validated_at: "2026-08-31"
       valid_from: null
       valid_until: null
+    - id: installation_includes
+      label: "Installation mise à disposition"
+      value: "solar_panels+home_battery"
+      unit: null
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+    - id: classic_bank_credit_required
+      label: "Crédit bancaire classique requis"
+      value: false
+      unit: null
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+    - id: buyout_possible_during_contract
+      label: "Rachat possible en cours de contrat"
+      value: true
+      unit: null
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+    - id: buyout_annual_reduction_percent
+      label: "Réduction annuelle annoncée du prix de rachat (%, sur la valeur initiale de l'installation)"
+      # Assiette, méthode, plancher, HT/TTC, date de calcul : NON DÉFINIS.
+      # Aucune projection (10 ans = -40 %…) n'est calculée nulle part.
+      value: 4
+      unit: PERCENT
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+    - id: ownership_transfer_after_years
+      label: "Transfert de propriété automatique au terme (années, panneaux + batterie)"
+      value: 25
+      unit: YEARS
+      validated_at: "2026-08-31"
+      valid_from: null
+      valid_until: null
+  # Légué du modèle précédent — le modèle SG n'est PAS qualifié de financement ;
+  # ce bloc reste vide et aucune copie ne doit le repeupler.
   financing:
-    provider: null          # identité du partenaire financier — décision propriétaire
+    provider: null
     conditions: []
+  # Conditions d'éligibilité owner-supplied. La préqualification (opérateur)
+  # n'est jamais l'éligibilité finale : la décision appartient à SG Solution.
   eligibility:
-    criteria: []
+    social_energy_tariff:
+      eligible: false
+    roof:
+      asbestos_allowed: false
+      technical_suitability_required: true
+    electrical_installation:
+      compliant_required: true
+      good_condition_required: true
+    building:
+      technical_suitability_required: true
+    final_acceptance:
+      technical_review_required: true
+      decision_by: "SG Solution"
   geography:
     service_areas: []
   guarantees: []
   restrictions: []
-  # Exemple chiffré réaliste : UNE installation réelle, fournie par le
-  # propriétaire (production, mensualité, économie constatée). Jamais généré.
   worked_example: null
+  # Preuves contractuelles : rien n'est fourni. Tant que c'est null, les
+  # formulations « fixe » / « garanti » restent affaire de matrice juridique.
+  evidence:
+    contract_reference: null
+    terms_reference: null
+  # Offre alternative SG Solution quand l'installation est techniquement
+  # impossible (toiture, orientation, structure…). AUCUN tarif fourni →
+  # AUCUN prix généré, nulle part.
+  fallback_offer:
+    provider: "SG Solution"
+    eligible_when:
+      solar_technical_feasibility: false
+    electricity_offer:
+      available: true
+    tariff:
+      amount: null
+    pending_legal_review: true
   legal:
     reviewed_at: null
     reviewer: null
     mandatory_disclosures: []
 
-# ── Identité de l'organisation ───────────────────────────────────────────────
-# Rien n'est inventé : tant que legal_name + n° BCE manquent, aucun schéma
-# Organization n'est émis ; LocalBusiness exige en plus l'adresse complète et
-# un moyen de contact. Trois noms coexistent aujourd'hui (BEAVER DATA GROUP /
-# Mon Projet Solaire / Solar Belgium) — trancher est une décision propriétaire.
+# ── Identité de l'OPÉRATEUR ──────────────────────────────────────────────────
+# Fournie par le propriétaire le 2026-08-31. Le modèle d'entités est un
+# invariant :
+#   Mon Projet Solaire  → marque publique / site / service d'acquisition
+#                         (PAS une entité juridique : aucun numéro, aucune
+#                         adresse, aucune certification ne lui appartient)
+#   Beaver Data Group   → opérateur juridique : acquisition, SEO/Prospect 360,
+#                         qualification, consentement, rendez-vous,
+#                         transmission du prospect
+#   SG Solution         → fournisseur de la solution commerciale
+#                         (offer.provider — analyse, décision, contrat)
+# Beaver Data Group n'est NI installateur, NI fournisseur d'électricité, NI
+# prêteur, NI propriétaire de l'installation, NI le décisionnaire final.
+# logo / sameAs / certifications : non fournis — donc absents, pas inventés.
 organization:
-  legal_name: null
-  bce_number: null
+  legal_name: "Beaver Data Group"
+  bce_number: null                 # entité française — pas de n° BCE
+  company_number: "935097675"      # SIREN
   address:
-    street: null
-    postal_code: null
-    city: null
-    country: "BE"
-  phone: null
-  email: null
+    street: "43 rue de Marquillies"
+    postal_code: "59000"
+    city: "Lille"
+    country: "FR"
+  phone: "+33659855704"
+  email: "reda.boutaa.seolead@gmail.com"
+  activities:
+    - lead_generation
+    - seo
+    - prospect_360
+    - lead_qualification
+    - appointment_generation
+    - lead_transmission
+  # Où chaque lead capturé doit atteindre un humain. La couche de notification
+  # lit CETTE valeur — jamais une adresse codée en dur.
+  lead_destination_email: "reda.boutaa.seolead@gmail.com"
   service_areas: []
   logo_path: null
   installer_partner: null
@@ -235,11 +343,25 @@ conversion:
     - key: roof
       title: "Votre toiture"
       description: "Pour situer la taille d'installation possible."
-      fields: [roof_type, roof_orientation]
+      fields: [roof_type, roof_orientation, known_asbestos]
       i18n:
         nl:
           title: "[NL — À TRADUIRE PAR UN NATIF] Votre toiture"
           description: "[NL — À TRADUIRE PAR UN NATIF] Pour situer la taille d'installation possible."
+    # Préqualification SG Solution (2026-08-31) : deux questions de situation,
+    # facultatives, « je ne sais pas » toujours possible. La préqualification
+    # n'est jamais l'éligibilité finale — celle-ci appartient à SG Solution
+    # après analyse du dossier. Minimisation RGPD : aucune donnée de revenus,
+    # d'endettement ou d'historique bancaire n'est collectée à ce stade —
+    # aucun besoin démontré à l'étape de génération de lead.
+    - key: situation
+      title: "Votre situation"
+      description: "Deux questions qui aident à préparer l'analyse — « je ne sais pas » est une réponse valable."
+      fields: [social_energy_tariff, electrical_installation_compliance]
+      i18n:
+        nl:
+          title: "[NL — À TRADUIRE PAR UN NATIF] Votre situation"
+          description: "[NL — À TRADUIRE PAR UN NATIF] Deux questions facultatives."
     - key: consumption
       title: "Votre consommation"
       description: "Facultatif — utile pour affiner l'estimation."
@@ -253,7 +375,7 @@ conversion:
           description: "[NL — À TRADUIRE PAR UN NATIF] Facultatif — utile pour affiner l'estimation."
     - key: timing
       title: "Votre échéance"
-      fields: [project_timeframe, financing_interest]
+      fields: [project_timeframe, financing_interest, appointment_interest]
       i18n:
         nl:
           title: "[NL — À TRADUIRE PAR UN NATIF] Votre échéance"
@@ -349,6 +471,64 @@ conversion:
         - value: UNKNOWN
           label: "Je ne sais pas"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
+    # ── Préqualification SG Solution (owner-supplied, 2026-08-31) ────────────
+    # Trois critères d'exclusion connus de l'offre (tarif social, amiante,
+    # conformité électrique). Facultatifs, valeurs CITÉES (chargeur strict),
+    # UNKNOWN toujours offert : le visiteur peut ne pas savoir, et une
+    # préqualification n'a pas à le forcer à deviner. Les libellés ne
+    # promettent rien — répondre « non » n'est pas un refus, répondre « oui »
+    # n'est pas une acceptation : la décision finale appartient à SG Solution.
+    - key: known_asbestos
+      type: choice
+      label: "À votre connaissance, votre toiture contient-elle de l'amiante ?"
+      required: false
+      help: "Une toiture amiantée nécessite un traitement particulier — le savoir tôt évite un déplacement inutile."
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Amiante dans la toiture ?"}
+      options:
+        - value: "YES"
+          label: "Oui"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: "NO"
+          label: "Non"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
+        - value: "UNKNOWN"
+          label: "Je ne sais pas"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
+    - key: social_energy_tariff
+      type: choice
+      label: "Bénéficiez-vous du tarif social de l'énergie ?"
+      required: false
+      help: "Cette information sert uniquement à vérifier les premiers critères de l'analyse."
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Tarif social de l'énergie ?"}
+      options:
+        - value: "YES"
+          label: "Oui"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: "NO"
+          label: "Non"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
+        - value: "UNKNOWN"
+          label: "Je ne sais pas"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
+    - key: electrical_installation_compliance
+      type: choice
+      label: "Votre installation électrique est-elle conforme et en bon état ?"
+      required: false
+      help: "Un contrôle technique aura lieu de toute façon — votre réponse aide simplement à préparer l'analyse."
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Installation électrique conforme ?"}
+      options:
+        - value: "YES"
+          label: "Oui, à ma connaissance"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: "NO"
+          label: "Non, ou pas sûr(e) de sa conformité"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
+        - value: "UNKNOWN"
+          label: "Je ne sais pas"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas"}}
     - key: annual_consumption_kwh
       type: number
       label: "Consommation annuelle (kWh)"
@@ -400,27 +580,48 @@ conversion:
     # Facultative : une case de qualification n'est jamais un péage. Les
     # libellés ne promettent rien — « étudier » un financement n'est pas
     # l'accorder.
+    # La clé `financing_interest` est HISTORIQUE (des leads réels la portent) ;
+    # elle capture désormais l'intérêt pour la solution SG Solution, formulée
+    # sans présumer d'un crédit — la qualification juridique du contrat est
+    # inconnue et n'appartient pas à un libellé de formulaire.
     - key: financing_interest
       type: choice
-      label: "Souhaitez-vous étudier une solution de financement ?"
+      label: "Souhaitez-vous étudier une solution pour disposer d'une installation sans l'acheter immédiatement ?"
       required: false
-      help: "Sans engagement — cela nous aide à préparer une estimation adaptée."
+      help: "Sans engagement — cela nous aide à préparer une analyse adaptée."
       i18n:
         nl:
-          label: "[NL — À TRADUIRE PAR UN NATIF] Souhaitez-vous étudier une solution de financement ?"
+          label: "[NL — À TRADUIRE PAR UN NATIF] Une solution sans achat immédiat ?"
           help: "[NL — À TRADUIRE PAR UN NATIF] Sans engagement."
       options:
         - value: "YES"
           label: "Oui, je veux en savoir plus"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
         - value: "NO"
-          label: "Non, je financerais moi-même"
+          label: "Non, je préfère acheter directement"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
         - value: "ALREADY_FINANCED"
-          label: "J'ai déjà une solution de financement"
+          label: "J'ai déjà une solution"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] J'ai déjà une solution"}}
         - value: "UNSURE"
           label: "Je ne sais pas encore"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas encore"}}
+    - key: appointment_interest
+      type: choice
+      label: "Souhaitez-vous un rendez-vous pour discuter des résultats de votre analyse ?"
+      required: false
+      help: "Le rendez-vous n'a lieu que si votre demande aboutit à une proposition — et seulement avec votre accord de contact."
+      i18n:
+        nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Souhaitez-vous un rendez-vous ?"}
+      options:
+        - value: "YES"
+          label: "Oui, volontiers"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Oui"}}
+        - value: "NO"
+          label: "Non, une réponse écrite me suffit"
+          i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Non"}}
+        - value: "UNSURE"
+          label: "Je verrai selon les résultats"
           i18n: {nl: {label: "[NL — À TRADUIRE PAR UN NATIF] Je ne sais pas encore"}}
     - key: first_name
       type: text

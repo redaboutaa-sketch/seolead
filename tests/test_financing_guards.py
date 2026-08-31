@@ -271,15 +271,30 @@ class TestOfferRegistry:
         with pytest.raises(ValueError, match="status"):
             OfferConfig(status="probably_fine")
 
-    def test_the_live_registry_is_empty_and_locked(self):
-        """The configuration as shipped: slots, no values, both locks on.
-        « Ne mets PAS 150 uniquement parce que cela apparaît dans notre brief. »
+    def test_the_live_registry_is_supplied_and_still_locked(self):
+        """The SG Solution offer as shipped (2026-08-31): every fact carries an
+        owner-supplied value AND both locks stay shut — supplied is not
+        legally approved, so nothing is publishable and the QA registry stays
+        empty. Fail-closed with a full registry is the whole point.
         """
         offer = load_site("solar_be").offer
+        assert offer.version.startswith("sg-solution-solar-25y")
         assert offer.pending_legal_review is True
+        assert offer.status == "draft"
         assert offer.publishable is False
-        assert all(f.value is None for f in offer.facts)
+        assert all(f.value is not None and f.validated_at for f in offer.facts)
+        assert offer.usable_facts == []
+        assert offer.registered_numbers() == set(), \
+            "owner-supplied values must not leak into pages before both locks lift"
         assert offer.worked_example is None
+        # The previous model's version is history, never rewritten.
+        assert [r.version for r in offer.history] == ["solar-be-offer-v0.1-draft"]
+        # The provider is named; its legal identity is NOT invented.
+        assert offer.provider.get("name") == "SG Solution"
+        # No contract evidence supplied — "fixed/guaranteed" stays gated.
+        assert offer.evidence.get("contract_reference") is None
+        # The fallback offer exists with NO tariff: no price generation.
+        assert offer.fallback_offer.get("tariff", {}).get("amount") is None
 
     def test_the_vertical_bridge_serves_the_qa_gate(self):
         view = offer_for_vertical("SOLAR_BE")
@@ -381,10 +396,28 @@ class TestOfferRegistryLifecycle:
 
 
 class TestOrganizationReadiness:
-    def test_nothing_supplied_nothing_ready(self):
+    def test_the_operator_identity_is_supplied_and_ready(self):
+        """Beaver Data Group, owner-supplied 2026-08-31: the Organization
+        schema becomes emittable — with the FRENCH registration (SIREN), no
+        BCE invented — and nothing beyond what was supplied."""
         org = load_site("solar_be").organization
-        assert org.organization_schema_ready is False
-        assert org.local_business_schema_ready is False
+        assert org.legal_name == "Beaver Data Group"
+        assert org.bce_number is None, "a French entity carries no BCE number"
+        assert org.company_number == "935097675"
+        assert org.registration_number == "935097675"
+        assert org.organization_schema_ready is True
+        assert org.local_business_schema_ready is True
+        assert org.address.country == "FR"
+        assert org.lead_destination_email == "reda.boutaa.seolead@gmail.com"
+        # Not supplied → absent, not invented.
+        assert org.logo_path is None
+        assert org.same_as == []
+        assert org.certifications == []
+
+    def test_a_company_number_alone_readies_the_schema(self):
+        assert OrganizationConfig(
+            legal_name="X", company_number="123456789"
+        ).organization_schema_ready is True
 
     def test_organization_needs_legal_name_and_bce(self):
         assert OrganizationConfig(legal_name="X SRL").organization_schema_ready \
