@@ -160,11 +160,16 @@ describe("CSP policy — strength is preserved", () => {
       expect(page.headers.get("x-robots-tag")).toBeNull();
       expect(page.html).toContain('name="robots"');
     }
-    // Les surfaces jamais indexables gardent l'en-tête, inconditionnellement.
+    // Les surfaces jamais indexables : en production, la basicauth Traefik
+    // répond 401 à l'edge (rien n'est servi, rien n'est indexable) ; sans
+    // Traefik, le middleware Next répond avec l'en-tête. Les deux formes
+    // sont fermées ; un préview SERVI sans en-tête ne l'est pas.
     const preview = await fetch(`${BASE}/preview/fr/nimporte-quoi`);
-    expect(preview.headers.get("x-robots-tag")).toBe(
-      "noindex, nofollow, noarchive, nosnippet",
-    );
+    if (preview.status !== 401) {
+      expect(preview.headers.get("x-robots-tag")).toBe(
+        "noindex, nofollow, noarchive, nosnippet",
+      );
+    }
     // L'invariant est « /preview n'est jamais crawlable » : site lancé →
     // `Disallow: /preview/` explicite ; stack fail-closed (config
     // inaccessible) → `Disallow: /` qui le couvre aussi. Les deux formes
