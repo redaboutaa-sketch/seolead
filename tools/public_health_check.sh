@@ -54,6 +54,24 @@ check /panneaux-solaires-sans-apport      404 "EXPECTED_GATED_404 — offre non 
 robots_meta /                             "index, follow"
 robots_meta /conditions                   "noindex"
 
+# Les DEUX signaux, pas seulement la meta : au lancement, un en-tête
+# X-Robots-Tag: noindex résiduel contredisait la meta index,follow et Google
+# a suivi le plus strict — trois demandes d'indexation refusées avant que
+# quiconque ne lise les en-têtes. Une page publique n'en porte AUCUN ;
+# /preview le garde inconditionnellement.
+hdr=$(curl -s -o /dev/null -w '%{header_json}' "$BASE/" | grep -io '"x-robots-tag"' || true)
+if [ -n "$hdr" ]; then
+  echo "/                                          en-tête X-Robots-Tag PRÉSENT — FAIL (il contredit la meta, Google suit le plus strict)"; FAIL=1
+else
+  echo "/                                          en-tête X-Robots-Tag: absent OK"
+fi
+phdr=$(curl -s -o /dev/null -w '%{header_json}' "$BASE/preview/fr/x" | grep -io '"x-robots-tag"' || true)
+if [ -n "$phdr" ]; then
+  echo "/preview/*                                 en-tête X-Robots-Tag: présent OK (jamais indexable)"
+else
+  echo "/preview/*                                 en-tête X-Robots-Tag ABSENT — FAIL"; FAIL=1
+fi
+
 echo "-- sitemap (aucun draft/pending, jamais la landing financement) --"
 curl -s "$BASE/sitemap.xml" | grep -o '<loc>[^<]*</loc>'
 if curl -s "$BASE/sitemap.xml" | grep -q "panneaux-solaires-sans-apport"; then

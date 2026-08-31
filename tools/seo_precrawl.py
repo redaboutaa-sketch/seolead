@@ -241,6 +241,20 @@ def crawl(base: str, probes: list[str] | None = None
             findings.append(f"meta description dupliquée sur "
                             f"{', '.join(sorted(paths))}")
 
+    # Les DEUX signaux robots doivent dire la même chose. Le 2026-08-31, un
+    # en-tête X-Robots-Tag: noindex résiduel contredisait la meta index,follow
+    # sur tout le site ; Google suit le signal le plus strict et a refusé
+    # chaque demande d'indexation. Ce crawler affichait alors
+    # `robots_meta or robots_header` — la meta masquait l'en-tête sur toute
+    # page HTML, et trois diagnostics sont passés à côté. Plus jamais.
+    for path, r in html_pages.items():
+        if (r.robots_header and "noindex" in r.robots_header.lower()
+                and r.robots_meta and "noindex" not in r.robots_meta.lower()):
+            findings.append(
+                f"CONTRADICTION robots sur `{path}` : meta « {r.robots_meta} » "
+                f"mais en-tête X-Robots-Tag « {r.robots_header} » — Google "
+                f"suit le plus strict, la page ne sera PAS indexée")
+
     for path, r in html_pages.items():
         if len(r.h1s) != 1:
             findings.append(f"`{path}` porte {len(r.h1s)} H1")
@@ -304,7 +318,13 @@ def render(seen: dict[str, RouteReport], meta: dict, label: str) -> str:
             lines.append(f"| `{path}` | {r.status} | {r.robots_header or '—'} "
                          f"| | ({r.content_type}) | | | | | | {r.text_chars} o |")
             continue
-        robots = r.robots_meta or r.robots_header or "—"
+        # Les deux signaux, toujours : un `or` ici a masqué l'en-tête
+        # X-Robots-Tag pendant tout le lancement (voir le constat
+        # CONTRADICTION ci-dessus). L'en-tête d'une page HTML s'affiche
+        # explicitement, même — surtout — quand la meta existe.
+        robots = r.robots_meta or "—"
+        if r.robots_header:
+            robots += f" ; hdr: {r.robots_header}"
         og = "✓" if r.og.get("og:title") else "—"
         jsonld = ", ".join(sorted(set(r.jsonld_types))) or "—"
         lines.append(

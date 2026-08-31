@@ -102,10 +102,16 @@ services:
       traefik.http.middlewares.monprojetsolaire-security-headers.headers.stsIncludeSubdomains: "true"
       traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.X-Powered-By: ""
       traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.Server: ""
-      # Belt and braces with the application's own header. The app is fail-closed
-      # already; this makes the refusal true even for a response the app did not
-      # generate, such as a Traefik-level error page.
-      traefik.http.middlewares.monprojetsolaire-security-headers.headers.customResponseHeaders.X-Robots-Tag: "noindex, nofollow, noarchive, nosnippet"
+      # AUCUN X-Robots-Tag ici — retiré le 2026-08-31, jour du lancement.
+      # L'ancien « belt and braces » (le même en-tête noindex ajouté à l'edge)
+      # était la TROISIÈME source de vérité sur l'indexation, et la plus
+      # sournoise : le runbook demandait de le retirer au lancement, personne
+      # ne l'a fait, et Traefik a estampillé noindex sur chaque réponse
+      # publique pendant que le HTML disait index,follow. Google suit le
+      # signal le plus strict → trois demandes d'indexation refusées.
+      # L'autorité est UNIQUE désormais : la meta par page, pilotée par la
+      # config (fail-closed). /preview et /api gardent leur en-tête noindex,
+      # posé par le middleware Next — il traverse Traefik tel quel.
 
       traefik.http.middlewares.monprojetsolaire-compress.compress: "true"
       # Brotli first, explicitly.

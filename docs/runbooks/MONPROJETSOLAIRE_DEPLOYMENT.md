@@ -141,10 +141,21 @@ having been indexed is a fact about the internet.
 1. `config/sites/solar_be.yaml`: `staging: false` **and**
    `seo.allow_indexing: true`. The validator refuses either alone in a way that
    would produce an inconsistent state.
-2. Rebuild `seolead_web` with `SEOLEAD_ALLOW_INDEXING=true` so the fail-closed
-   `X-Robots-Tag` header stops being emitted.
-3. Remove the `X-Robots-Tag` custom response header from
-   `infra/traefik/docker-compose.public.yml` and re-apply.
+2. ~~Rebuild `seolead_web` with `SEOLEAD_ALLOW_INDEXING=true`~~ — **caduc
+   depuis le 2026-08-31.** Cette variable n'existe plus : au lancement, les
+   étapes 2 et 3 ont été oubliées, l'en-tête `X-Robots-Tag: noindex` a
+   contredit la meta `index, follow` sur tout le site, et Google — qui suit
+   le signal le plus strict — a refusé chaque demande d'indexation. La
+   config du site est désormais **l'unique** autorité d'indexation : la meta
+   par page en découle, et l'en-tête HTTP n'existe plus que sur `/preview`
+   et `/api`, inconditionnellement (middleware Next). Rien à rebuilder, rien
+   à retirer : les étapes 2 et 3 historiques n'ont plus d'équivalent.
+3. ~~Remove the `X-Robots-Tag` custom response header from
+   `infra/traefik/docker-compose.public.yml` and re-apply~~ — fait une fois
+   pour toutes le 2026-08-31 ; le fichier suivi n'ajoute plus cet en-tête.
+   Vérification après tout déploiement :
+   `curl -sI https://monprojetsolaire.be/ | grep -i x-robots-tag` ne doit
+   RIEN afficher (et la même commande sur `/preview/fr/x` doit l'afficher).
 
 Then, and only then, publish content:
 

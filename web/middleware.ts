@@ -25,7 +25,24 @@ import type { NextRequest } from "next/server";
  * exists to stop.
  */
 
-const ALLOW_INDEXING = process.env.SEOLEAD_ALLOW_INDEXING === "true";
+/**
+ * Routes that must NEVER be indexable, whatever the site-wide gate says.
+ * Unconditional on purpose: preview serves unpublished content behind a
+ * token, /api is machinery — no configuration state makes either indexable.
+ *
+ * The launched public routes carry NO X-Robots-Tag from here anymore. The
+ * env-var switch that used to gate a blanket noindex header (deliberately
+ * not named here: a test pins its absence from this file) was a second
+ * source of truth beside the site config — and
+ * on launch night (2026-08-31) it did exactly what a second source of truth
+ * does: the YAML opened meta robots, robots.txt and the sitemap, the env
+ * var stayed unset, every page served `index, follow` in HTML AND
+ * `X-Robots-Tag: noindex` in HTTP, and Google honoured the stricter one.
+ * Three « demande d'indexation refusée » later, the header answers to the
+ * same authority as everything else: per-page metadata from the site
+ * config, fail-closed by construction.
+ */
+const ALWAYS_NOINDEX_PREFIXES = ["/preview", "/api"];
 
 function buildCsp(nonce: string): string {
   return [
@@ -72,7 +89,8 @@ export function middleware(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("content-security-policy", csp);
-  if (!ALLOW_INDEXING) {
+  if (ALWAYS_NOINDEX_PREFIXES.some(
+      (prefix) => request.nextUrl.pathname.startsWith(prefix))) {
     // Kept here as well as in next.config so the header is present on every
     // response middleware touches, whatever the route returns.
     response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");

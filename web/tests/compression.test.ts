@@ -187,12 +187,11 @@ describe.skipIf(!THROUGH_EDGE)("the wire, through Traefik", () => {
     }
   }, 60_000);
 
-  it("still refuses to index anything", async () => {
-    // Compression negotiation touches headers; this is the one header set that
-    // must never move, whatever else does.
+  it("compression negotiation does not resurrect the blanket noindex header", async () => {
+    // Le site est lancé : la page publique ne porte AUCUN X-Robots-Tag —
+    // c'est l'en-tête qui a contredit la meta au lancement. La négociation
+    // de compression touche aux en-têtes ; elle ne doit pas ramener celui-là.
     const response = await fetch(`${BASE}/`, { headers: { "Accept-Encoding": BROWSER_AE } });
-    expect(response.headers.get("x-robots-tag")).toBe(
-      "noindex, nofollow, noarchive, nosnippet",
-    );
+    expect(response.headers.get("x-robots-tag")).toBeNull();
   }, 30_000);
 });
