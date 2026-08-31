@@ -426,6 +426,10 @@ def to_dto(snapshot: PublishedContent, config: SiteConfig) -> dict:
         },
         "version": snapshot.version,
         "state": snapshot.state,
+        # Both dates travel because the Article schema distinguishes them:
+        # datePublished is the publication act, dateModified the last touch.
+        "published_at": (snapshot.published_at.isoformat()
+                         if snapshot.published_at else None),
         "updated_at": (snapshot.updated_at.isoformat()
                        if snapshot.updated_at else None),
     }
