@@ -101,8 +101,9 @@ def rejudge(monkeypatch, session):
     captured: list[dict] = []
     monkeypatch.setattr(cli, "_emit", lambda payload: captured.append(payload))
 
-    async def _run(draft_id: str) -> tuple[int, dict]:
-        code = await cmd_qa_rejudge(argparse.Namespace(id=draft_id))
+    async def _run(draft_id: str, *, explain: bool = False) -> tuple[int, dict]:
+        code = await cmd_qa_rejudge(argparse.Namespace(id=draft_id,
+                                                       explain=explain))
         return code, captured[-1]
 
     return _run
@@ -170,3 +171,45 @@ class TestRejudge:
         code, report = await rejudge(str(uuid.uuid4()))
         assert code != 0
         assert report == {"error": "not found"}
+
+
+class TestExplain:
+    """Off by default, because a count is what the command is usually asked for.
+
+    On, it answers the question the count cannot: whether the arbitration is
+    still deciding anything. Read-only either way — no provider, no write.
+    """
+
+    async def test_it_is_absent_unless_asked_for(self, session, rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, report = await rejudge(str(draft.id))
+        assert "arbitration" not in report
+
+    async def test_it_shows_the_two_readings_and_the_gap(self, session,
+                                                         rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, report = await rejudge(str(draft.id), explain=True)
+        arbitration = report["arbitration"]
+        assert arbitration["consulted"] == 1
+        pair = arbitration["pairs"][0]
+        assert pair["contested_claim"] and pair["supported_claim"]
+        assert pair["gap"] >= 0
+        assert pair["margin"] == 0.05
+
+    async def test_it_separates_what_still_blocks_from_what_no_longer_does(
+            self, session, rejudge):
+        draft, _ = await _sealed_draft(session, body=UNSUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, report = await rejudge(str(draft.id), explain=True)
+        assert report["arbitration"]["blocks_now"] == 1
+
+    async def test_asking_for_it_does_not_change_the_verdict(self, session,
+                                                             rejudge):
+        draft, _ = await _sealed_draft(session, body=SUPPORTED,
+                                       stored_blocking=[OLD_FINDING])
+        _, plain = await rejudge(str(draft.id))
+        _, explained = await rejudge(str(draft.id), explain=True)
+        assert plain["now"] == explained["now"]
+        assert plain["blocking_total"] == explained["blocking_total"]

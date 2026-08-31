@@ -202,6 +202,94 @@ def _ambiguous_finding(sentence: str, claim: dict, rival: dict | None,
                 f"{str((rival or {}).get('claim') or '(none)')[:80]}"))
 
 
+# The three checks that consult the arbitration, and the code each of them
+# would raise if the contested reading won. Kept beside `explain_arbitration`
+# so a check added later is a visible omission rather than a silent one.
+_ARBITRATED_CHECKS = ("HIGH_RISK_CLAIM_ASSERTED", "REGIONAL_SCOPE_NOT_STATED",
+                      "CONFLICTING_EVIDENCE_ASSERTED")
+
+
+def explain_arbitration(draft: dict, package: dict,
+                        profile: VerticalProfile) -> list[dict]:
+    """Every place the arbitration was consulted, and what it decided.
+
+    Read-only, and answers a question the verdict cannot: `run_factual_qa_v2`
+    reports five findings or none, and either number is compatible with an
+    arbitration that is doing real work and with one that has quietly stopped
+    blocking anything. This shows the two strengths and the gap between them,
+    so the margin can be judged instead of trusted.
+
+    One row per (check, claim) the OLD unarbitrated logic would have raised —
+    that is, every claim some factual sentence matches. What changed is which
+    of those become findings.
+    """
+    body = (draft.get("body") or "").strip()
+    claims = package.get("claims") or []
+    supported = [c for c in claims
+                 if c.get("evidence_status") == EvidenceStatus.SUPPORTED.value]
+    sentences = extract_draft_claims(body) if body else []
+
+    rows: list[dict] = []
+
+    def row(check: str, claim: dict, sentence: str) -> None:
+        contested = _match_strength(sentence, claim)
+        best, rival = 0.0, None
+        for candidate in supported:
+            if candidate is claim:
+                continue
+            strength = _match_strength(sentence, candidate)
+            if strength > best:
+                best, rival = strength, candidate
+        verdict, _ = _arbitrate(sentence, claim, supported)
+        rows.append({
+            "check": check,
+            "verdict": verdict,
+            "would_have_blocked_before": True,
+            "blocks_now": verdict in (_ASSERTED, _AMBIGUOUS),
+            "sentence": sentence[:200],
+            "contested_claim": str(claim.get("claim"))[:200],
+            "contested_status": claim.get("evidence_status"),
+            "contested_category": claim.get("category"),
+            "contested_strength": round(contested, 4),
+            "supported_claim": str((rival or {}).get("claim") or "")[:200] or None,
+            "supported_strength": round(best, 4),
+            "gap": round(abs(contested - best), 4),
+            "margin": _MATCH_MARGIN,
+            # Twice the margin. Not a rule the code enforces — a band where the
+            # comparison decided something on very little, and a human should
+            # look before trusting it.
+            "narrow": abs(contested - best) < 2 * _MATCH_MARGIN,
+        })
+
+    for claim in claims:
+        status = claim.get("evidence_status")
+        risk = claim.get("claim_risk")
+
+        if risk == ClaimRisk.HIGH and status != EvidenceStatus.SUPPORTED.value:
+            for sentence in sentences:
+                if _matches_claim(sentence, claim):
+                    row("HIGH_RISK_CLAIM_ASSERTED", claim, sentence)
+                    break
+
+        claim_region = _region_of(claim)
+        if (claim.get("regionally_determined") and claim_region.is_subnational
+                and body):
+            for sentence in sentences:
+                if not _matches_claim(sentence, claim):
+                    continue
+                if not names_region(sentence, claim_region):
+                    row("REGIONAL_SCOPE_NOT_STATED", claim, sentence)
+                break
+
+        if status == EvidenceStatus.CONFLICTING.value:
+            for sentence in sentences:
+                if _matches_claim(sentence, claim):
+                    row("CONFLICTING_EVIDENCE_ASSERTED", claim, sentence)
+                    break
+
+    return rows
+
+
 def run_factual_qa_v2(draft: dict, package: dict,
                       profile: VerticalProfile) -> dict:
     """Evaluate a draft against the package's atomic claim ledger."""

@@ -11,6 +11,8 @@ forbidden to become: a preference for the supported reading, and a silence.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.core.enums import EvidenceStatus
 from app.services import factual_qa_v2
 from app.services.claim_policy import ClaimRisk
@@ -145,6 +147,56 @@ class TestTiesBlock:
         assert "HIGH_RISK_CLAIM_ASSERTED" in codes
         assert "AMBIGUOUS_MATCH" not in codes
 
+    # ── The canary the first version did not have ────────────────────────
+    # Every tie exercised above was an EXACT tie — identical texts, gap zero.
+    # That tests equality, not the margin, and left the fail-closed middle as a
+    # branch nothing walked: the margin could have been zero, or a thousand, and
+    # the suite would not have noticed. Below, the supported reading is genuinely
+    # ahead — by 0.048, inside the 0.05 margin. Fail-closed means it blocks
+    # anyway, and says so as a matcher case.
+
+    SHARED = ("installation photovoltaïque résidentielle raccordée au réseau "
+              "wallon produit environ 4200 kWh chaque année civile complète "
+              "mesurée durant douze mois consécutifs sans ombrage notable")
+
+    def _near_tie(self):
+        return (self.SHARED + ".",
+                _claim(self.SHARED + " normalement."),
+                _claim(self.SHARED + " selon l'orientation choisie.",
+                       status=EvidenceStatus.UNSUPPORTED, risk=ClaimRisk.HIGH,
+                       category="ROI"))
+
+    def test_the_near_tie_is_really_inside_the_margin(self):
+        """The fixture is only a canary if the gap is where it claims to be."""
+        sentence, supported, contested = self._near_tie()
+        ahead = factual_qa_v2._match_strength(sentence, supported)
+        behind = factual_qa_v2._match_strength(sentence, contested)
+        gap = ahead - behind
+        assert gap > 0, "an exact tie would test equality, not the margin"
+        assert gap < factual_qa_v2._MATCH_MARGIN, (
+            f"gap {gap:.4f} is outside the margin; this fixture no longer "
+            f"exercises the fail-closed middle")
+
+    def test_a_gap_inside_the_margin_blocks_as_ambiguous(self, solar_profile):
+        """The supported reading leads — and it is not allowed to win on that."""
+        sentence, supported, contested = self._near_tie()
+        verdict = _run(sentence, [supported, contested], solar_profile)
+        assert "AMBIGUOUS_MATCH" in _codes(verdict)
+        assert verdict["status"] == "FAILED"
+
+    def test_the_same_pair_beyond_the_margin_does_not_block(self,
+                                                            solar_profile):
+        """The other side of the same knob, so the margin is pinned from both."""
+        sentence, supported, _ = self._near_tie()
+        far = _claim("Le tarif prosumer wallon est calculé sur la puissance "
+                     "de l'onduleur, pas sur les 4200 kilowattheures produits.",
+                     status=EvidenceStatus.UNSUPPORTED, risk=ClaimRisk.HIGH,
+                     category="GRID_RULE")
+        ahead = factual_qa_v2._match_strength(sentence, supported)
+        behind = factual_qa_v2._match_strength(sentence, far)
+        assert ahead - behind > factual_qa_v2._MATCH_MARGIN
+        assert _codes(_run(sentence, [supported, far], solar_profile)) == []
+
     def test_an_unsupported_claim_with_no_supported_rival_blocks_outright(
             self, solar_profile):
         """No rival means no ambiguity. This is the case the gate exists for."""
@@ -276,3 +328,88 @@ class TestMatchStrength:
                      "l'électricité pendant 25 ans.")
         assert (factual_qa_v2._match_strength(sentence, near)
                 > factual_qa_v2._match_strength(sentence, far))
+
+
+# ─── The gap, made visible ───────────────────────────────────────────────────
+
+class TestExplainArbitration:
+    """`run_factual_qa_v2` returns five findings or none.
+
+    Both numbers are compatible with an arbitration doing real work and with one
+    that has quietly stopped blocking anything. Only the gap tells them apart.
+    """
+
+    def _package(self):
+        supported = ("La prime régionale atteint 1500 euros pour une "
+                     "installation résidentielle.")
+        contested = ("La prime régionale atteint 1500 euros pour une "
+                     "installation photovoltaïque.")
+        return supported, contested, [
+            _claim(supported),
+            _claim(contested, status=EvidenceStatus.UNSUPPORTED,
+                   risk=ClaimRisk.HIGH, category="SUBSIDY"),
+        ]
+
+    def _explain(self, body, claims, profile):
+        return factual_qa_v2.explain_arbitration(
+            {"body": body}, {"claims": claims}, profile)
+
+    def test_it_reports_the_claims_the_old_check_would_have_blocked(
+            self, solar_profile):
+        supported, _, claims = self._package()
+        rows = self._explain(supported, claims, solar_profile)
+        assert len(rows) == 1
+        assert rows[0]["check"] == "HIGH_RISK_CLAIM_ASSERTED"
+        assert rows[0]["would_have_blocked_before"] is True
+
+    def test_it_names_both_readings_and_the_gap_between_them(self,
+                                                             solar_profile):
+        supported, contested, claims = self._package()
+        row = self._explain(supported, claims, solar_profile)[0]
+        assert row["contested_claim"].startswith("La prime régionale")
+        assert row["supported_claim"] == supported
+        assert row["gap"] == pytest.approx(
+            abs(row["contested_strength"] - row["supported_strength"]), abs=1e-4)
+        assert row["blocks_now"] is False, "the supported reading wins here"
+
+    def test_a_near_tie_is_flagged_as_narrow(self, solar_profile):
+        """Twice the margin. Not a rule — a band a human should look at."""
+        sentence, supported, contested = TestTiesBlock()._near_tie()
+        row = self._explain(sentence, [supported, contested], solar_profile)[0]
+        assert row["narrow"] is True
+        assert row["verdict"] == "AMBIGUOUS"
+        assert row["blocks_now"] is True
+
+    def test_a_wide_gap_is_not_flagged(self, solar_profile):
+        supported, _, claims = self._package()
+        rows = self._explain(
+            "La prime régionale atteint 1500 euros pour une installation "
+            "photovoltaïque.", claims, solar_profile)
+        assert rows[0]["blocks_now"] is True
+        assert rows[0]["narrow"] is False
+
+    def test_it_writes_nothing_and_decides_nothing(self, solar_profile):
+        """A diagnostic that changes the verdict is not a diagnostic."""
+        supported, _, claims = self._package()
+        before = _run(supported, claims, solar_profile)
+        self._explain(supported, claims, solar_profile)
+        assert _run(supported, claims, solar_profile) == before
+
+    def test_a_claim_is_never_its_own_rival(self, solar_profile):
+        """The scope check runs on SUPPORTED claims, so the claim sits in the
+        pool it is compared against. Left in, every regional row would report a
+        gap of zero and a "supported reading" identical to the contested one —
+        a permanent, meaningless tie."""
+        unscoped = _claim("Le retour sur investissement d'une installation "
+                          "photovoltaïque se situe entre 10 et 12 ans selon la "
+                          "consommation du ménage.")
+        walloon = _claim("En Wallonie, le retour sur investissement d'une "
+                         "installation atteint 10 ans.",
+                         category="ROI", region="BE-WAL",
+                         regionally_determined=True)
+        body = "Le retour sur investissement d'une installation atteint 10 ans."
+        rows = self._explain(body, [unscoped, walloon], solar_profile)
+        row = next(r for r in rows
+                   if r["check"] == "REGIONAL_SCOPE_NOT_STATED")
+        assert row["supported_claim"] != row["contested_claim"]
+        assert row["gap"] > 0

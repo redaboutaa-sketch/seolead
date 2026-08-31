@@ -589,6 +589,13 @@ async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
                 "all_codes": codes(result["findings"]),
             }
 
+        # `--explain` answers what the count cannot: five findings or none are
+        # both compatible with an arbitration doing real work and with one that
+        # has quietly stopped blocking. Read-only, no extra spend.
+        explanation = (factual_qa_v2.explain_arbitration(draft_payload, payload,
+                                                         profile)
+                       if getattr(args, "explain", False) else None)
+
         _emit({
             "draft_id": str(draft.id), "title": draft.title,
             "package_id": str(package.id), "query": package.query,
@@ -607,6 +614,13 @@ async def cmd_qa_rejudge(args: argparse.Namespace) -> int:
                 for name, result in (("FACTUAL", factual), ("SEO", seo))
                 for f in result["blocking_issues"]
             ],
+            **({"arbitration": {
+                "pairs": explanation,
+                "consulted": len(explanation),
+                "blocks_now": sum(1 for r in explanation if r["blocks_now"]),
+                "narrow_gaps": [r for r in explanation if r["narrow"]],
+                "margin": factual_qa_v2._MATCH_MARGIN,
+            }} if explanation is not None else {}),
             "note": ("Gates only. The research, the brief and the draft are the "
                      "sealed ones; nothing was bought and nothing was written."),
         })
@@ -1136,6 +1150,10 @@ def build_parser() -> argparse.ArgumentParser:
         "rejudge", help="re-run the deterministic QA gates on a stored draft — "
                         "read-only, no provider call")
     draft_rejudge.add_argument("id")
+    draft_rejudge.add_argument("--explain", action="store_true",
+                               help="also show, for every claim the old "
+                                    "unarbitrated check would have blocked, the "
+                                    "two readings and the gap between them")
     draft_rejudge.set_defaults(func=cmd_qa_rejudge)
 
     content = sub.add_parser("content", help="approval workflow")
