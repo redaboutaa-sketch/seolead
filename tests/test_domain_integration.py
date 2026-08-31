@@ -80,36 +80,46 @@ class TestCanonicalOrigin:
     def test_no_origin_falls_back_to_a_relative_path_not_a_guess(self):
         raw = load_site("solar_be").model_dump()
         raw["domain"] = None
+        # Refermer les portes du site lancé : une fixture sans domaine ne
+        # peut être ni non-staging ni indexable, les validateurs refusent.
+        raw["staging"] = True
         raw["seo"] = {**raw["seo"], "canonical_origin": None,
-                      "allow_publication": False}
+                      "allow_publication": False, "allow_indexing": False}
         config = SiteConfig(**raw)
         assert config.canonical_url("/prix") == "/prix"
 
 
 class TestDomainDoesNotEnableIndexing:
-    def test_the_configured_site_is_still_not_indexable(self):
+    def test_the_configured_site_is_launched(self):
+        """Publication ouverte le 2026-08-31 sur autorisation explicite du
+        propriétaire — les deux décisions sont prises, ensemble."""
         config = load_site("solar_be")
         assert config.domain == DOMAIN
-        assert config.staging is True
-        assert config.seo.allow_indexing is False
-        assert config.is_indexable is False, \
-            "acquiring a domain must not, by itself, make a site indexable"
+        assert config.staging is False
+        assert config.seo.allow_indexing is True
+        assert config.is_indexable is True
 
-    def test_the_yaml_on_disk_has_indexing_off(self):
+    def test_the_yaml_on_disk_records_the_launch(self):
         """Read the file, not the object: this is the line an edit would change."""
         raw = yaml.safe_load(Path("config/sites/solar_be.yaml").read_text())
-        assert raw["seo"]["allow_indexing"] is False
-        assert raw["staging"] is True
+        assert raw["seo"]["allow_indexing"] is True
+        assert raw["staging"] is False
 
     def test_enabling_indexing_while_staging_is_still_refused(self):
+        # Le mécanisme, épinglé sur une config remise explicitement en
+        # préproduction : il ne dépend plus de l'état du fichier vivant.
         raw = load_site("solar_be").model_dump()
+        raw["staging"] = True
         raw["seo"] = {**raw["seo"], "allow_indexing": True}
         with pytest.raises(ValueError, match="may not allow indexing"):
             SiteConfig(**raw)
 
     def test_launching_needs_two_deliberate_changes_not_one(self):
-        """`staging: false` AND `allow_indexing: true`, together."""
+        """`staging: false` AND `allow_indexing: true`, together — rebuilt
+        from the explicitly closed state, so the invariant outlives launch."""
         base = _with_validated_consents(load_site("solar_be").model_dump())
+        base = {**base, "staging": True,
+                "seo": {**base["seo"], "allow_indexing": False}}
 
         only_staging_off = {**base, "staging": False}
         assert SiteConfig(**only_staging_off).is_indexable is False
@@ -127,7 +137,11 @@ class TestPublicationAndIndexingAreSeparateGates:
     """
 
     def test_the_site_may_serve_published_content_but_not_be_indexed(self):
-        config = load_site("solar_be")
+        # La distinction, épinglée sur la variante soft-launch construite —
+        # le site vivant a désormais les deux portes ouvertes.
+        base = load_site("solar_be").model_dump()
+        base["seo"] = {**base["seo"], "allow_indexing": False}
+        config = SiteConfig(**base)
         assert config.is_publishable is True
         assert config.is_indexable is False
 
@@ -141,7 +155,8 @@ class TestPublicationAndIndexingAreSeparateGates:
     def test_indexing_still_requires_leaving_staging(self):
         """The stricter gate did not move."""
         base = _with_validated_consents(load_site("solar_be").model_dump())
-        base["seo"] = {**base["seo"], "allow_indexing": True}
+        base = {**base, "staging": True,
+                "seo": {**base["seo"], "allow_indexing": True}}
         with pytest.raises(ValueError, match="may not allow indexing"):
             SiteConfig(**base)
 
@@ -160,16 +175,17 @@ class TestPublicationAndIndexingAreSeparateGates:
     def test_publication_requires_a_domain_to_serve_on(self):
         base = load_site("solar_be").model_dump()
         base["domain"] = None
+        base["staging"] = True
         base["seo"] = {**base["seo"], "canonical_origin": None,
-                       "allow_publication": True}
+                       "allow_publication": True, "allow_indexing": False}
         with pytest.raises(ValueError, match="requires a domain"):
             SiteConfig(**base)
 
-    def test_the_yaml_on_disk_publishes_without_indexing(self):
+    def test_the_yaml_on_disk_is_launched(self):
         raw = yaml.safe_load(Path("config/sites/solar_be.yaml").read_text())
         assert raw["seo"]["allow_publication"] is True
-        assert raw["seo"]["allow_indexing"] is False
-        assert raw["staging"] is True
+        assert raw["seo"]["allow_indexing"] is True
+        assert raw["staging"] is False
 
 
 class TestTraefikRoutingIsPreparedNotApplied:

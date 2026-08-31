@@ -58,12 +58,13 @@ class TestSiteApiAuthentication:
 
 
 class TestSiteConfigEndpoint:
-    def test_the_config_reports_the_site_as_not_indexable(self, client):
-        """The domain is set and the site is still not indexable.
+    def test_the_config_reports_the_launched_site(self, client):
+        """Publication ouverte le 2026-08-31 (autorisation propriétaire).
 
-        This is the assertion that matters after the domain arrived: the API is
-        what the frontend trusts for `robots`, `sitemap` and every page's meta,
-        so if `indexable` ever flipped here the whole gate would open at once.
+        L'API est ce que le frontend croit pour robots, sitemap et chaque
+        méta : elle rapporte désormais le site lancé — ET l'offre toujours
+        verrouillée, parce que la porte juridique est indépendante des
+        portes de site.
         """
         response = client.get("/site/v1/sites/solar_be",
                               headers={"X-Internal-Key": KEY})
@@ -71,11 +72,15 @@ class TestSiteConfigEndpoint:
         body = response.json()
         assert body["domain"] == "monprojetsolaire.be"
         assert body["seo"]["canonical_origin"] == "https://monprojetsolaire.be"
-        assert body["staging"] is True
-        assert body["seo"]["allow_indexing"] is False
-        assert body["indexable"] is False
+        assert body["staging"] is False
+        assert body["seo"]["allow_indexing"] is True
+        assert body["indexable"] is True
         assert body["brand_name"] == "Mon Projet Solaire"
         assert body["brand_name_is_placeholder"] is False
+        # La porte indépendante n'a pas bougé avec le lancement.
+        assert body["offer"]["publishable"] is False
+        assert body["offer"]["pending_legal_review"] is True
+        assert body["offer"]["facts"] == []
 
     def test_no_secret_appears_in_the_site_config(self, client):
         body = client.get("/site/v1/sites/solar_be",

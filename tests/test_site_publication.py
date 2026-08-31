@@ -237,24 +237,35 @@ class TestPublicationGate:
             await publish_content(session, snapshot=snapshot, config=closed)
         assert snapshot.state == PublicationState.STAGED.value
 
-    async def test_a_published_page_stays_noindex_while_the_site_is_not(
+    async def test_publication_noindex_follows_the_site_gate(
             self, session, solar_site):
-        """Soft launch: served at its real URL, still invisible to crawlers."""
+        """Soft launch preserved as a mechanism; launched site publishes
+        indexable pages. The flag is decided at PUBLISH time, from the
+        config's indexability — staged snapshots are always noindex."""
         draft, brief = await _make_draft(session, solar_site)
         await _add_qa(session, draft)
         await _approve(session, draft)
-        config = load_site("solar_be")
+
+        # Variante soft-launch (construite) : publiée, toujours noindex.
+        base = load_site("solar_be").model_dump()
+        base["seo"] = {**base["seo"], "allow_indexing": False}
+        soft = SiteConfig(**base)
         snapshot = await stage_content(session, draft=draft, brief=brief,
-                                       site=solar_site, config=config)
-
-        assert config.is_publishable and not config.is_indexable
-        await publish_content(session, snapshot=snapshot, config=config)
-
+                                       site=solar_site, config=soft)
+        assert snapshot.noindex is True
+        assert soft.is_publishable and not soft.is_indexable
+        await publish_content(session, snapshot=snapshot, config=soft)
         assert snapshot.state == PublicationState.PUBLISHED.value
         assert snapshot.published_at is not None
         assert snapshot.noindex is True, \
             "a published page on a non-indexable site must still be noindex"
-        assert to_dto(snapshot, config)["meta"]["noindex"] is True
+        assert to_dto(snapshot, soft)["meta"]["noindex"] is True
+
+        # Le site vivant, lancé : la même page publiée devient indexable.
+        launched = load_site("solar_be")
+        assert launched.is_indexable is True
+        snapshot.noindex = not launched.is_indexable
+        assert to_dto(snapshot, launched)["meta"]["noindex"] is False
 
     async def test_publishing_is_refused_when_the_site_may_not_serve_content(
             self, session, solar_site):
@@ -508,21 +519,21 @@ def _with_validated_consents(base: dict) -> dict:
 
 
 class TestSiteConfiguration:
-    def test_solar_be_has_its_domain_and_is_still_not_indexable(self):
-        """The domain arriving must not, on its own, make the site indexable.
-
-        This is why indexability is three conditions. Owning an address and being
-        ready to be found at it are different decisions.
-        """
+    def test_solar_be_is_launched_with_its_domain(self):
+        """Publication ouverte le 2026-08-31 sur autorisation explicite du
+        propriétaire : les trois conditions d'indexabilité sont réunies —
+        chacune par une décision, aucune par accident."""
         config = load_site("solar_be")
         assert config.domain == "monprojetsolaire.be"
         assert config.seo.canonical_origin == "https://monprojetsolaire.be"
-        assert config.staging is True
-        assert config.seo.allow_indexing is False
-        assert config.is_indexable is False
+        assert config.staging is False
+        assert config.seo.allow_indexing is True
+        assert config.is_indexable is True
 
     def test_a_staging_site_may_not_enable_indexing(self):
+        # Le mécanisme, sur une config remise explicitement en préproduction.
         raw = load_site("solar_be").model_dump()
+        raw["staging"] = True
         raw["seo"]["allow_indexing"] = True
         with pytest.raises(ValueError, match="may not allow indexing"):
             SiteConfig(**raw)

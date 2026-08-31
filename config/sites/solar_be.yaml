@@ -1,13 +1,15 @@
 # Mon Projet Solaire — site configuration.
 #
-# `staging: true` and `seo.allow_indexing: false` are the publication gate. The
-# loader refuses a configuration where a domainless site claims to be live, and
+# `staging` and `seo.allow_indexing` are the publication gate. The loader
+# refuses a configuration where a domainless site claims to be live, and
 # refuses a staging site that permits indexing.
 #
-# The domain is now owned and configured, and the site is STILL not indexable —
-# that is deliberate and is the whole point of keeping indexability as three
-# independent conditions rather than one flag. Having an address is not the same
-# as being ready to be found at it.
+# PUBLICATION OUVERTE le 2026-08-31 sur autorisation explicite du
+# propriétaire (« FINAL PUBLICATION APPROVAL — ALREADY GIVEN ») : staging
+# false, allow_indexing true. Ce qui reste fermé le reste par sa propre
+# porte, pas par celles-ci : la landing financement est servie et indexée
+# UNIQUEMENT quand `offer.publishable` (validation propriétaire + revue
+# juridique) ; /conditions reste noindex tant que son texte légal manque.
 
 site_id: solar_be
 vertical: SOLAR_BE
@@ -41,7 +43,7 @@ default_language: fr
 # ce qui est exactement ce qu'on veut.
 supported_languages: [fr]
 
-staging: true
+staging: false
 
 # The default language is unprefixed so the primary market's URLs stay short;
 # Dutch is prefixed. Deliberately explicit rather than derived, because the
@@ -113,7 +115,7 @@ seo:
   sitemap_enabled: true
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
   # requires `staging: false` as well. Owner decision only.
-  allow_indexing: false
+  allow_indexing: true
   # Jetons de vérification Search Console / Bing Webmaster — fournis par le
   # propriétaire depuis chaque console, JAMAIS inventés. Null n'émet rien.
   # Poser le jeton avant allow_indexing est sûr et utile : la console prouve

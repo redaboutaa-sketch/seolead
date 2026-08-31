@@ -53,9 +53,10 @@ class TestTheStagingExitGuardIsGreen:
         assert public.is_publishable is True
 
     def test_leaving_staging_is_still_not_indexing(self, raw):
-        """Two decisions, and the second is still unmade."""
-        public = SiteConfig(**{**raw, "staging": False})
-        assert public.seo.allow_indexing is False
+        """Two decisions — both now made on the live file, so the mechanism is
+        pinned on a fixture that closes the second one back."""
+        public = SiteConfig(**{**raw, "staging": False,
+                               "seo": {**raw["seo"], "allow_indexing": False}})
         assert public.is_indexable is False
 
     def test_restoring_dutch_blocks_again_until_the_texts_are_validated(self, raw):
