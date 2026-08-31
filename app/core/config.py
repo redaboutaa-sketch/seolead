@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,6 +83,30 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = Field(120, alias="SEOLEAD_LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(2, alias="SEOLEAD_LLM_MAX_RETRIES")
 
+    # ── Lead notification transport (SMTP relay) ────────────────────────────
+    # The DESTINATION lives in site configuration
+    # (`organization.lead_destination_email`, owner-supplied); only the
+    # TRANSPORT lives here. Unset is a first-class state: leads are stored and
+    # the log says loudly that nobody was notified.
+    smtp_host: str = Field("", alias="SEOLEAD_SMTP_HOST")
+    smtp_port: int = Field(587, alias="SEOLEAD_SMTP_PORT")
+    # Both spellings accepted: the operator's .env carries SEOLEAD_SMTP_USER
+    # (the name the go-live order used); the long form stays valid.
+    smtp_username: str = Field(
+        "", validation_alias=AliasChoices("SEOLEAD_SMTP_USER",
+                                         "SEOLEAD_SMTP_USERNAME"))
+    smtp_password: str = Field("", alias="SEOLEAD_SMTP_PASSWORD")
+    # Optional: a Brevo-verified sender identity. When unset, the notifier
+    # falls back to sending FROM the destination address — the operator's own
+    # verified address — because an SMTP login like `9xxx@smtp-brevo.com` is
+    # not a sender identity and relays refuse it.
+    smtp_sender: str = Field("", alias="SEOLEAD_SMTP_SENDER")
+    smtp_starttls: bool = Field(True, alias="SEOLEAD_SMTP_STARTTLS")
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host.strip())
+
     # ── Prospect 360 producer (TR-SL-01) ────────────────────────────────────
     # Empty by default, and that is the safe position: an unconfigured producer
     # leaves every lead in PENDING_EXPORT, which is exactly what Phase 4 already
@@ -136,6 +160,7 @@ class Settings(BaseSettings):
             "INTERNAL_API": "CONFIGURED" if self.internal_api_protected else "NOT_CONFIGURED",
             "SITE_PREVIEW": ("CONFIGURED" if self.site_preview_token.strip()
                              else "NOT_CONFIGURED"),
+            "SMTP": "CONFIGURED" if self.smtp_configured else "NOT_CONFIGURED",
         }
 
     def relevance_thresholds(self):

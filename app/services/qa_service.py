@@ -432,13 +432,33 @@ async def run_llm_qa(
 _OFFER_SENTENCE = re.compile(
     r"frais\s+de\s+dossier|acompte|\bapport\b"
     r"|(?:notre|nos|chez\s+nous|proposons)\W+(?:\w+\W+){0,6}?mensualite"
-    r"|mensualite\W+(?:\w+\W+){0,6}?(?:notre|nos|chez\s+nous|proposons)",
+    r"|mensualite\W+(?:\w+\W+){0,6}?(?:notre|nos|chez\s+nous|proposons)"
+    # SG Solution vocabulary (2026-08-31): fees, OUR tariff and the contract's
+    # figures are offer sentences too. « Le tarif de nuit est à 0,05 €/kWh
+    # chez certains fournisseurs » must stay a market sentence — the
+    # possessive/contract markers are what separates the two, and the
+    # regression corpus pins that edge.
+    r"|frais\s+administratifs?"
+    r"|(?:notre|nos|chez\s+nous|proposons|vous\s+payez|payez\s+que)"
+    r"\W+(?:\w+\W+){0,6}?(?:tarif|€/?\s*kwh|contrat)"
+    r"|(?:notre|le)\s+contrat\W+(?:\w+\W+){0,6}?(?:€|eur|ans?\b|kwh)"
+    r"|vous\s+(?:ne\s+)?payez\b|ne\s+vous\s+coute\w*"
+    r"|prix\s+de\s+rachat|option\s+de\s+rachat",
+    re.IGNORECASE)
+# The framing that turns a registered fact into a totality claim: « Vous payez
+# SEULEMENT 150 € » asserts far more than the fee it names — it asserts there
+# is nothing else. Blocked even when 150 is validated in the registry.
+_OFFER_TOTALITY = re.compile(
+    r"\bseulement\b|\buniquement\b|\btout\s+compris\b"
+    r"|\bne\s+(?:vous\s+)?coute\w*\s+que\b|\bpayez\s+que\b"
+    r"|\brien\s+d[’']\s*autre\b|\baucun\s+autre\s+frais\b",
     re.IGNORECASE)
 _SENTENCE_SPLIT_QA = re.compile(r"(?<=[.!?])\s+|\n+")
 # `_NUMBER_PATTERN` above deliberately ignores figures under four digits (page
 # counts, years of warranty). Offer figures live exactly there — 150 € of fees,
 # 240 months of term — so the offer check reads its own pattern.
-_OFFER_NUMBER = re.compile(r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,})")
+_OFFER_NUMBER = re.compile(
+    r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,}|\d(?=\s*%))")
 
 
 def _financing_findings(draft: dict, offer: dict | None) -> list[dict]:
@@ -467,6 +487,18 @@ def _financing_findings(draft: dict, offer: dict | None) -> list[dict]:
                    for m in _OFFER_NUMBER.finditer(sentence)}
         numbers.discard("")
         if numbers and _OFFER_SENTENCE.search(normalize_query(sentence)):
+            # « Vous payez SEULEMENT 150 € » asserts more than the fee it
+            # names — it asserts there is nothing else. The framing blocks
+            # even when the figure itself is validated.
+            if _OFFER_TOTALITY.search(normalize_query(sentence)):
+                findings.append(_finding(
+                    "OFFER_FACT_OVERCLAIM",
+                    "The draft frames an offer figure as the totality of what "
+                    "the reader pays ('seulement', 'tout compris', 'ne coûte "
+                    "que'). A validated fee licenses stating the fee, never "
+                    "the claim that nothing else exists.",
+                    blocking=True, detail=sentence[:240]))
+                continue
             strays = numbers - registered
             if strays:
                 findings.append(_finding(
@@ -478,6 +510,28 @@ def _financing_findings(draft: dict, offer: dict | None) -> list[dict]:
                     blocking=True, detail=sentence[:240]))
             continue
 
+        if claim_policy.is_unconditional_contract_promise(sentence):
+            findings.append(_finding(
+                "UNCONDITIONAL_CONTRACT_PROMISE",
+                "The draft promises terms of the provider's contract (a "
+                "tariff called fixed or guaranteed, a buyout trajectory, an "
+                "ownership transfer) with no condition attached. The exact "
+                "wording of these terms belongs to the legal verdict matrix "
+                "backed by contract evidence — never to a generated "
+                "sentence.",
+                blocking=True, detail=sentence[:240]))
+            continue
+
+        if claim_policy.is_unconditional_acceptance_promise(sentence):
+            findings.append(_finding(
+                "UNCONDITIONAL_ACCEPTANCE_PROMISE",
+                "The draft promises acceptance or unconditional eligibility. "
+                "Prequalification is the operator's; the DECISION is the "
+                "provider's, after analysis — a page has no standing to "
+                "promise it for anyone.",
+                blocking=True, detail=sentence[:240]))
+            continue
+
         if claim_policy.is_unconditional_financing_promise(sentence):
             findings.append(_finding(
                 "UNCONDITIONAL_FINANCING_PROMISE",
@@ -485,6 +539,16 @@ def _financing_findings(draft: dict, offer: dict | None) -> list[dict]:
                 "attached. The subject is allowed; the unconditional form of "
                 "it is not — no offer is unconditional, and a page saying so "
                 "is wrong before it is checked.",
+                blocking=True, detail=sentence[:240]))
+            continue
+
+        if claim_policy.is_unconditional_outcome_promise(sentence):
+            findings.append(_finding(
+                "UNCONDITIONAL_OUTCOME_PROMISE",
+                "The draft guarantees a financial outcome with no condition. "
+                "In the body the claim ledger already demands institutional "
+                "corroboration; in a title or meta description nothing else "
+                "reads it, so it blocks here.",
                 blocking=True, detail=sentence[:240]))
     return findings
 

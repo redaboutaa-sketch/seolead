@@ -11,81 +11,91 @@ import { financingLandingVisible, localizedPath } from "@/lib/site";
 import type { OfferDTO, SiteConfigDTO } from "@/lib/types";
 
 /**
- * Landing « sans apport » — the transactional page of the financing cluster.
+ * Landing « sans apport » — aligned with the REAL model (2026-08-31).
  *
- * Two disciplines govern every sentence here, and they are the page's actual
- * value proposition:
+ * The model this page describes is the SG Solution offer: an installation
+ * (solar panels + home battery) made available under a long-term contract,
+ * with a possible buyout and an ownership transfer at term. Its legal nature
+ * is deliberately UNQUALIFIED — not called a credit, a lease, a PPA or an
+ * energy-supply contract anywhere, because that qualification is the
+ * lawyer's, not this file's. Provisional naming: « solution SG Solution ».
  *
- * 1. NO INVENTED FIGURE. The only numbers this page may show come from the
- *    first-party offer registry, and only once the owner has validated them AND
- *    the legal review is lifted (`offer.publishable`). Until then the page
- *    explains the METHOD — savings minus instalment — and says plainly that the
- *    figures are established during the personalised study. A fake worked
- *    example would convert better and be the exact thing this site exists not
- *    to do.
+ * Three disciplines govern every sentence:
  *
- * 2. CONDITIONAL, NEVER PROMISSIVE. "Sans apport" is a question the page
- *    answers honestly ("selon votre situation et le montage retenu"), not a
- *    guarantee it makes. The claim-policy gate blocks the promissive form in
- *    generated content; this hand-written page holds itself to the same rule.
+ * 1. NO FIGURE OUTSIDE THE REGISTRY. Duration, tariff, fee, buyout and term
+ *    render ONLY from `offer.facts` — which the API serves only when the
+ *    offer is publishable (owner validation AND legal review). Until then
+ *    every block falls back to « présenté lors de l'étude ».
  *
- * PUBLICATION GATE (P0.3): while the site is staging, the page is reachable for
- * construction and review. Once the site is public, it serves — and is listed,
- * and is indexable — ONLY when the offer registry is publishable (owner
- * validation AND legal review, independently). A financing page is or leads to
- * consumer-credit advertising, and its mandatory wording is the lawyer's to
- * supply — rendered verbatim from `offer.mandatory_disclosures` when present.
+ * 2. CONDITIONAL, NEVER PROMISSIVE. Prequalification is the operator's;
+ *    the DECISION is SG Solution's, after analysis — the page says so
+ *    instead of promising acceptance, and the claim-policy gates
+ *    (UNCONDITIONAL_CONTRACT_PROMISE, UNCONDITIONAL_ACCEPTANCE_PROMISE)
+ *    hold generated content to the same rule.
+ *
+ * 3. ENTITIES NEVER BLURRED. Mon Projet Solaire is the brand and the
+ *    acquisition journey; Beaver Data Group operates it (qualification,
+ *    consent, appointment, transmission); SG Solution analyses, decides and
+ *    contracts. The « qui fait quoi » section states it in that order.
+ *
+ * PUBLICATION GATE unchanged: reachable in staging for construction and
+ * review; on the public site it serves, is listed and is indexable ONLY when
+ * `offer.publishable` — and the lawyer's mandatory wording renders verbatim
+ * from `offer.mandatory_disclosures` when present.
  */
 
 const PATH = "/panneaux-solaires-sans-apport";
 
 const TITLE = "Installer des panneaux solaires sans apport en Belgique";
 const DESCRIPTION =
-  "Selon votre situation, un projet photovoltaïque peut être financé sans " +
-  "mobiliser votre épargne. Ce que « sans apport » veut vraiment dire, quels " +
-  "frais peuvent rester, et comment comparer mensualité et économies.";
+  "Selon votre situation, une installation solaire avec batterie peut être " +
+  "mise à disposition sans acheter l'ensemble immédiatement. Ce que la " +
+  "solution recouvre, les conditions examinées, et comment se décide " +
+  "l'éligibilité.";
 
 // ≤ 50 mots, factuelle, conditionnelle — la réponse qu'un moteur de réponse
 // peut citer telle quelle. Le compte de mots est épinglé par un test.
 const DIRECT_ANSWER =
-  "Oui, sous conditions : selon votre profil et le montage de financement " +
-  "retenu, une installation photovoltaïque peut être réalisée en Belgique " +
-  "sans mobiliser d'épargne au départ. Des frais peuvent rester à votre " +
-  "charge ; les conditions exactes sont établies lors de l'étude.";
+  "Oui, sous conditions : une installation solaire avec batterie domestique " +
+  "peut être mise à disposition dans le cadre d'un contrat de longue durée, " +
+  "sans acheter l'ensemble immédiatement. L'éligibilité est décidée après " +
+  "analyse de votre dossier ; les conditions exactes vous sont présentées " +
+  "avant tout engagement.";
 
 const FAQ = [
   {
     question: "Faut-il un apport pour installer des panneaux solaires ?",
     answer:
-      "Pas nécessairement. Selon votre situation et le montage de financement " +
-      "retenu, le projet peut être réalisé sans mobiliser votre épargne au " +
-      "départ. Certains frais peuvent rester à votre charge ; ils vous sont " +
-      "confirmés avant tout engagement, pendant l'étude.",
+      "Pas nécessairement. Selon votre situation et la solution retenue, " +
+      "l'installation peut être mise à disposition sans acheter l'ensemble " +
+      "immédiatement. Certains frais peuvent rester à votre charge ; ils " +
+      "vous sont confirmés avant tout engagement, pendant l'étude.",
   },
   {
-    question: "Une installation photovoltaïque peut-elle s'autofinancer ?",
+    question: "Dois-je obtenir un crédit auprès de ma banque ?",
     answer:
-      "Elle peut s'en approcher, sans que ce soit garanti : si les économies " +
-      "d'électricité mensuelles atteignent ou dépassent la mensualité du " +
-      "financement, l'effort net devient faible ou nul. Cela dépend de votre " +
-      "production, de votre consommation, du prix de l'électricité et des " +
-      "conditions de financement — c'est précisément ce que l'étude chiffre.",
+      "Selon la solution retenue, le passage par un crédit bancaire " +
+      "classique peut ne pas être requis — c'est l'un des points que " +
+      "l'analyse de votre dossier précise. La nature exacte du contrat et " +
+      "ses conditions vous sont présentées par écrit avant toute décision.",
   },
   {
-    question: "Quels frais faut-il prévoir au départ ?",
+    question: "Suis-je certain d'être accepté ?",
     answer:
-      "Cela dépend du montage. Certains montages prévoient des frais de " +
-      "dossier ; leur montant exact vous est communiqué lors de l'étude, " +
-      "avant tout engagement. Aucun paiement n'est demandé pour l'étude " +
-      "elle-même.",
+      "Non — et méfiez-vous de quiconque vous le promet. Le questionnaire " +
+      "permet une première vérification des critères ; la décision " +
+      "d'éligibilité appartient à SG Solution, après analyse de votre " +
+      "dossier et vérification technique. Un refus est possible et vous " +
+      "est expliqué.",
   },
   {
-    question: "Comment savoir si mon projet est éligible ?",
+    question: "Que se passe-t-il au terme du contrat ?",
     answer:
-      "L'éligibilité s'évalue au cas par cas : statut de propriétaire, " +
-      "toiture, consommation et situation financière entrent en compte. Le " +
-      "questionnaire de demande d'étude rassemble ces éléments et vous " +
-      "obtenez une réponse personnalisée, sans engagement.",
+      "Selon les termes du contrat proposé, l'installation peut être " +
+      "rachetée en cours de contrat ou devenir votre propriété au terme. " +
+      "Les modalités exactes — durée, conditions de rachat, transfert — " +
+      "figurent dans la proposition écrite qui vous est remise avant tout " +
+      "engagement.",
   },
 ];
 
@@ -117,7 +127,11 @@ export default async function NoDepositLandingPage() {
 
   const locale = config?.default_language ?? "fr";
   const offer = config?.offer;
-  const applicationFee = fact(offer, "application_fee_eur");
+  const duration = fact(offer, "contract_duration_years");
+  const tariff = fact(offer, "energy_tariff_eur_per_kwh");
+  const fee = fact(offer, "administrative_fee_eur");
+  const buyoutReduction = fact(offer, "buyout_annual_reduction_percent");
+  const ownershipYears = fact(offer, "ownership_transfer_after_years");
   const formHref = localizedPath(config, locale, "/demande-etude");
 
   const jsonLd = graph(
@@ -131,14 +145,15 @@ export default async function NoDepositLandingPage() {
     <article className="container page">
       {/* ── Hero ── */}
       <header>
-        <p className="eyebrow">Financement photovoltaïque · Belgique</p>
+        <p className="eyebrow">Solutions solaires · Belgique</p>
         <h1>{TITLE}</h1>
         <p className="hero__lede">
-          Un projet solaire n&apos;exige pas toujours une épargne disponible.
-          Selon votre situation, différentes solutions de financement peuvent
-          être étudiées — et cette page explique ce que « sans apport » veut
-          vraiment dire, sans rien promettre que votre étude ne confirmerait
-          pas.
+          Un projet solaire n&apos;exige pas toujours d&apos;acheter
+          l&apos;installation d&apos;un coup. Selon votre situation, une
+          installation avec batterie peut être mise à disposition dans le
+          cadre d&apos;un contrat — et cette page explique ce que cela
+          recouvre, sans rien promettre que l&apos;analyse de votre dossier
+          ne confirmerait pas.
         </p>
         <p>
           <Link className="button button--large" href={formHref} data-cta="primary">
@@ -147,160 +162,154 @@ export default async function NoDepositLandingPage() {
         </p>
       </header>
 
-      <DirectAnswer question="Peut-on installer des panneaux solaires sans apport en Belgique ?">
+      <DirectAnswer question="Peut-on accéder à des panneaux solaires et une batterie sans acheter immédiatement toute l'installation ?">
         <p>{DIRECT_ANSWER}</p>
       </DirectAnswer>
 
-      {/* ── 1. Pourquoi l'investissement initial bloque ── */}
-      <h2>Pourquoi l&apos;investissement initial bloque certains ménages</h2>
+      {/* ── 1. À qui s'adresse la solution ── */}
+      <h2>À qui s&apos;adresse cette solution</h2>
       <p>
-        Une installation photovoltaïque résidentielle représente plusieurs
-        milliers d&apos;euros. Beaucoup de ménages qui paieraient volontiers
-        leur électricité moins cher n&apos;ont pas cette somme disponible — ou
-        préfèrent ne pas immobiliser leur épargne. Conclure que le solaire
-        « n&apos;est pas pour eux » est souvent prématuré : la vraie question
-        n&apos;est pas « ai-je le montant ? » mais « le coût mensuel du
-        financement est-il inférieur à ce que je paie déjà pour la même
-        électricité ? ».
+        Aux ménages propriétaires qui veulent produire leur électricité —
+        panneaux et batterie domestique — sans immobiliser d&apos;un coup le
+        montant d&apos;une installation complète. Cela inclut les situations
+        où un achat immédiat n&apos;est pas envisageable ou pas souhaité,
+        quelle qu&apos;en soit la raison : la solution repose sur un contrat
+        de mise à disposition, et l&apos;analyse du dossier porte sur votre
+        projet et votre logement.
       </p>
 
-      {/* ── 2. Comment fonctionne un financement photovoltaïque ── */}
-      <h2>Comment fonctionne un financement photovoltaïque</h2>
+      {/* ── 2. Comment fonctionne la solution ── */}
+      <h2>Comment fonctionne la solution SG Solution</h2>
       <p>
-        Le principe est celui de tout financement : un organisme avance le coût
-        de l&apos;installation, et vous le remboursez par mensualités sur une
-        durée convenue. La spécificité du photovoltaïque est que
-        l&apos;installation produit dès le premier mois une électricité que
-        vous ne payez plus à votre fournisseur : le financement s&apos;évalue
-        donc toujours <em>en regard</em> de cette économie, pas dans
-        l&apos;absolu.
+        Le principe : l&apos;installation — panneaux solaires et batterie —
+        est mise à votre disposition dans le cadre d&apos;un contrat de
+        longue durée{duration ? (
+          <>
+            {" "}de <strong>{String(duration.value)}&nbsp;ans</strong>
+          </>
+        ) : null}. Vous utilisez l&apos;électricité produite chez vous
+        {tariff ? (
+          <>
+            , à un tarif défini au contrat de{" "}
+            <strong>{String(tariff.value).replace(".", ",")}&nbsp;€/kWh</strong>
+          </>
+        ) : (
+          <>
+            , à un tarif défini au contrat et communiqué lors de l&apos;étude
+          </>
+        )}.{" "}
+        {fee ? (
+          <>
+            Des frais administratifs uniques de{" "}
+            <strong>{String(fee.value)}&nbsp;€</strong> sont dus à la
+            signature — ils vous sont confirmés par écrit avant tout
+            engagement.
+          </>
+        ) : (
+          <>
+            Selon le contrat, des frais uniques peuvent être dus à la
+            signature ; leur montant exact vous est communiqué lors de
+            l&apos;étude, <strong>avant tout engagement</strong>. La demande
+            d&apos;étude elle-même ne donne lieu à aucun paiement.
+          </>
+        )}
       </p>
       <p>
-        Les conditions précises — organisme, taux, durée — dépendent du montage
-        retenu et de votre profil. Elles vous sont présentées noir sur blanc
-        lors de l&apos;étude, avant toute décision.
-      </p>
-
-      {/* ── 3. Ce que « sans apport » signifie réellement ── */}
-      <h2>Ce que « sans apport » signifie réellement</h2>
-      <p>
-        « Sans apport » signifie une chose précise : le montage ne vous demande
-        pas de mobiliser une épargne au départ pour couvrir le prix de
-        l&apos;installation. Cela ne signifie pas « sans engagement » — un
-        financement reste un contrat — ni « sans aucun frais » : selon le
-        montage, certains frais peuvent rester à votre charge. Une offre
-        sérieuse vous dit lesquels avant de vous demander quoi que ce soit.
-      </p>
-
-      {/* ── 4. Quels frais peuvent rester à payer ── */}
-      <h2>Quels frais peuvent rester à payer</h2>
-      {applicationFee ? (
-        <p>
-          Dans le montage proposé, des frais de dossier de{" "}
-          <strong>{String(applicationFee.value)}&nbsp;€</strong> sont à
-          prévoir. Ils vous sont confirmés par écrit avant tout engagement.
-        </p>
-      ) : (
-        <p>
-          Selon le montage, des frais de dossier peuvent être demandés. Leur
-          montant exact dépend de l&apos;offre applicable à votre situation et
-          vous est communiqué lors de l&apos;étude,{" "}
-          <strong>avant tout engagement</strong> — jamais après. La demande
-          d&apos;étude elle-même ne donne lieu à aucun paiement.
-        </p>
-      )}
-
-      {/* ── 5. Mensualité vs économies ── */}
-      <h2>Mensualité ou économies : la seule comparaison qui compte</h2>
-      <p>
-        Le bon critère n&apos;est pas le prix total de l&apos;installation,
-        mais l&apos;écart mensuel entre ce que le financement coûte et ce que
-        l&apos;installation fait économiser :
-      </p>
-      <div
-        className="method-formula"
-        role="img"
-        aria-label="Économie mensuelle estimée, moins la mensualité du financement, égale l'impact mensuel net"
-      >
-        <p>Économie mensuelle estimée</p>
-        <p>− mensualité du financement</p>
-        <p className="method-formula__result">= impact mensuel net</p>
-      </div>
-      <p>
-        Cette page n&apos;affiche volontairement aucun chiffre pour ces trois
-        lignes : votre production dépend de votre toiture, votre économie de
-        votre consommation et des tarifs, votre mensualité du montage retenu.
-        Un « exemple type » qui ignorerait tout cela serait une invention —
-        l&apos;étude personnalisée remplit la formule avec vos données.
+        La nature juridique précise du contrat, ses conditions et ses
+        mentions vous sont présentées noir sur blanc dans la proposition
+        écrite — c&apos;est sur pièces que l&apos;on s&apos;engage, pas sur
+        une page web.
       </p>
 
-      {/* ── 6. Conditions d'approche de l'autofinancement ── */}
-      <h2>
-        Dans quelles conditions une installation peut approcher
-        l&apos;autofinancement
-      </h2>
+      {/* ── 3. Peut-on devenir propriétaire ── */}
+      <h2>Peut-on devenir propriétaire de l&apos;installation&nbsp;?</h2>
       <p>
-        Plus l&apos;économie mensuelle se rapproche de la mensualité, plus le
-        projet se finance par lui-même. Quatre paramètres font l&apos;essentiel
-        de l&apos;écart&nbsp;:
-      </p>
-      <ul>
-        <li>
-          <strong>La part d&apos;autoconsommation</strong> — l&apos;électricité
-          consommée au moment où elle est produite est celle qui rapporte le
-          plus.
-        </li>
-        <li>
-          <strong>Le profil de consommation</strong> — une consommation diurne
-          (télétravail, pompe à chaleur, recharge) valorise mieux la
-          production.
-        </li>
-        <li>
-          <strong>Le prix de l&apos;électricité</strong> — plus il est élevé,
-          plus chaque kilowattheure autoconsommé pèse.
-        </li>
-        <li>
-          <strong>La durée et le taux du financement</strong> — ils fixent la
-          mensualité que l&apos;économie doit égaler.
-        </li>
-      </ul>
-      <p>
-        Selon la combinaison de ces paramètres, les économies peuvent couvrir
-        une partie — parfois l&apos;essentiel — de la mensualité. Aucun de ces
-        cas n&apos;est garanti d&apos;avance&nbsp;: c&apos;est un résultat
-        d&apos;étude, pas une promesse de page web.
+        Selon les termes du contrat proposé, deux chemins peuvent exister :
+        le rachat de l&apos;installation en cours de contrat
+        {buyoutReduction ? (
+          <>
+            {" "}— à un prix qui, selon les termes annoncés, diminue de{" "}
+            <strong>{String(buyoutReduction.value)}&nbsp;%</strong> par an
+            par rapport à la valeur initiale de l&apos;installation —
+          </>
+        ) : null}{" "}
+        et le transfert de propriété au terme
+        {ownershipYears ? (
+          <>
+            {" "}des <strong>{String(ownershipYears.value)}&nbsp;ans</strong>
+          </>
+        ) : null}
+        . L&apos;assiette exacte, la méthode de calcul et les conditions de
+        chacun figurent dans le contrat — cette page n&apos;en calcule
+        aucune projection, parce qu&apos;une projection sans la formule
+        contractuelle serait une invention.
       </p>
 
-      {/* ── 7. Simulation personnalisée ── */}
-      <h2>Une simulation personnalisée plutôt qu&apos;un chiffre générique</h2>
+      {/* ── 4. Conditions principales ── */}
+      <h2>Les conditions examinées</h2>
       <p>
-        L&apos;étude reprend votre toiture (orientation, inclinaison, surface),
-        votre consommation annuelle et vos habitudes, puis met en regard la
-        production attendue, l&apos;économie estimée et les solutions de
-        financement adaptées à votre situation. Vous repartez avec la formule
-        ci-dessus remplie — vos chiffres, pas ceux d&apos;une moyenne.
+        L&apos;analyse du dossier vérifie notamment les points suivants —
+        les connaître avant d&apos;entamer la démarche évite les mauvaises
+        surprises :
       </p>
-
-      {/* ── 8. Critères d'éligibilité ── */}
-      <h2>Les critères d&apos;éligibilité examinés</h2>
       <ul>
         <li>être propriétaire du logement (ou en cours d&apos;acquisition) ;</li>
-        <li>une toiture exploitable — orientation, surface, état ;</li>
-        <li>une consommation électrique que la production peut réellement compenser ;</li>
-        <li>une situation financière compatible avec le montage envisagé.</li>
+        <li>ne pas bénéficier du tarif social de l&apos;énergie ;</li>
+        <li>une toiture sans amiante, techniquement adaptée — orientation, surface, état ;</li>
+        <li>une installation électrique conforme et en bon état ;</li>
+        <li>un logement compatible avec l&apos;installation envisagée.</li>
       </ul>
       <p>
-        Chaque critère s&apos;évalue au cas par cas lors de l&apos;étude. Un
-        refus est possible — et vous est expliqué.
+        Le questionnaire fait une première vérification de ces critères.{" "}
+        <strong>La décision finale appartient à SG Solution</strong>, après
+        analyse du dossier et vérification technique — un refus est possible,
+        et il vous est expliqué.
       </p>
 
-      {/* ── 9. Étapes ── */}
-      <h2>Les étapes de votre projet</h2>
+      {/* ── 5. Si l'installation est impossible ── */}
+      <h2>Et si votre logement ne convient pas&nbsp;?</h2>
+      <p>
+        Certaines toitures ou configurations ne permettent pas
+        d&apos;installer des panneaux — orientation insuffisante, structure
+        incompatible, contraintes techniques. Dans ce cas, SG Solution peut
+        proposer une solution énergétique alternative. Ses conditions et son
+        tarif dépendent de votre situation et vous sont présentés lors de
+        l&apos;analyse — cette page n&apos;avance aucun chiffre à leur
+        sujet.
+      </p>
+
+      {/* ── 6. Qui fait quoi ── */}
+      <h2>Qui fait quoi</h2>
+      <ul>
+        <li>
+          <strong>Mon Projet Solaire</strong> — le site et le parcours de
+          demande : décrire votre projet et cadrer votre demande d&apos;étude.
+        </li>
+        <li>
+          <strong>Beaver Data Group</strong> — l&apos;entreprise qui exploite
+          ce site : elle recueille votre demande et vos consentements,
+          vérifie les premiers critères, organise le rendez-vous éventuel et
+          transmet votre dossier. Elle n&apos;installe pas, ne fournit pas
+          d&apos;électricité et ne décide pas de l&apos;éligibilité.
+        </li>
+        <li>
+          <strong>SG Solution</strong> — l&apos;entreprise qui propose la
+          solution : elle analyse votre dossier, vérifie la faisabilité
+          technique, décide de l&apos;éligibilité et, le cas échéant, vous
+          adresse une proposition contractuelle.
+        </li>
+      </ul>
+
+      {/* ── 7. Étapes ── */}
+      <h2>Les étapes de votre demande</h2>
       <ol className="landing-steps">
-        <li>Vous décrivez votre logement et votre consommation — quelques minutes, sans engagement.</li>
-        <li>Nous analysons la faisabilité et préparons une estimation personnalisée.</li>
-        <li>Vous recevez production attendue, économies estimées et solutions de financement, par écrit.</li>
-        <li>Vous décidez — avec les chiffres, les conditions et les frais éventuels sous les yeux.</li>
+        <li>Vous décrivez votre logement et votre projet sur ce site — quelques minutes, sans engagement.</li>
+        <li>Beaver Data Group vérifie les premiers critères et recueille vos consentements.</li>
+        <li>Si vous le souhaitez, un rendez-vous est organisé.</li>
+        <li>Votre dossier est transmis à SG Solution — avec votre accord explicite, jamais sans.</li>
+        <li>SG Solution analyse le dossier et vérifie la faisabilité technique.</li>
+        <li>Si votre dossier est retenu, SG Solution vous adresse une proposition écrite — conditions, frais et mentions inclus.</li>
+        <li>Vous décidez, avec les pièces sous les yeux. La contractualisation éventuelle se fait avec SG Solution.</li>
       </ol>
 
       {/* ── Mentions légales du montage (juriste) ── */}
@@ -314,8 +323,8 @@ export default async function NoDepositLandingPage() {
         </section>
       ) : null}
 
-      {/* ── 10. FAQ ── */}
-      <h2 id="faq-financement">Questions fréquentes sur le financement</h2>
+      {/* ── 8. FAQ ── */}
+      <h2 id="faq-financement">Questions fréquentes</h2>
       <div className="faq">
         {FAQ.map(({ question, answer }) => (
           <details key={question}>
@@ -325,12 +334,12 @@ export default async function NoDepositLandingPage() {
         ))}
       </div>
 
-      {/* ── 11. CTA final ── */}
+      {/* ── 9. CTA final ── */}
       <CtaBlock
         config={config}
         locale={locale}
-        heading="Vérifier ce que votre projet donnerait, avec vos chiffres"
-        body="Quelques questions sur votre logement et votre consommation suffisent. L'étude est sans engagement, et les conditions de financement applicables à votre situation vous sont présentées avant toute décision."
+        heading="Vérifier si votre projet correspond aux premiers critères"
+        body="Quelques questions sur votre logement et votre projet suffisent. La demande est sans engagement, et les conditions applicables à votre situation vous sont présentées par écrit avant toute décision."
       />
 
       {jsonLd ? (

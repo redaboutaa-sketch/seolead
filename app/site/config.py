@@ -269,6 +269,20 @@ class OfferConfig(BaseModel):
     # Superseded versions, append-only, newest last. Never edited, never
     # emptied — the registry's memory of what was once claimed.
     history: list[OfferRevision] = Field(default_factory=list)
+    # The company whose commercial offer this is (name and role only until its
+    # legal identity is supplied). The operator (`organization:`) acquires and
+    # transmits; the provider analyses, decides and contracts. The registry
+    # never lets one entity's facts be presented as the other's.
+    provider: dict = Field(default_factory=dict)
+    # Contractual evidence backing the facts (contract reference, terms
+    # reference). Null until the provider's standard contract is supplied —
+    # and until then, "fixed"/"guaranteed" wordings stay a legal-matrix matter,
+    # never a page's.
+    evidence: dict = Field(default_factory=dict)
+    # The provider's alternative offer when the primary installation is
+    # technically impossible. No tariff was supplied, so no tariff exists here:
+    # `tariff.amount: null` is the whole point.
+    fallback_offer: dict = Field(default_factory=dict)
     facts: list[OfferFact] = Field(default_factory=list)
     financing: dict = Field(default_factory=dict)      # provider, conditions[]
     eligibility: dict = Field(default_factory=dict)    # criteria[]
@@ -360,20 +374,42 @@ class OrganizationAddress(BaseModel):
 
 
 class OrganizationConfig(BaseModel):
-    """The identity data an Organization/LocalBusiness schema would assert.
+    """The identity of the OPERATOR — the legal entity running this site.
 
-    Every field starts null because none of it may be invented: the banner still
-    says « Marque et coordonnées à confirmer », and three names currently
-    coexist (BEAVER DATA GROUP, Mon Projet Solaire, Solar Belgium). Structured
-    data that asserts things nobody supplied is fabrication with a schema — the
-    readiness predicates below are what keeps that sentence true mechanically.
+    The entity model has three names with three distinct roles, and the site
+    must never blur them:
+
+    - **Mon Projet Solaire** — public brand, website, acquisition service.
+      A brand, not a legal entity: it owns no registration, no licence, no
+      contract.
+    - **The operator** (this block) — the legal entity behind the brand:
+      acquisition, qualification, consent, appointment, lead transmission.
+      Owner-supplied on 2026-08-31: Beaver Data Group.
+    - **The solution provider** (`offer.provider`) — the company whose
+      commercial offer prospects are transmitted to (SG Solution). Nothing of
+      the provider's identity lives here, and nothing of the operator's may be
+      presented as the provider's.
+
+    Every field the owner has not supplied stays null — structured data that
+    asserts things nobody supplied is fabrication with a schema.
     """
 
     legal_name: str | None = None
+    # Belgian BCE and generic company registration are separate slots: the
+    # operator is French (SIREN), a future Belgian entity would carry a BCE.
+    # Either one satisfies the schema-readiness predicate; neither is invented.
     bce_number: str | None = None
+    company_number: str | None = None
     address: OrganizationAddress = Field(default_factory=OrganizationAddress)
     phone: str | None = None
     email: str | None = None
+    # What the operator DOES — and, by omission, what it does not: it is not an
+    # installer, not an energy supplier, not a lender, not the party that
+    # accepts or refuses a prospect's dossier.
+    activities: list[str] = Field(default_factory=list)
+    # Where captured leads must reach a human. Config-driven on purpose: the
+    # notification layer reads THIS value, never a hardcoded address.
+    lead_destination_email: str | None = None
     service_areas: list[str] = Field(default_factory=list)
     logo_path: str | None = None
     installer_partner: str | None = None
@@ -384,7 +420,11 @@ class OrganizationConfig(BaseModel):
     def organization_schema_ready(self) -> bool:
         """The minimum an `Organization` node may honestly assert: who, legally,
         and under what registration. A brand name alone names nobody."""
-        return bool(self.legal_name and self.bce_number)
+        return bool(self.legal_name and (self.bce_number or self.company_number))
+
+    @property
+    def registration_number(self) -> str | None:
+        return self.bce_number or self.company_number
 
     @property
     def local_business_schema_ready(self) -> bool:

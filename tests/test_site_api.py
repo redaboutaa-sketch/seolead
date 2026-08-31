@@ -90,6 +90,18 @@ class TestSiteConfigEndpoint:
                               headers={"X-Internal-Key": KEY})
         assert response.status_code == 404
 
+    def test_the_operator_identity_travels_but_not_the_lead_routing(self, client):
+        """Beaver Data Group (fournie 2026-08-31) voyage vers le rendu ;
+        lead_destination_email est du ROUTAGE, lu côté serveur par la couche
+        de notification — il ne sort pas dans un payload de page."""
+        body = client.get("/site/v1/sites/solar_be",
+                          headers={"X-Internal-Key": KEY}).json()
+        organization = body["organization"]
+        assert organization["legal_name"] == "Beaver Data Group"
+        assert organization["registration_number"] == "935097675"
+        assert organization["organization_schema_ready"] is True
+        assert "lead_destination_email" not in organization
+
     def test_verification_tokens_are_exposed_and_null_until_supplied(self, client):
         """Les jetons Search Console voyagent avec la config SEO ; null tant
         que le propriétaire n'a rien collé — rien n'est jamais inventé ici."""

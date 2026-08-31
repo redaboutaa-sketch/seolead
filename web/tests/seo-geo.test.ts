@@ -21,6 +21,7 @@ import type { SiteConfigDTO } from "@/lib/types";
 
 const ORG_EMPTY = {
   legal_name: null, bce_number: null,
+  company_number: null, registration_number: null, activities: [],
   address: { street: null, postal_code: null, city: null, country: "BE" },
   phone: null, email: null, service_areas: [], logo_path: null,
   installer_partner: null, certifications: [], same_as: [],
@@ -63,6 +64,22 @@ const CONFIG = {
 describe("organization schema readiness", () => {
   it("emits nothing while the identity registry is empty", () => {
     expect(organizationNode(CONFIG)).toBeNull();
+  });
+
+  it("carries the operator's real registration (SIREN, no invented BCE)", () => {
+    const ready = {
+      ...CONFIG,
+      organization: {
+        ...ORG_EMPTY, legal_name: "Beaver Data Group",
+        company_number: "935097675", registration_number: "935097675",
+        organization_schema_ready: true,
+      },
+    } as SiteConfigDTO;
+    const node = organizationNode(ready)!;
+    expect(node.legalName).toBe("Beaver Data Group");
+    expect(node.identifier).toBe("935097675");
+    // La marque reste le name public ; l'entité est legalName + identifier.
+    expect(node.name).toBe("Mon Projet Solaire");
   });
 
   it("emits Organization once legal name and BCE exist", () => {

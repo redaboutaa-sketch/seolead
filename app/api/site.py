@@ -26,10 +26,11 @@ from app.api.deps import require_internal_key
 from app.core.enums import PublicationState, SiteEventType
 from app.core.errors import SeoLeadError
 from app.db.session import get_session
-from app.models import (ContentBrief, ContentDraft, PublishedContent, Site,
-                        SiteEvent, Vertical)
+from app.models import (CapturedLead, ContentBrief, ContentDraft,
+                        PublishedContent, Site, SiteEvent, Vertical)
 from app.site.config import InvalidSite, SiteConfig, load_site
 from app.site.lead_capture import (LeadRejected, LeadSubmission, capture_lead)
+from app.site.lead_notification import notify_lead
 from app.site.publication import draft_preview_dto, evaluate_gate, to_dto
 from app.site.spam_protection import SubmissionSignals
 
@@ -160,7 +161,11 @@ async def get_site_config(site_id: str) -> dict:
         # the renderer emits Organization/LocalBusiness only when they are true,
         # so a half-filled block can never become a half-true schema.
         "organization": {
-            **config.organization.model_dump(),
+            # `lead_destination_email` stays out: it is lead ROUTING, read by
+            # the notification layer server-side — the renderer has no use for
+            # it and operational values do not belong in page payloads.
+            **config.organization.model_dump(exclude={"lead_destination_email"}),
+            "registration_number": config.organization.registration_number,
             "organization_schema_ready":
                 config.organization.organization_schema_ready,
             "local_business_schema_ready":
@@ -316,6 +321,15 @@ async def create_lead(site_id: str, payload: LeadRequest,
                             detail={"code": exc.code, "message": exc.detail}) from exc
 
     await session.commit()
+
+    # After commit, on purpose: the lead is safe in the database before anyone
+    # is told about it, and no notification failure can turn a captured lead
+    # into an error response. Destination = site configuration; transport =
+    # environment; both absent are loud log lines, never exceptions.
+    lead_row = await session.get(CapturedLead, uuid.UUID(result.lead_id))
+    if lead_row is not None:
+        await notify_lead(lead_row, config)
+
     return {"lead_id": result.lead_id, "state": result.state,
             "destination": result.destination}
 
