@@ -162,6 +162,15 @@ class ClaimCategory(StrEnum):
     # classified GENERAL/LOW. Research can never establish these: the only
     # legitimate source is the validated first-party offer registry.
     FINANCING_PROMISE = "FINANCING_PROMISE"
+    # A promise about the TERMS of our provider's contract — a tariff called
+    # fixed or guaranteed over a duration, a buyout price trajectory, an
+    # automatic ownership transfer. Added 2026-08-31 for the SG Solution model:
+    # measured, « Le tarif est garanti à 0,27 €/kWh pendant 25 ans » classified
+    # MARKET_PRICE/MEDIUM. Deliberately NOT a financing category — the
+    # contract's legal nature (credit, PPA, lease…) is unqualified and stays
+    # the lawyer's question. Research can never establish these either: only
+    # the offer registry with contract evidence and legal review can.
+    CONTRACT_PROMISE = "CONTRACT_PROMISE"
     GENERAL = "GENERAL"
 
 

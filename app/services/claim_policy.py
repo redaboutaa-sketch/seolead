@@ -181,6 +181,16 @@ _DEFAULT_POLICY: dict[ClaimCategory, tuple[str, AuthorityRequirement,
         "company making it: the OFFICIAL bar keeps it unassertable from "
         "retrieved pages, and the only legitimate path into a page is the "
         "validated first-party offer registry."),
+    ClaimCategory.CONTRACT_PROMISE: (
+        ClaimRisk.HIGH, AuthorityRequirement.OFFICIAL,
+        FreshnessRequirement.REQUIRED, 1,
+        "A promise about the terms of the provider's contract — a tariff "
+        "called fixed or guaranteed over a duration, a buyout trajectory, an "
+        "automatic ownership transfer. Same construction as "
+        "FINANCING_PROMISE: no researched source can establish it, so the "
+        "OFFICIAL bar keeps it unassertable from retrieval; the only path in "
+        "is the offer registry with contract evidence and a legal verdict on "
+        "the exact wording."),
     ClaimCategory.GENERAL: (
         ClaimRisk.LOW, AuthorityRequirement.ANY,
         FreshnessRequirement.NOT_REQUIRED, 1,
@@ -198,7 +208,13 @@ _GUARANTEED_OUTCOME = re.compile(
     r"(?:garanti\w*|guaranteed|gegarandeerd)\W+(?:\w+\W+){0,3}?"
     r"(?:rendement|economie\w*|epargne|benefice|retour|savings?|returns?|roi|yield)"
     r"|(?:rendement|economie\w*|epargne|benefice|retour|savings?|returns?|roi|yield)"
-    r"\W+(?:\w+\W+){0,3}?(?:garanti\w*|guaranteed|gegarandeerd)",
+    r"\W+(?:\w+\W+){0,3}?(?:garanti\w*|guaranteed|gegarandeerd)"
+    # « Vous économisez forcément par rapport au marché » — the guarantee said
+    # without the word. Measured GENERAL/LOW on 2026-08-31; the certainty
+    # adverb next to a savings verb IS the guarantee.
+    r"|econom\w+\W+(?:\w+\W+){0,2}?"
+    r"(?:forcement|necessairement|assurement|a\s+coup\s+sur|quoi\s+qu)"
+    r"|(?:forcement|necessairement|assurement)\W+(?:\w+\W+){0,2}?econom\w+",
     re.IGNORECASE)
 
 # ── Financing promises ───────────────────────────────────────────────────────
@@ -243,8 +259,127 @@ _FINANCING_PROMISE = re.compile(
     rf"(?:les?\s+|la\s+|votre\s+|vos\s+)?(?:econom\w+|factur\w+)"
     rf"|\b(?:factur|econom)\w+\W+(?:\w+\W+){{0,2}}?(?:financ|rembours)\w+"
     rf"\W+(?:\w+\W+){{0,3}}?(?:installation|panneaux|projet|systeme)"
-    rf"|\bfrais\s+de\s+dossier\b",
+    rf"|\bfrais\s+de\s+dossier\b"
+    # SG Solution hardening (2026-08-31). « Aucun crédit bancaire n'est
+    # nécessaire » measured GENERAL/LOW; « Vous payez seulement 150 € »
+    # measured MARKET_PRICE/MEDIUM. Both are promises about how the reader
+    # pays — the first family this category exists for.
+    rf"|\b(?:aucun|sans|pas\s+de)\s+credit(?:\s+bancaire)?\b"
+    rf"|\bsans\s+passer\s+par\s+(?:la|une|votre)\s+banque"
+    rf"|\bvous\s+(?:ne\s+)?payez\s+(?:que|seulement)\b"
+    rf"|\bne\s+(?:vous\s+)?coute\w*\s+que\b",
     re.IGNORECASE)
+
+# ── Contract promises (SG Solution model, 2026-08-31) ────────────────────────
+# The terms of the provider's contract, promised as certainties: a tariff
+# called fixed or guaranteed over a duration, a bill that "can never rise
+# again", a buyout price trajectory, an automatic ownership transfer. Measured
+# before this block existed: « Le tarif est garanti à 0,27 €/kWh pendant
+# 25 ans » → MARKET_PRICE/MEDIUM; « Votre facture ne pourra plus augmenter »
+# and « Après 25 ans, l'installation devient gratuitement votre propriété » →
+# GENERAL/LOW. All of them are first-party contract assertions that no
+# researched source can establish — only the offer registry, with contract
+# evidence (`offer.evidence.contract_reference`) and a legal verdict on the
+# exact wording.
+#
+# Deliberate edge: a product warranty (« garantie 25 ans sur les panneaux »,
+# « garantie constructeur ») is the manufacturer's claim about its product,
+# not a promise about OUR contract's terms — the tariff/price/bill nouns are
+# what make the difference, and the regression corpus pins that a warranty
+# stays out of here.
+_CONTRACT_PROMISE = re.compile(
+    rf"\b(?:tarif|prix|montant|mensualite)\w*\W+(?:\w+\W+){{0,4}}?"
+    rf"(?:garanti\w*|fixe\w*|bloque\w*|verrouille\w*)"
+    rf"|\b(?:garanti\w*|fixe\w*|bloque\w*)\W+(?:\w+\W+){{0,4}}?"
+    rf"(?:tarif|prix|€|eur\b|euros?\b|kwh)"
+    rf"|\b(?:facture|prix|tarif)\w*\W+(?:\w+\W+){{0,3}}?"
+    rf"(?:ne\s+pourra\w*\s+plus|n{_APO}\s*augmentera\w*\s+(?:plus|jamais)"
+    rf"|ne\s+(?:peut|pourront|pourra)\s+(?:plus|pas)\s+augmenter)"
+    rf"|\bprotege\w*\s+(?:de|contre)\s+(?:toutes?\s+)?(?:les\s+)?hausses?"
+    rf"|\ba\s+l{_APO}\s*abri\s+des\s+hausses?"
+    rf"|\bprix\s+de\s+rachat\b|\boption\s+de\s+rachat\b"
+    rf"|\brachat\w*\W+(?:\w+\W+){{0,4}}?(?:baisse|diminue|reduit)\w*"
+    rf"|\bracheter\s+(?:l{_APO}\s*|votre\s+|son\s+)?installation"
+    rf"|\bdev(?:ient|enez|iendrez)\s+(?:gratuitement\s+|automatiquement\s+)?"
+    rf"(?:votre\s+|sa\s+)?propri(?:ete|etaire)"
+    rf"|\bpropri(?:ete|etaire)\W+(?:\w+\W+){{0,4}}?"
+    rf"(?:au\s+terme|apres\s+\d+\s+ans|automatiquement|gratuitement)"
+    rf"|\btransfert\s+(?:automatique\s+)?de\s+propriete",
+    re.IGNORECASE)
+
+# ── Acceptance promises (SG Solution model, 2026-08-31) ──────────────────────
+# « Tout le monde est accepté », « Votre banque vous refuse ? SG Solution vous
+# accepte », « Même si vous n'êtes pas finançable, vous êtes accepté » — all
+# measured GENERAL/LOW. An acceptance promise is an eligibility claim at its
+# most consequential: the operator prequalifies, the provider DECIDES, and a
+# page has no standing to promise anyone's decision. Routed to ELIGIBILITY
+# (HIGH / OFFICIAL / dated), and the unconditional form blocks at QA.
+_ACCEPTANCE_PROMISE = re.compile(
+    rf"\btout\s+le\s+monde\s+est\s+(?:accepte|eligible)\w*"
+    rf"|\btous\s+(?:les\s+dossiers\s+sont\s+)?acceptes\b"
+    rf"|\bvous\s+(?:etes|serez)\s+accepte\w*"
+    rf"|\brefus\w*\W+(?:\w+\W+){{0,6}}?accept\w+"
+    rf"|\baccept\w+\W+(?:\w+\W+){{0,6}}?refus\w*"
+    # « SG Solution vous accepte. » stands alone once the sentence splitter
+    # separates it from « Votre banque vous refuse ? » — the promise must be
+    # caught per sentence, not per pairing.
+    rf"|\bvous\s+accept(?:e|ons|era|erons|eront)\b"
+    rf"|\b(?:pas|non)\s+financable\w*\W+(?:\w+\W+){{0,6}}?accepte\w*"
+    rf"|\baucun\w*\s+(?:verification|controle|condition)\w*\s+"
+    rf"(?:financier\w*|de\s+solvabilite|n{_APO}\s*est\s+(?:necessaire|requis))"
+    rf"|\bsans\s+(?:aucune\s+)?(?:verification|condition)\s+"
+    rf"(?:financiere|de\s+solvabilite|de\s+revenus)",
+    re.IGNORECASE)
+
+
+def is_contract_promise(text: str) -> bool:
+    """Whether this text promises terms of the provider's contract."""
+    return bool(_CONTRACT_PROMISE.search(normalize_query(text or "")))
+
+
+def is_unconditional_contract_promise(text: str) -> bool:
+    """The blocking form: a contract-terms promise with no condition anywhere.
+
+    « Selon le contrat proposé, le tarif peut être fixé pour la durée » names
+    its conditions and passes; « Le tarif est garanti pendant 25 ans » does
+    not. The wording that MAY ultimately be published for these terms belongs
+    to the legal verdict matrix, never to a generated sentence.
+    """
+    normalized = normalize_query(text or "")
+    return bool(_CONTRACT_PROMISE.search(normalized)) and \
+        not _CONDITIONAL_MARKERS.search(normalized)
+
+
+def is_unconditional_outcome_promise(text: str) -> bool:
+    """A guaranteed financial outcome with no condition — for the QA layer.
+
+    The claim ledger already refuses GUARANTEED_SAVINGS without institutional
+    corroboration in the BODY; this predicate exists because the QA guard also
+    reads title and meta description, where no ledger looks. « Vous économisez
+    forcément par rapport au marché » in a meta description is the guarantee
+    at its most visible.
+    """
+    normalized = normalize_query(text or "")
+    return bool(_GUARANTEED_OUTCOME.search(normalized)) and \
+        not _CONDITIONAL_MARKERS.search(normalized)
+
+
+def is_acceptance_promise(text: str) -> bool:
+    """Whether this text promises acceptance or unconditional eligibility."""
+    return bool(_ACCEPTANCE_PROMISE.search(normalize_query(text or "")))
+
+
+def is_unconditional_acceptance_promise(text: str) -> bool:
+    """The blocking form: acceptance promised with no condition, no analysis.
+
+    The honest sentence exists and passes: « Selon l'analyse de votre dossier,
+    votre demande peut être acceptée. » Final eligibility is the provider's
+    decision after analysis; a page that promises it is wrong before it is
+    checked, whatever the registry says.
+    """
+    normalized = normalize_query(text or "")
+    return bool(_ACCEPTANCE_PROMISE.search(normalized)) and \
+        not _CONDITIONAL_MARKERS.search(normalized)
 
 # What separates a controlled, conditional formulation from a promise. « Selon
 # le financement, …, les économies PEUVENT contribuer à compenser tout ou
@@ -254,7 +389,11 @@ _FINANCING_PROMISE = re.compile(
 _CONDITIONAL_MARKERS = re.compile(
     r"\bselon\b|\ben\s+fonction\s+de\b|\bsous\s+conditions?\b"
     r"|\bpeut\b|\bpeuvent\b|\bpourrai(?:t|ent)\b|\bpotentiellement\b"
-    r"|\bdans\s+certains\s+cas\b|\bsi\s|\bau\s+cas\s+par\s+cas\b"
+    # « même si » is not a condition — it is a concession that STRENGTHENS the
+    # promise (« Même si vous n'êtes pas finançable, vous êtes accepté » rode
+    # the bare `si` exemption straight past the acceptance guard, measured
+    # 2026-08-31). The lookbehind keeps the real conditional « si » working.
+    r"|\bdans\s+certains\s+cas\b|(?<!meme )\bsi\s|\bau\s+cas\s+par\s+cas\b"
     r"|\btout\s+ou\s+partie\b|\beligib\w+\b",
     re.IGNORECASE)
 
@@ -356,6 +495,19 @@ def classify_category(claim: str, profile: VerticalProfile) -> ClaimCategory:
     # before any dictionary is consulted.
     if _FINANCING_PROMISE.search(normalized):
         return ClaimCategory.FINANCING_PROMISE
+
+    # Contract-terms promises next, for the same reason: « Le tarif est
+    # garanti à 0,27 €/kWh pendant 25 ans » otherwise falls through to
+    # MARKET_PRICE at MEDIUM, which is two bars too low for a first-party
+    # contract assertion.
+    if _CONTRACT_PROMISE.search(normalized):
+        return ClaimCategory.CONTRACT_PROMISE
+
+    # An acceptance promise is an eligibility claim at its most consequential
+    # — and the eligibility DICTIONARY only knows the word « éligible », so
+    # « tout le monde est accepté » sailed to GENERAL before this check.
+    if _ACCEPTANCE_PROMISE.search(normalized):
+        return ClaimCategory.ELIGIBILITY
 
     vat_is_price_qualifier = bool(_VAT_AS_PRICE_QUALIFIER.search(claim)) and \
         not _TAX_RATE.search(claim)
