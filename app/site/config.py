@@ -19,9 +19,9 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.strict_yaml import strict_load
 from app.core.enums import ConsentChannel, ConsentPurpose
 from app.core.errors import SeoLeadError
 
@@ -521,7 +521,7 @@ class SiteConfig(BaseModel):
 
 def _load(path: Path) -> SiteConfig:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = strict_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise InvalidSite(f"site config {path.name} is not valid YAML: {exc}") from exc
     try:
