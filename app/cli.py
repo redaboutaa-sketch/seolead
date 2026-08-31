@@ -971,6 +971,46 @@ async def cmd_content_publish(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+async def cmd_leads_report(args: argparse.Namespace) -> int:
+    """L'état opérationnel des leads : rien ne doit rester oublié.
+
+    Deux vues, aucune donnée personnelle : les comptes par état (capture ET
+    notification), puis chaque lead dont la notification n'est PAS partie
+    (FAILED, NO_TRANSPORT, NO_DESTINATION — ou aucun enregistrement) — la
+    liste de rappel manuel de l'opérateur. SENT signifie « accepté par le
+    relais », jamais « lu ».
+    """
+    from sqlalchemy import func as sa_func
+    async with get_sessionmaker()() as session:
+        by_state = (await session.execute(
+            select(CapturedLead.state, sa_func.count())
+            .group_by(CapturedLead.state))).all()
+        by_notification = (await session.execute(
+            select(CapturedLead.notification_state, sa_func.count())
+            .group_by(CapturedLead.notification_state))).all()
+        needs_followup = (await session.execute(
+            select(CapturedLead)
+            .where((CapturedLead.notification_state.is_(None))
+                   | (CapturedLead.notification_state != "SENT"))
+            .order_by(CapturedLead.created_at.desc()).limit(100))).scalars().all()
+    _emit({
+        "leads_by_state": {state: count for state, count in by_state},
+        "notifications": {(state or "UNRECORDED"): count
+                          for state, count in by_notification},
+        "needs_manual_followup": [{
+            "lead_id": str(lead.id),
+            "created_at": lead.created_at,
+            "state": lead.state,
+            "notification_state": lead.notification_state or "UNRECORDED",
+            "notified_at": lead.notified_at,
+        } for lead in needs_followup],
+        "note": ("SENT = accepté par le relais SMTP, pas « lu ». UNRECORDED = "
+                 "lead antérieur à la colonne (migration 0013) ou notification "
+                 "jamais tentée : à vérifier à la main."),
+    })
+    return EXIT_OK
+
+
 async def cmd_leads_list(args: argparse.Namespace) -> int:
     """Captured leads. Contact details are shown masked.
 
@@ -1280,6 +1320,10 @@ def build_parser() -> argparse.ArgumentParser:
     leads_export.add_argument("--limit", default=50)
     leads_export.add_argument("--dry-run", action="store_true")
     leads_export.set_defaults(func=cmd_leads_export)
+    leads_report = leads_sub.add_parser(
+        "report", help="états de capture et de notification — la liste de "
+                       "rappel manuel de l'opérateur")
+    leads_report.set_defaults(func=cmd_leads_report)
 
     health_cmd = sub.add_parser("health", help="check dependencies")
     health_cmd.set_defaults(func=cmd_health)
