@@ -29,6 +29,21 @@ export async function generateMetadata(): Promise<Metadata> {
     ...(config?.seo.canonical_origin
       ? { metadataBase: new URL(config.seo.canonical_origin) }
       : {}),
+    // Ownership tokens for the search consoles, straight from config — null
+    // emits nothing. Proving ownership is independent of (and safe before)
+    // allow_indexing: the console then reports the noindex state honestly.
+    ...(config?.seo.verification?.google || config?.seo.verification?.bing
+      ? {
+          verification: {
+            ...(config.seo.verification.google
+              ? { google: config.seo.verification.google }
+              : {}),
+            ...(config.seo.verification.bing
+              ? { other: { "msvalidate.01": config.seo.verification.bing } }
+              : {}),
+          },
+        }
+      : {}),
     // A vector favicon: same sun-over-roof mark as the header wordmark, a few
     // hundred bytes, and it adapts to any tab size. `public/favicon.svg` is
     // same-origin, which the CSP's `img-src 'self'` requires.

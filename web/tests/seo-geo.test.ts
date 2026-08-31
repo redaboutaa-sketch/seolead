@@ -192,7 +192,9 @@ describe("answer-first discipline", () => {
     const match = source.match(
       /const DIRECT_ANSWER =\n((?:\s*"[^"]*"(?: \+)?\n?)+);/);
     expect(match, "DIRECT_ANSWER introuvable dans la landing").toBeTruthy();
-    const text = [...match![1].matchAll(/"([^"]*)"/g)].map((m) => m[1]).join("");
+    const text = [...(match?.[1] ?? "").matchAll(/"([^"]*)"/g)]
+      .map((m) => m[1] ?? "")
+      .join("");
     const words = text.trim().split(/\s+/).length;
     expect(words).toBeLessThanOrEqual(50);
     expect(words).toBeGreaterThan(20);

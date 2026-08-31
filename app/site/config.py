@@ -111,6 +111,13 @@ class SeoConfig(BaseModel):
     sitemap_enabled: bool = True
     # Even when a domain exists, indexing stays off until the owner opens the gate.
     allow_indexing: bool = False
+    # Search-console ownership tokens (Google `google-site-verification`, Bing
+    # `msvalidate.01`), supplied by the owner from each console — NEVER invented.
+    # Null emits nothing. Verification proves ownership of the domain; it does
+    # not index anything and is safe (and useful) to set before allow_indexing:
+    # the consoles then show the noindex state instead of guessing at it.
+    verification: dict[str, str | None] = Field(
+        default_factory=lambda: {"google": None, "bing": None})
 
 
 class OfferFact(BaseModel):

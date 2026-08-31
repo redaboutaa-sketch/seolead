@@ -110,6 +110,13 @@ seo:
   # THE INDEXING GATE — unchanged, and stricter than allow_publication. Still
   # requires `staging: false` as well. Owner decision only.
   allow_indexing: false
+  # Jetons de vérification Search Console / Bing Webmaster — fournis par le
+  # propriétaire depuis chaque console, JAMAIS inventés. Null n'émet rien.
+  # Poser le jeton avant allow_indexing est sûr et utile : la console prouve
+  # la propriété et montre l'état noindex au lieu de le deviner.
+  verification:
+    google: null
+    bing: null
 
 # ── Registre d'offre de première partie ─────────────────────────────────────
 # LA source de vérité pour ce que Mon Projet Solaire affirme de sa propre offre.
