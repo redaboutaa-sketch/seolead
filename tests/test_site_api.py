@@ -107,12 +107,18 @@ class TestSiteConfigEndpoint:
         assert organization["organization_schema_ready"] is True
         assert "lead_destination_email" not in organization
 
-    def test_verification_tokens_are_exposed_and_null_until_supplied(self, client):
-        """Les jetons Search Console voyagent avec la config SEO ; null tant
-        que le propriétaire n'a rien collé — rien n'est jamais inventé ici."""
+    def test_verification_tokens_travel_as_supplied(self, client):
+        """Les jetons Search Console voyagent avec la config SEO — celui de
+        Google, fourni par le propriétaire le 2026-08-31 (public par
+        construction : il est publié dans le HTML de chaque page) ; Bing
+        reste null (import depuis Search Console, aucun jeton nécessaire).
+        Rien n'est jamais inventé ici."""
         body = client.get("/site/v1/sites/solar_be",
                           headers={"X-Internal-Key": KEY}).json()
-        assert body["seo"]["verification"] == {"google": None, "bing": None}
+        assert body["seo"]["verification"] == {
+            "google": "tMnffPZeT4Mc9jfbKIEMfy2BIm1lpW8f0pDLsds0Za8",
+            "bing": None,
+        }
 
 
 class TestPreviewToken:
