@@ -441,12 +441,20 @@ _SENTENCE_SPLIT_QA = re.compile(r"(?<=[.!?])\s+|\n+")
 _OFFER_NUMBER = re.compile(r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,})")
 
 
-def _financing_findings(body: str, offer: dict | None) -> list[dict]:
+def _financing_findings(draft: dict, offer: dict | None) -> list[dict]:
     findings: list[dict] = []
     registered = set((offer or {}).get("registered_numbers") or set())
     version = (offer or {}).get("version") or "absent"
 
-    for sentence in (s.strip() for s in _SENTENCE_SPLIT_QA.split(body)):
+    # The body sentence by sentence — and the three fields a crawler reads
+    # FIRST. A meta description saying « gratuit » is the promise at its most
+    # visible, and the first version of this check only read the body.
+    texts = [s.strip()
+             for s in _SENTENCE_SPLIT_QA.split(draft.get("body") or "")]
+    texts += [str(draft.get(field) or "")
+              for field in ("title", "meta_title", "meta_description")]
+
+    for sentence in texts:
         if not sentence:
             continue
 
@@ -501,7 +509,7 @@ def run_seo_qa_v2(
     if not body:
         return base
 
-    findings.extend(_financing_findings(body, offer))
+    findings.extend(_financing_findings(draft, offer))
 
     normalized_body = normalize_query(body)
     normalized_title = normalize_query(title)
