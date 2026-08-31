@@ -50,6 +50,59 @@ visitor can act on:
 | `not a usable email address` | failed server-side validation |
 | `missing required answer(s): …` | a required configured field was empty |
 
+## What the honeypot defect actually cost
+
+Measured on the host on 2026-08-31, after the fix: **one** `lead submission
+rejected` in the whole log, and it was the owner's own submission of the evening
+before. No human request was lost. The defect cost exactly the test that
+revealed it.
+
+That number is the reason the fix is a fix and not a post-mortem — but it is
+also why the count matters as a habit rather than as a one-off. A honeypot that
+starts refusing humans does so silently, and the only place it shows is here:
+
+```bash
+docker logs seolead_api 2>&1 | grep -c "lead submission rejected"
+docker logs seolead_api 2>&1 | grep "lead submission rejected" | tail -20
+```
+
+Nothing about a refusal is persisted — `capture_lead` logs and raises — so this
+count lives only as long as the container's logs do. A rising count with no
+matching spam is the signal to look at the decoy field again.
+
+## Verifying one real submission
+
+What a complete submission must leave behind: **one** `captured_lead` row and
+**five** `lead_consent` rows. Five and not four: `consent_followup_contact` is
+one checkbox whose validated text names two channels, so it emits a PHONE row
+and a WHATSAPP row carrying the same answer, the same text and the same version.
+
+| consent_key | purpose | channel | text_version |
+|---|---|---|---|
+| `consent_processing` | PROCESSING | — | `solar-be-consent-v1.0-2026-08-17` |
+| `consent_followup_contact` | FOLLOWUP_CONTACT | PHONE | `solar-be-followup-contact-v1.0-2026-08-30` |
+| `consent_followup_contact` | FOLLOWUP_CONTACT | WHATSAPP | `solar-be-followup-contact-v1.0-2026-08-30` |
+| `consent_marketing` | MARKETING | WHATSAPP | `solar-be-marketing-whatsapp-v1.0-2026-08-30` |
+| `consent_partner_transfer` | PARTNER_TRANSFER | — | `solar-be-partner-transfer-v1.0-2026-08-30` |
+
+**PROCESSING carries a 17/08 version, and that is correct.** Its text was not
+touched by the validation of 2026-08-30 — the YAML says so in place — so it
+still resolves through `legal.consent_version`. Four rows dated 30/08 and one
+dated 17/08 is the expected shape; five rows dated 30/08 would mean a text had
+been changed without anyone deciding to.
+
+An unticked box is a row with `granted = false`. A refusal is a fact with legal
+weight, and it is what lets an export say "marketing: not consented" instead of
+guessing. A case the form never offered has no row at all.
+
+```sql
+SELECT c.consent_key, c.purpose, c.channel, c.granted, c.text_version,
+       c.granted_at, c.source
+FROM lead_consent c
+JOIN captured_lead l ON l.id = c.captured_lead_id
+ORDER BY l.created_at DESC, c.purpose, c.channel;
+```
+
 ## Privacy
 
 - No submitted value is written to the logs, on success or on rejection.
