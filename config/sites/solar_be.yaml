@@ -122,30 +122,44 @@ seo:
 # docs/seo/AUDIT_SEO_AEO_GEO_2026-08-31.md §3).
 offer:
   version: "solar-be-offer-v0.1-draft"
-  status: draft
+  status: draft            # draft | validated | retired
   pending_legal_review: true
   owner_validated_at: null
+  # Versions remplacées, jamais réécrites : « 150 € devient 190 € » = nouvelle
+  # version ci-dessus, ancienne version ajoutée ICI avec sa date. Le chargeur
+  # refuse un fichier dont la version courante figure déjà dans l'historique.
+  history: []
+  # valid_from / valid_until (dates ISO, incluses) : la fenêtre pendant
+  # laquelle la valeur EST l'offre. Hors fenêtre, le fait se tait tout seul.
   facts:
     - id: application_fee_eur
       label: "Frais de dossier (€)"
       value: null
       unit: EUR
       validated_at: null
+      valid_from: null
+      valid_until: null
     - id: upfront_payment_required
       label: "Apport initial exigé"
       value: null
       unit: null
       validated_at: null
+      valid_from: null
+      valid_until: null
     - id: financing_term_months
       label: "Durée de financement (mois)"
       value: null
       unit: MONTHS
       validated_at: null
+      valid_from: null
+      valid_until: null
     - id: monthly_instalment_example_eur
       label: "Mensualité de l'exemple validé (€)"
       value: null
       unit: EUR
       validated_at: null
+      valid_from: null
+      valid_until: null
   financing:
     provider: null          # identité du partenaire financier — décision propriétaire
     conditions: []

@@ -285,8 +285,99 @@ class TestOfferRegistry:
         view = offer_for_vertical("SOLAR_BE")
         assert view is not None
         assert view["publishable"] is False
+        assert view["status"] == "draft"
         assert view["registered_numbers"] == set()
         assert offer_for_vertical("NO_SUCH_VERTICAL") is None
+
+
+def _publishable_kwargs(**overrides):
+    """A fully unlocked offer — both locks open — to test what ELSE can
+    close it again."""
+    base = dict(version="v2", status="validated",
+                owner_validated_at="2026-08-31", pending_legal_review=False,
+                legal={"reviewed_at": "2026-09-01", "reviewer": "Me Exemple"},
+                facts=[_fact(value=150, validated_at="2026-08-31")])
+    base.update(overrides)
+    return base
+
+
+class TestOfferRegistryLifecycle:
+    """RC1 : draft → validated → retired, versions à sens unique, fenêtres
+    de validité. « 150 € devient 190 € » ne réécrit jamais l'histoire."""
+
+    def test_a_retired_offer_is_never_publishable(self):
+        retired = OfferConfig(**_publishable_kwargs(status="retired"))
+        assert retired.publishable is False
+        assert retired.registered_numbers() == set()
+
+    def test_a_draft_with_both_dates_is_still_a_draft(self):
+        # La bascule de statut est l'acte explicite du propriétaire ; une date
+        # de validation posée sans elle ne publie rien.
+        draft = OfferConfig(**_publishable_kwargs(status="draft"))
+        assert draft.publishable is False
+        assert draft.registered_numbers() == set()
+
+    def test_history_refuses_the_current_version(self):
+        with pytest.raises(ValueError, match="rewriting the past"):
+            OfferConfig(**_publishable_kwargs(history=[
+                {"version": "v2", "status": "validated",
+                 "superseded_at": "2026-08-01"}]))
+
+    def test_history_refuses_duplicate_versions(self):
+        with pytest.raises(ValueError, match="append-only"):
+            OfferConfig(**_publishable_kwargs(history=[
+                {"version": "v1", "status": "validated",
+                 "superseded_at": "2026-08-01"},
+                {"version": "v1", "status": "validated",
+                 "superseded_at": "2026-08-02"}]))
+
+    def test_a_proper_supersession_loads(self):
+        offer = OfferConfig(**_publishable_kwargs(history=[
+            {"version": "v1", "status": "validated",
+             "superseded_at": "2026-08-01",
+             "note": "frais de dossier 150 → 190"}]))
+        assert offer.publishable is True
+        assert offer.history[0].note == "frais de dossier 150 → 190"
+
+    def test_history_requires_a_date_and_a_known_status(self):
+        with pytest.raises(ValueError, match="ISO date"):
+            OfferConfig(history=[{"version": "v1", "status": "validated",
+                                  "superseded_at": "hier"}])
+        with pytest.raises(ValueError, match="draft|validated|retired"):
+            OfferConfig(history=[{"version": "v1", "status": "live",
+                                  "superseded_at": "2026-08-01"}])
+
+    def test_duplicate_fact_ids_are_refused(self):
+        with pytest.raises(ValueError, match="same id twice"):
+            OfferConfig(facts=[_fact(), _fact()])
+
+    def test_an_expired_fact_goes_silent_on_its_own(self):
+        expired = _fact(value=150, validated_at="2026-01-15",
+                        valid_until="2026-06-30")
+        assert expired.usable is False
+        offer = OfferConfig(**_publishable_kwargs(facts=[expired]))
+        assert offer.registered_numbers() == set(), \
+            "an expired fee must vanish from the registry without an edit"
+
+    def test_a_future_fact_is_not_yet_the_offer(self):
+        future = _fact(value=190, validated_at="2026-08-31",
+                       valid_from="2099-01-01")
+        assert future.usable is False
+
+    def test_a_fact_inside_its_window_is_usable(self):
+        current = _fact(value=150, validated_at="2026-08-31",
+                        valid_from="2026-01-01", valid_until="2099-12-31")
+        assert current.usable is True
+
+    def test_an_inverted_window_is_refused_at_load(self):
+        with pytest.raises(ValueError, match="ends before it starts"):
+            _fact(valid_from="2026-06-01", valid_until="2026-01-01")
+
+    def test_a_malformed_date_is_refused_at_load(self):
+        # Le chargeur strict livre les dates comme chaînes ; c'est ICI
+        # qu'elles doivent être des dates, et bruyamment.
+        with pytest.raises(ValueError, match="ISO date"):
+            _fact(valid_from="31/08/2026")
 
 
 class TestOrganizationReadiness:

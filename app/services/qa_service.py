@@ -500,6 +500,16 @@ def run_seo_qa_v2(
     None is treated exactly like an empty registry — fail-closed — because a
     missing registry must never read as permission.
     """
+    # Which registry judged this draft — carried on the verdict so a stored QA
+    # row can always be traced back to the offer version it was checked
+    # against. « 150 € devient 190 € » is a new registry version, and the old
+    # verdicts keep naming the old one.
+    registry_ref = {
+        "version": (offer or {}).get("version") or "absent",
+        "status": (offer or {}).get("status") or "absent",
+        "publishable": bool((offer or {}).get("publishable")),
+    }
+
     base = run_deterministic_qa(draft, brief, package, profile,
                                 existing_titles=existing_titles)
     findings = list(base["findings"])
@@ -507,7 +517,7 @@ def run_seo_qa_v2(
     body = (draft.get("body") or "").strip()
     title = (draft.get("title") or "").strip()
     if not body:
-        return base
+        return {**base, "offer_registry": registry_ref}
 
     findings.extend(_financing_findings(draft, offer))
 
@@ -650,7 +660,7 @@ def run_seo_qa_v2(
         findings.append(_finding("SERP_CONTENT_GAP", f"Opportunity: {gap}",
                                  blocking=False))
 
-    return _verdict(findings)
+    return {**_verdict(findings), "offer_registry": registry_ref}
 
 
 def _question_covered(question: str, normalized_body: str) -> bool:
