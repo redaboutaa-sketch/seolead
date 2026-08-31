@@ -3,13 +3,21 @@ import type { Metadata } from "next";
 import { IconCheck } from "@/components/home/Icons";
 import { LeadForm } from "@/components/LeadForm";
 import { getSiteConfig } from "@/lib/api";
+import { pageMetadata } from "@/lib/metadata";
 
-export const metadata: Metadata = {
-  title: "Cadrer votre projet solaire",
-  description:
-    "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
-  robots: { index: false, follow: false },
-};
+// Robots follow the site-wide gate, like /demande-etude: the declared route
+// table feeds the sitemap, and a hardcoded noindex would contradict it at
+// flip time.
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getSiteConfig();
+  return pageMetadata({
+    config,
+    title: "Cadrer votre projet solaire",
+    description:
+      "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
+    path: "/outils/estimation-solaire",
+  });
+}
 
 export const dynamic = "force-dynamic";
 

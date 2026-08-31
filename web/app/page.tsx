@@ -9,10 +9,34 @@ import {
   Process,
   QualificationCta,
 } from "@/components/home/Sections";
+import type { Metadata } from "next";
+
 import { getSiteConfig, listPublished } from "@/lib/api";
 import { faqNode, graph, organizationNode, websiteNode } from "@/lib/jsonld";
 
 export const revalidate = 300;
+
+// Canonical and Open Graph for the homepage. Title and robots stay the
+// layout's business (the layout's default title must not pass through its own
+// `%s — suffix` template, so no `title` is set here); the canonical is the
+// origin itself, and it is absent rather than wrong when no origin is
+// configured.
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getSiteConfig();
+  const origin = config?.seo.canonical_origin ?? null;
+  const description = config?.seo.default_meta_description ?? undefined;
+  return {
+    ...(origin ? { alternates: { canonical: origin } } : {}),
+    openGraph: {
+      title: config?.brand_name ?? "Mon Projet Solaire",
+      description,
+      type: "website",
+      locale: config?.default_language ?? "fr",
+      siteName: config?.brand_name ?? undefined,
+      ...(origin ? { url: origin } : {}),
+    },
+  };
+}
 
 /**
  * The homepage is composition, not markup.

@@ -35,6 +35,20 @@ export function isKnownRoute(config: SiteConfigDTO | null, path: string): boolea
   return config.routes.some((route) => route.path === path);
 }
 
+export const FINANCING_PATH = "/panneaux-solaires-sans-apport";
+
+/**
+ * Whether the financing landing is actually served — the SAME gate its page
+ * module applies (`staging || offer.publishable`), exposed so nothing links
+ * to it while it 404s. The pre-publication crawl found the gap: with staging
+ * off and the offer not yet publishable, the page correctly disappears, and
+ * every hero/FAQ link to it became a broken link on day one.
+ */
+export function financingLandingVisible(config: SiteConfigDTO | null): boolean {
+  if (!config || !isKnownRoute(config, FINANCING_PATH)) return false;
+  return Boolean(config.staging) || Boolean(config.offer?.publishable);
+}
+
 export function knownRoutesForLocale(
   config: SiteConfigDTO | null,
   locale: string,

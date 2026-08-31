@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { isKnownRoute, localizedPath } from "@/lib/site";
+import { FINANCING_PATH, financingLandingVisible, isKnownRoute, localizedPath } from "@/lib/site";
 import type { PublishedContentDTO, SiteConfigDTO } from "@/lib/types";
 
 import { HeroVisual } from "./HeroVisual";
@@ -37,8 +37,6 @@ type Ctx = { config: SiteConfigDTO | null; locale: string };
 function primaryLabel(config: SiteConfigDTO | null): string {
   return config?.conversion.primary_cta_label ?? "Demander une estimation";
 }
-
-const FINANCING_PATH = "/panneaux-solaires-sans-apport";
 
 export function PrimaryCta({
   config,
@@ -99,7 +97,7 @@ export function Hero({ config, locale }: Ctx) {
           {/* Positionnement financement (P1.2) — secondaire et conditionnel :
               « selon votre situation », « peuvent être étudiées ». Jamais une
               promesse ; la page dédiée porte le sujet, le hero le signale. */}
-          {isKnownRoute(config, FINANCING_PATH) ? (
+          {financingLandingVisible(config) ? (
             <p className="hero__financing">
               Pas d&apos;épargne à mobiliser&nbsp;? Selon votre situation,
               différentes solutions de financement peuvent être étudiées.{" "}
@@ -525,7 +523,10 @@ export function Faq({ config, locale }: Ctx) {
                 <summary>{question}</summary>
                 <p>
                   {answer}
-                  {target && link && isKnownRoute(config, target) ? (
+                  {target && link &&
+                  (target === FINANCING_PATH
+                    ? financingLandingVisible(config)
+                    : isKnownRoute(config, target)) ? (
                     <>
                       {" "}
                       <Link href={localizedPath(config, locale, target)}>

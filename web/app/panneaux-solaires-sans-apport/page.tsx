@@ -7,7 +7,7 @@ import { DirectAnswer } from "@/components/DirectAnswer";
 import { getSiteConfig } from "@/lib/api";
 import { faqNode, graph, serviceNode, webPageNode, websiteNode } from "@/lib/jsonld";
 import { pageMetadata } from "@/lib/metadata";
-import { localizedPath } from "@/lib/site";
+import { financingLandingVisible, localizedPath } from "@/lib/site";
 import type { OfferDTO, SiteConfigDTO } from "@/lib/types";
 
 /**
@@ -102,9 +102,9 @@ export async function generateMetadata(): Promise<Metadata> {
   });
 }
 
-function visible(config: SiteConfigDTO | null): boolean {
-  return Boolean(config?.staging) || Boolean(config?.offer?.publishable);
-}
+// The one gate, shared with everything that links here (hero, FAQ): a page
+// that 404s must not be linked, and a page that is linked must be served.
+const visible = financingLandingVisible;
 
 /** The validated fact, or null — never a placeholder number. */
 function fact(offer: OfferDTO | undefined, id: string) {
