@@ -3,12 +3,14 @@ import {
   Benefits,
   Faq,
   FinalCta,
+  HOME_FAQ,
   Hero,
   Method,
   Process,
   QualificationCta,
 } from "@/components/home/Sections";
 import { getSiteConfig, listPublished } from "@/lib/api";
+import { faqNode, graph, organizationNode, websiteNode } from "@/lib/jsonld";
 
 export const revalidate = 300;
 
@@ -29,6 +31,17 @@ export default async function Home() {
   const locale = config?.default_language ?? "fr";
   const published = await listPublished(locale);
 
+  // WebSite + FAQPage from the same data the visible FAQ renders, plus
+  // Organization/LocalBusiness ONLY once the owner has supplied legal_name and
+  // BCE number (`organization_schema_ready`) — the builders return null until
+  // then, and null renders nothing. The privacy entry's schema answer is the
+  // plain text; its link is presentation.
+  const jsonLd = graph(
+    websiteNode(config),
+    organizationNode(config),
+    faqNode(config, "/", HOME_FAQ.map(({ question, answer }) => ({ question, answer }))),
+  );
+
   return (
     <>
       <Hero config={config} locale={locale} />
@@ -39,6 +52,12 @@ export default async function Home() {
       <QualificationCta config={config} locale={locale} />
       <Faq config={config} locale={locale} />
       <FinalCta config={config} locale={locale} />
+      {jsonLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLd }}
+        />
+      ) : null}
     </>
   );
 }
