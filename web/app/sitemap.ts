@@ -54,8 +54,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }
   const publishedUrls = new Set(published.map((item) => item.url));
 
+  // /conditions declares itself noindex in its page module while its legal
+  // text is the owner-pending placeholder — a sitemap must not list a page
+  // that tells crawlers to ignore it. When the owner supplies the text and
+  // the page's hardcoded noindex is lifted, remove the path here too (the
+  // route stays in the table so the footer keeps linking it).
+  const SELF_NOINDEX_PATHS = new Set(["/conditions"]);
+
   for (const route of config.routes) {
     if (route.path === "/") continue;
+    if (SELF_NOINDEX_PATHS.has(route.path)) continue;
     if (route.path === FINANCING_PATH && !config.offer?.publishable) continue;
     for (const locale of route.locales) {
       if (!config.supported_languages.includes(locale)) continue;
