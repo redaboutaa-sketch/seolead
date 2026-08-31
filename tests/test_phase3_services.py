@@ -607,7 +607,10 @@ class TestCredentialReport:
                           "OPENAI": "CONFIGURED", "INTERNAL_API": "CONFIGURED",
                           # Phase 4: the staging preview token is the only secret
                           # that gates access to unpublished content.
-                          "SITE_PREVIEW": "NOT_CONFIGURED"}
+                          "SITE_PREVIEW": "NOT_CONFIGURED",
+                          # Lead notification transport — unset until the
+                          # operator supplies SMTP credentials.
+                          "SMTP": "NOT_CONFIGURED"}
         # No value, no prefix, no length may appear.
         joined = str(report)
         assert "test-tavily-key-not-real" not in joined
