@@ -80,7 +80,13 @@ legal:
   # après avoir vu ce troisième nom dans les résultats Google. Aucune autre
   # modification de sens. Distincte de consent_version, qui identifie le texte
   # du consentement au traitement (v1.1-2026-08-31, même correction de nom).
-  privacy_policy_version: "solar-be-privacy-v1.2-2026-08-31"
+  # v1.3 le 2026-09-02 : la v1.2 servie en production nommait encore
+  # « Solar Belgium » à deux endroits du corps — les phrases y sont coupées
+  # par un retour à la ligne, invisible à une recherche ligne à ligne, et le
+  # renommage les avait donc manquées. Une version identifie un texte : le
+  # texte ayant changé, il en faut une nouvelle, même pour une correction
+  # que la v1.2 prétendait déjà porter.
+  privacy_policy_version: "solar-be-privacy-v1.3-2026-09-02"
   data_controller: "BEAVER DATA GROUP"
   privacy_contact_email: "reda.boutaa@gmail.com"
   reviewed: true

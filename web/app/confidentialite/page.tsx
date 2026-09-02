@@ -58,8 +58,8 @@ export default async function PrivacyPage() {
 
       <h2>Responsable du traitement</h2>
       <p>
-        Les données personnelles collectées par l&apos;intermédiaire du site Solar
-        Belgium sont traitées sous la responsabilité de&nbsp;:
+        Les données personnelles collectées par l&apos;intermédiaire du site Mon
+        Projet Solaire sont traitées sous la responsabilité de&nbsp;:
       </p>
       <address>
         {controller}
@@ -127,8 +127,8 @@ export default async function PrivacyPage() {
       <h2>Base juridique du traitement</h2>
       <p>
         Lorsque vous validez le formulaire, vous consentez au traitement des données
-        que vous avez communiquées pour la gestion et le suivi de votre demande Solar
-        Belgium.
+        que vous avez communiquées pour la gestion et le suivi de votre demande sur
+        Mon Projet Solaire.
       </p>
       <p>
         Votre consentement peut être retiré à tout moment. Le retrait du consentement

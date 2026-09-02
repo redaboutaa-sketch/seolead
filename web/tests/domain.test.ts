@@ -94,6 +94,46 @@ describe("indexing gate", () => {
   });
 });
 
+describe("le service porte UN seul nom sur les pages publiques", () => {
+  /*
+   * Le 2026-09-02, la page confidentialité servait encore « Solar Belgium »
+   * après un renommage qui se croyait complet — deux fois, dans des phrases
+   * que JSX coupe par un retour à la ligne :
+   *
+   *     Les données personnelles collectées par l'intermédiaire du site Solar
+   *     Belgium sont traitées sous la responsabilité de :
+   *
+   * `grep "Solar Belgium"` ne trouve rien là-dedans : il lit ligne à ligne,
+   * quand le rendu, lui, recolle. Deux reconstructions d'image et un
+   * .dockerignore ont été soupçonnés avant que la source ne soit relue
+   * correctement. D'où cette assertion, qui aplatit les espaces AVANT de
+   * chercher — la seule forme qui voie ce que le visiteur voit.
+   */
+  const NOMS_ABANDONNES = ["Solar Belgium"];
+
+  for (const fichier of ["../app/confidentialite/page.tsx",
+                         "../app/conditions/page.tsx"]) {
+    it(`${fichier} ne rend aucun nom abandonné`, () => {
+      let source: string;
+      try {
+        source = readFileSync(new URL(fichier, import.meta.url), "utf-8");
+      } catch {
+        return; // la page n'existe pas dans cette configuration
+      }
+      // Les commentaires du fichier PEUVENT nommer l'ancien nom : ils
+      // expliquent précisément pourquoi il a disparu. Seul le rendu compte.
+      const rendu = source
+        .split("\n")
+        .filter((ligne) => !ligne.trim().startsWith("//") && !ligne.trim().startsWith("*"))
+        .join(" ")
+        .replace(/\s+/g, " ");
+      for (const nom of NOMS_ABANDONNES) {
+        expect(rendu, `${fichier} rend encore « ${nom} »`).not.toContain(nom);
+      }
+    });
+  }
+});
+
 describe("content-security-policy", () => {
   it("is emitted from middleware only, never from next.config", () => {
     // Two CSP headers means the browser enforces the intersection, so a static
