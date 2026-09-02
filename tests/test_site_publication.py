@@ -589,7 +589,7 @@ class TestSiteConfiguration:
         assert config.legal.reviewed is True
         assert config.legal.consent_version == "solar-be-consent-v1.1-2026-08-31"
         assert config.legal.privacy_policy_version == \
-            "solar-be-privacy-v1.2-2026-08-31"
+            "solar-be-privacy-v1.3-2026-09-02"
         assert config.legal.data_controller == "BEAVER DATA GROUP"
         assert config.legal.privacy_contact_email == "reda.boutaa@gmail.com"
 
