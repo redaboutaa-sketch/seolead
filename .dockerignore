@@ -1,0 +1,44 @@
+# Ce qui ne doit JAMAIS entrer dans un contexte de build.
+#
+# Son absence a coûté un déploiement le 2026-09-02 : le contexte pesait
+# 747 Mo et `COPY web/ ./` — qui s'exécute APRÈS `npm ci` dans l'étape
+# builder — recouvrait les dépendances proprement installées par celles de
+# l'hôte, et déposait un `.next` périmé dans le répertoire de build. Une
+# image reconstruite servait alors l'ancienne page : le symptôme le plus
+# coûteux qui soit, parce qu'il fait douter du code plutôt que du build.
+#
+# Règle : le contexte ne contient que des SOURCES. Tout ce qui est dérivé
+# (dépendances installées, sorties de build, caches) se reconstruit dans
+# l'image, jamais ne s'y copie.
+
+# ── Dérivés du front ────────────────────────────────────────────────────
+node_modules
+web/node_modules
+.next
+web/.next
+web/out
+
+# ── Dérivés Python ──────────────────────────────────────────────────────
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+
+# ── Historique, outillage local, artefacts ──────────────────────────────
+.git
+.github
+.gitignore
+*.log
+playwright-report
+test-results
+coverage
+
+# ── Secrets : rien de tout cela n'a à traverser un build ────────────────
+.env
+.env.*
+!.env.example

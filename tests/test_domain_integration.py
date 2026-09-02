@@ -286,6 +286,53 @@ class TestTraefikRoutingIsPreparedNotApplied:
         assert not any("stsPreload" in k for k in labels)
 
 
+class TestBuildContextCarriesOnlySources:
+    """Le contexte de build ne contient que des sources.
+
+    Mesuré le 2026-09-02, sur une image reconstruite qui servait pourtant
+    l'ancienne page : sans `.dockerignore`, le contexte pesait 747 Mo —
+    `web/node_modules` (626 Mo) et `web/.next` (199 Mo) de l'hôte. Or dans
+    `infra/web/Dockerfile`, `COPY web/ ./` s'exécute APRÈS
+    `COPY --from=deps /app/node_modules` : les dépendances proprement
+    installées par `npm ci` étaient recouvertes par celles de l'hôte, et un
+    répertoire de build périmé atterrissait dans l'étape builder.
+
+    C'est le symptôme le plus coûteux qui soit : il fait douter du code
+    alors que le défaut est dans le build. Ces assertions gardent
+    l'exclusion, pas la taille — un `.dockerignore` supprimé rend ce
+    fichier rouge avant qu'un déploiement ne rende quiconque perplexe.
+    """
+
+    IGNORE = Path(".dockerignore")
+
+    def test_the_dockerignore_exists(self):
+        assert self.IGNORE.exists(), (
+            "sans .dockerignore, le contexte embarque node_modules et .next")
+
+    def test_derived_directories_never_enter_the_context(self):
+        lignes = {l.strip() for l in self.IGNORE.read_text().splitlines()
+                  if l.strip() and not l.startswith("#")}
+        # Les deux qui ont réellement cassé un déploiement.
+        assert "node_modules" in lignes or "web/node_modules" in lignes
+        assert ".next" in lignes or "web/.next" in lignes
+        # Et les dérivés Python, pour la même raison côté image API.
+        assert "__pycache__" in lignes
+        assert ".venv" in lignes
+
+    def test_the_sources_the_images_need_are_not_excluded(self):
+        """Une exclusion trop large casserait le build au lieu de le salir."""
+        lignes = {l.strip() for l in self.IGNORE.read_text().splitlines()
+                  if l.strip() and not l.startswith("#")}
+        for indispensable in ("web", "web/app", "web/public", "app", "config",
+                              "migrations", "alembic.ini", "web/package.json"):
+            assert indispensable not in lignes
+
+    def test_no_secret_file_can_ride_along(self):
+        lignes = {l.strip() for l in self.IGNORE.read_text().splitlines()
+                  if l.strip() and not l.startswith("#")}
+        assert ".env" in lignes and ".env.*" in lignes
+
+
 class TestGenericSiteArchitectureSurvivesTheDomain:
     def test_a_second_site_still_loads_with_no_domain(self):
         """The isolation control must not have acquired a Solar assumption."""
