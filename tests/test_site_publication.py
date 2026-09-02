@@ -587,9 +587,9 @@ class TestSiteConfiguration:
         # affirme désormais l'inverse : ce qui a été fourni est présent,
         # exactement.
         assert config.legal.reviewed is True
-        assert config.legal.consent_version == "solar-be-consent-v1.0-2026-08-17"
+        assert config.legal.consent_version == "solar-be-consent-v1.1-2026-08-31"
         assert config.legal.privacy_policy_version == \
-            "solar-be-privacy-v1.1-2026-08-30"
+            "solar-be-privacy-v1.2-2026-08-31"
         assert config.legal.data_controller == "BEAVER DATA GROUP"
         assert config.legal.privacy_contact_email == "reda.boutaa@gmail.com"
 

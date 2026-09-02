@@ -3,15 +3,17 @@ import type { Metadata } from "next";
 import { getSiteConfig } from "@/lib/api";
 import { pageMetadata } from "@/lib/metadata";
 
-// The title keeps the wording of the owner-approved policy (including its
-// « Solar Belgium » naming — the three-name question is an open owner
-// decision, not the renderer's to settle). The description states what the
-// page contains without adding any legal assertion of its own.
+// The title keeps the wording of the owner-approved policy. The three-name
+// question it used to carry is settled: the owner decided on 2026-08-31,
+// after seeing « Solar Belgium » in Google's own results for a page that
+// names it nowhere else, that the service is « Mon Projet Solaire »
+// everywhere — policy v1.2 and consent text v1.1. The description states
+// what the page contains without adding any legal assertion of its own.
 export async function generateMetadata(): Promise<Metadata> {
   const config = await getSiteConfig();
   return pageMetadata({
     config,
-    title: "Protection de vos données personnelles – Solar Belgium",
+    title: "Protection de vos données personnelles – Mon Projet Solaire",
     description:
       "Politique de confidentialité : quelles données le formulaire " +
       "d'estimation collecte, dans quel but, combien de temps elles sont " +
@@ -47,7 +49,7 @@ export default async function PrivacyPage() {
 
   return (
     <div className="container page">
-      <h1>Protection de vos données personnelles – Solar Belgium</h1>
+      <h1>Protection de vos données personnelles – Mon Projet Solaire</h1>
       <p>
         <small>
           Version&nbsp;: <code>{version}</code>
@@ -72,7 +74,7 @@ export default async function PrivacyPage() {
       </address>
       <p>
         {controller} détermine les finalités et les moyens des traitements
-        réalisés dans le cadre du service Solar Belgium.
+        réalisés dans le cadre du service Mon Projet Solaire.
       </p>
 
       <h2>Pourquoi collectons-nous vos données&nbsp;?</h2>
@@ -162,7 +164,7 @@ export default async function PrivacyPage() {
       <p>
         Les données relatives à votre demande sont conservées pendant une durée
         maximale de 24&nbsp;mois (730&nbsp;jours) à compter de leur collecte ou de
-        votre dernière interaction avec Solar Belgium, sauf si&nbsp;:
+        votre dernière interaction avec Mon Projet Solaire, sauf si&nbsp;:
       </p>
       <ul>
         <li>vous demandez leur suppression auparavant&nbsp;;</li>

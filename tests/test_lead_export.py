@@ -527,7 +527,12 @@ class TestConsentementApprouve:
             consent_version=lead.consent_version
             or load_site("solar_be").legal.consent_version)
         version = charge["consent"]["version"]
-        assert version == "solar-be-consent-v1.0-2026-08-17"
+        # Ce qui compte est le LIEN : la charge porte la version que la
+        # personne a réellement vue, donc celle de la config au moment de la
+        # capture — pas un littéral figé ici, qui rendrait rouge toute
+        # incrémentation légitime (v1.1 le 2026-08-31 : le service renommé
+        # « Mon Projet Solaire ») alors que le mécanisme, lui, marche.
+        assert version == load_site("solar_be").legal.consent_version
         assert "placeholder" not in version.lower()
 
     @pytest.mark.asyncio

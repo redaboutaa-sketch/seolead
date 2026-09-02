@@ -304,10 +304,15 @@ class TestPerCaseConsent:
 # Modifier un libellé sans frapper une nouvelle version rend cette table
 # fausse et la suite rouge : c'est le garde de version, et il est voulu.
 TEXTES_VERSIONNES = {
-    "solar-be-consent-v1.0-2026-08-17": (
+    # v1.1 (2026-08-31) : le service est nommé « Mon Projet Solaire » et non
+    # plus « Solar Belgium ». Le texte v1.0 n'est PAS répété ici — il vit
+    # désormais uniquement dans les lignes lead_consent déjà collectées, qui
+    # portent leur propre version. C'est la règle : on frappe une version, on
+    # ne réécrit pas ce à quoi quelqu'un a consenti.
+    "solar-be-consent-v1.1-2026-08-31": (
         "consent_processing",
         "J'accepte que mes données personnelles soient traitées par BEAVER "
-        "DATA GROUP, responsable du traitement de Solar Belgium, afin "
+        "DATA GROUP, responsable du traitement de Mon Projet Solaire, afin "
         "d'analyser ma demande relative à mon projet solaire, me recontacter "
         "à ce sujet et assurer le suivi de ma demande. J'ai pris connaissance "
         "de la Politique de confidentialité et je peux retirer mon "
