@@ -108,17 +108,23 @@ class TestSiteConfigEndpoint:
         assert "lead_destination_email" not in organization
 
     def test_verification_tokens_travel_as_supplied(self, client):
-        """Les jetons Search Console voyagent avec la config SEO — celui de
-        Google, fourni par le propriétaire le 2026-08-31 (public par
-        construction : il est publié dans le HTML de chaque page) ; Bing
-        reste null (import depuis Search Console, aucun jeton nécessaire).
-        Rien n'est jamais inventé ici."""
+        """Les jetons Search Console et Bing voyagent avec la config SEO,
+        tels que FOURNIS par le propriétaire le 2026-08-31 (publics par
+        construction : ils sont publiés dans le HTML de chaque page).
+
+        L'assertion se fait contre la config elle-même, pas contre des
+        littéraux : ce qui doit être vrai est « l'API rend ce qui a été
+        fourni », et un jeton en dur ici rendrait rouge tout renouvellement
+        légitime sans rien prouver de plus. Rien n'est jamais inventé —
+        un champ null reste null."""
+        from app.site.config import load_site
+        attendu = load_site("solar_be").seo.verification
         body = client.get("/site/v1/sites/solar_be",
                           headers={"X-Internal-Key": KEY}).json()
-        assert body["seo"]["verification"] == {
-            "google": "tMnffPZeT4Mc9jfbKIEMfy2BIm1lpW8f0pDLsds0Za8",
-            "bing": None,
-        }
+        assert body["seo"]["verification"] == attendu
+        # Et les deux sont bien renseignés aujourd'hui : le contraire
+        # signifierait une console qui ne peut plus vérifier la propriété.
+        assert attendu["google"] and attendu["bing"]
 
 
 class TestPreviewToken:
