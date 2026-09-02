@@ -72,13 +72,15 @@ legal:
   privacy_policy_path: /confidentialite
   terms_path: /conditions
   cookie_policy_path: null
-  consent_version: "solar-be-consent-v1.0-2026-08-17"
-  # Version de la POLITIQUE affichée sur /confidentialite. Incrémentée le
-  # 2026-08-30 (section « Transmission à notre partenaire installateur »
-  # ajoutée, phrase d'exclusion retirée — validé par le propriétaire,
-  # responsable de traitement). Distincte de consent_version, qui identifie le
-  # texte du consentement au traitement et reste v1.0-2026-08-17.
-  privacy_policy_version: "solar-be-privacy-v1.1-2026-08-30"
+  consent_version: "solar-be-consent-v1.1-2026-08-31"
+  # Version de la POLITIQUE affichée sur /confidentialite. v1.1 le 2026-08-30
+  # (section « Transmission à notre partenaire installateur » ajoutée, phrase
+  # d'exclusion retirée). v1.2 le 2026-08-31 : le service y est nommé « Mon
+  # Projet Solaire » et non plus « Solar Belgium » — décision du propriétaire
+  # après avoir vu ce troisième nom dans les résultats Google. Aucune autre
+  # modification de sens. Distincte de consent_version, qui identifie le texte
+  # du consentement au traitement (v1.1-2026-08-31, même correction de nom).
+  privacy_policy_version: "solar-be-privacy-v1.2-2026-08-31"
   data_controller: "BEAVER DATA GROUP"
   privacy_contact_email: "reda.boutaa@gmail.com"
   reviewed: true
@@ -687,12 +689,18 @@ conversion:
     - key: consent_processing
       type: consent
       consent_purpose: PROCESSING
-      # INCHANGÉ — version solar-be-consent-v1.0-2026-08-17 via
-      # legal.consent_version.
+      # Version solar-be-consent-v1.1-2026-08-31 via legal.consent_version.
+      # SEUL changement depuis la v1.0 : le service est nommé « Mon Projet
+      # Solaire » et non plus « Solar Belgium » — un nom provisoire qui
+      # n'existait nulle part ailleurs sur le site et que Google affichait
+      # dans ses résultats. Le responsable de traitement, la finalité, les
+      # droits et la portée sont identiques au caractère près. Les
+      # consentements déjà recueillis gardent la v1.0 : c'est ce que le
+      # modèle versionné garantit, et l'historique ne se réécrit pas.
       label: >-
         J'accepte que mes données personnelles soient traitées par BEAVER DATA
-        GROUP, responsable du traitement de Solar Belgium, afin d'analyser ma
-        demande relative à mon projet solaire, me recontacter à ce sujet et
+        GROUP, responsable du traitement de Mon Projet Solaire, afin d'analyser
+        ma demande relative à mon projet solaire, me recontacter à ce sujet et
         assurer le suivi de ma demande. J'ai pris connaissance de la Politique
         de confidentialité et je peux retirer mon consentement à tout moment.
       required: true

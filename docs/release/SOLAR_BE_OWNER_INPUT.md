@@ -53,9 +53,9 @@ Sans ces éléments, la revue juridique ne peut pas conclure et les faits
 | 15 | Revue juridique du modèle réel (matrice L-1…L-20) | lever `pending_legal_review` — voir `docs/legal/SOLAR_BE_FINANCING_REVIEW.md` | ______ |
 | 16 | Décision propriétaire : approuver/rejeter `/prix-panneaux-solaires-belgique` révision 2 | premier contenu publié (portes déterministes PASS, approbation PENDING) | ______ |
 | 17 | Conditions d'utilisation du site | `/conditions` (placeholder noindex) | ______ |
-| 18 | Identifiants SMTP (SEOLEAD_SMTP_* dans .env de l'hôte) | livraison effective des notifications de leads — sans eux, chaque lead produit un WARNING « NOT delivered » dans les logs | ______ |
-| 19 | Jetons Search Console / Bing (`seo.verification.*`) | avant l'indexation, recommandé | ______ |
-| 20 | Titre « – Solar Belgium » de /confidentialite : à confirmer ou reformuler avec le juriste | cohérence des noms | ______ |
+| 18 | Identifiants SMTP (SEOLEAD_SMTP_* dans .env de l'hôte) | livraison effective des notifications de leads | **FOURNI 2026-08-31** — relais Brevo configuré sur l'hôte, envoi accepté |
+| 19 | Jetons Search Console / Bing (`seo.verification.*`) | avant l'indexation, recommandé | **FOURNIS 2026-08-31** — Google et Bing, servis en production |
+| 20 | Titre « – Solar Belgium » de /confidentialite : à confirmer ou reformuler | cohérence des noms | **TRANCHÉ 2026-08-31** — le service est « Mon Projet Solaire » partout ; politique v1.2, texte de consentement v1.1. Décision prise après avoir vu ce troisième nom dans les résultats Google |
 
 ## 4. Ce que le propriétaire n'a toujours PAS à fournir
 

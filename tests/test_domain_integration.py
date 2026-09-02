@@ -264,10 +264,21 @@ class TestTraefikRoutingIsPreparedNotApplied:
         assert "$apr1$" not in raw
         assert "$$apr1$$" not in raw
 
-    def test_the_overlay_forces_noindex_at_the_edge_too(self):
+    def test_the_overlay_stamps_no_X_Robots_Tag_at_all(self):
+        """L'edge n'a plus voix au chapitre sur l'indexation (2026-08-31).
+
+        Ce test affirmait l'inverse : l'overlay ajoutait `X-Robots-Tag:
+        noindex` à CHAQUE réponse publique, en « belt and braces » de
+        l'en-tête applicatif. Le jour du lancement, la config a ouvert la
+        meta, robots.txt et le sitemap ; ce label, lui, est resté — et
+        Google, qui suit le signal le plus strict, a refusé trois demandes
+        d'indexation en disant exactement pourquoi. Une seule autorité
+        désormais : la meta par page, pilotée par la config. Les surfaces
+        jamais indexables (/preview, /api) portent leur en-tête depuis le
+        middleware Next, qui traverse Traefik tel quel.
+        """
         labels = yaml.safe_load(OVERLAY.read_text())["services"]["seolead_web"]["labels"]
-        tag = next(v for k, v in labels.items() if k.endswith("X-Robots-Tag"))
-        assert "noindex" in tag and "nofollow" in tag
+        assert not [k for k in labels if k.endswith("X-Robots-Tag")]
 
     def test_hsts_is_not_preloaded(self):
         """Preload is effectively irreversible and this site has served nothing."""
