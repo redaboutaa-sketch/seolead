@@ -291,6 +291,18 @@ def quantity_labels(text: str) -> dict[str, str]:
     return {k: v for k, v in labels.items() if k}
 
 
+def sentence_is_sourced(sentence: str, supported: list[dict]) -> bool:
+    """Whether the ledger carries a sentence: every risky figure covered by
+    one SUPPORTED claim (same unit, full range), or — for a figure-less
+    sentence — a SUPPORTED claim it lexically matches. The deterministic
+    answer to « is this sourced? », for anyone who would answer otherwise."""
+    segments = risky_segments(sentence)
+    if segments:
+        ranges, units = risky_ranges(sentence), risky_units(sentence)
+        return any(covers(c, segments, ranges, units) for c in supported)
+    return any(_matches_claim(sentence, c) for c in supported)
+
+
 def body_segments(body: str) -> set[str]:
     """Every risky segment a body states, over all its sentences."""
     segments: set[str] = set()

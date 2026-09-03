@@ -643,3 +643,54 @@ class TestWriterFeedbackNamesTheFix:
                  "detail": "phrase"}]))
         assert "apply the fix to THAT sentence" in system
         assert '"fix"' in user and "INSIDE that same sentence" in user
+
+
+# ─── 10. Le registre l'emporte sur le relecteur pour le sourcing ────────────
+
+@pytest.mark.asyncio
+class TestLedgerOverrulesReviewer:
+    BODY = ("En Wallonie, une installation standard est rentabilisée au bout "
+            "de 5 ans. Une installation coûte 9 999 euros en moyenne.")
+
+    class _LLM(_CapturingLLM):
+        async def generate(self, request):
+            self.requests.append(request)
+            return LLMResponse(content=json.dumps({"findings": [
+                {"code": "unsupported_claim", "severity": "high",
+                 "category": "ROI",
+                 "message": "En Wallonie, une installation standard est "
+                            "rentabilisée au bout de 5 ans."},
+                {"code": "unsupported_claim", "severity": "high",
+                 "category": "ROI",
+                 "message": "Une installation coûte 9 999 euros en moyenne."},
+            ]}), provider="stub", model="stub",
+                usage=LLMUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                latency_ms=1)
+
+    async def _run(self, sourced):
+        return await qa_service.run_llm_qa(
+            {"title": "t", "meta_description": "d", "body": self.BODY},
+            {"primary_query": "q", "search_intent": "INFORMATIONAL",
+             "content_type": "GUIDE", "target_audience": "a",
+             "cta_strategy": {}},
+            llm=self._LLM(), correlation_id="t", sourced_claims=sourced)
+
+    async def test_a_sourced_sentence_cannot_be_blocked_by_the_model(self):
+        """Cinquième brouillon régénéré (f4b897a6) : le relecteur a bloqué le
+        5 ans wallon que le registre porte en source officielle."""
+        result = await self._run([CLAIM_PROSUMER_5_ANS])
+        five = next(f for f in result["findings"]
+                    if f["message"].startswith("En Wallonie"))
+        assert five["blocking"] is False and five.get("overruled_by_ledger")
+        price = next(f for f in result["findings"]
+                     if f["message"].startswith("Une installation coûte"))
+        assert price["blocking"] is True
+        assert len(result["blocking_issues"]) == 1
+
+    async def test_without_claim_dicts_the_model_keeps_its_say(self):
+        result = await self._run([CLAIM_PROSUMER_5_ANS["claim"]])
+        assert len(result["blocking_issues"]) == 2
+
+    async def test_the_mutation_an_unsourced_five_years_still_blocks(self):
+        result = await self._run([CLAIM_PROSUMER_MECHANISM_TRUNCATED])
+        assert len(result["blocking_issues"]) == 2
