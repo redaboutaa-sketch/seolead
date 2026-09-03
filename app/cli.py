@@ -1384,18 +1384,32 @@ async def cmd_leads_export(args: argparse.Namespace) -> int:
 
     config = load_site("solar_be")
     destination = Prospect360Destination(settings)
+    # Le producteur émet le contrat v2. Une route ou une campagne absentes se
+    # disent AVANT toute frappe d'identité : rien n'est gelé, rien ne part.
+    try:
+        lead_export.verifier_route(destination)
+        lead_export.verifier_campagne(config)
+    except lead_export.ExportRefuse as exc:
+        _emit({"status": "CONTRACT_NOT_READY", "detail": str(exc)})
+        return EXIT_ERROR
     resultats = []
     async with get_sessionmaker()() as session:
         attente = await lead_export.leads_a_exporter(
             session, vertical_code="SOLAR_BE", limit=int(args.limit or 50))
         if args.dry_run:
-            _emit({"status": "DRY_RUN", "pending": len(attente),
+            _emit({"status": "DRY_RUN", "contract": "v2", "pending": len(attente),
                    "lead_ids": [str(l.id) for l in attente]})
             return EXIT_OK
         for lead in attente:
-            r = await lead_export.exporter_lead(
-                session, lead, destination=destination, config=config,
-                max_attempts=settings.prospect360_max_attempts)
+            try:
+                r = await lead_export.exporter_lead(
+                    session, lead, destination=destination, config=config,
+                    max_attempts=settings.prospect360_max_attempts)
+            except lead_export.ExportRefuse as exc:
+                resultats.append({"lead_id": str(lead.id),
+                                  "outcome": "REFUSED", "state": lead.state,
+                                  "detail": str(exc)})
+                continue
             # Ni courriel, ni téléphone, ni charge : un opérateur veut savoir
             # ce qui est parti et ce qui coince.
             resultats.append({"lead_id": r.lead_id,
@@ -1669,7 +1683,9 @@ def build_parser() -> argparse.ArgumentParser:
     leads_followup.add_argument("--note", default="",
                                 help="short operational note (no PII needed)")
     leads_followup.set_defaults(func=cmd_leads_followup)
-    leads_export = leads_sub.add_parser("export")
+    leads_export = leads_sub.add_parser(
+        "export", help="déposer les leads en attente chez Prospect 360 "
+                       "(contrat v2, route /api/v2/lead-ingest)")
     leads_export.add_argument("--limit", default=50)
     leads_export.add_argument("--dry-run", action="store_true")
     leads_export.set_defaults(func=cmd_leads_export)

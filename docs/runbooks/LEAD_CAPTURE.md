@@ -136,3 +136,27 @@ ORDER BY l.created_at DESC, c.purpose, c.channel;
 Edit `config/sites/solar_be.yaml` under `conversion.form_steps` and
 `conversion.fields`. No migration and no code change: unknown keys are dropped
 server-side, so an old cached form cannot inject a field that no longer exists.
+
+## Export vers Prospect 360 — contrat v2 (2026-09-03)
+
+Le producteur émet le contrat **v2** : route `/api/v2/lead-ingest`,
+`consents[]` (projection de `lead_consent`), `contact_type`, `attribution.campaign`.
+
+Préalables, tous vérifiés AVANT toute frappe d'identité (rien n'est gelé, rien
+ne part tant qu'un seul manque) :
+
+- `PROSPECT360_INGEST_URL` nomme la route v2 ; `PROSPECT360_CREDENTIAL` présent
+  (`/opt/seolead/.env`, jamais affichés) ;
+- `export.prospect360_campaign` renseigné dans `config/sites/solar_be.yaml`
+  (identifiant du registre de campagnes de la plateforme — décision du
+  propriétaire des deux dépôts), puis rebuild de l'image API.
+
+```bash
+seolead leads export --dry-run      # qui partirait, contrat v2, aucun appel
+seolead leads export --limit 1      # un lead, puis vérifier des deux côtés
+```
+
+Issues possibles par lead : `CREATED` (201), `REPLAY` (200, prospect
+d'origine), `CONFLICT` (409, terminal), `UNAUTHORIZED`, `REJECTED`,
+`RETRYABLE`, `STALE_CONTRACT` (charge gelée d'une autre version : jamais
+déposée, lead inchangé, regard humain).
