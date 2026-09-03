@@ -29,7 +29,7 @@ from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
                         ResearchPackage, ResearchRun, SeedKeyword, Vertical)
 from app.providers.llm.base import LLMResponse, LLMUsage
 from app.services import draft_retry, factual_qa_v2, qa_service
-from app.services.draft_stage import write_and_judge
+from app.services.draft_stage import choose_best, write_and_judge
 from app.services.factual_qa_v2 import (_UNREAD, _arbitrate, claim_figures,
                                         covers, endpoint_only, risky_ranges,
                                         risky_units, unit_only)
@@ -437,3 +437,108 @@ class TestSupportFreeClaim:
 
     def test_the_rewrite_is_a_writing_fault_the_writer_may_answer(self):
         assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in draft_retry.NOT_RETRIABLE
+
+
+# ─── 8. Le brouillon gardé est le meilleur, pas le dernier ──────────────────
+
+class TestChooseBest:
+    def _c(self, attempt, codes):
+        return {"attempt": attempt, "blocking": [{"code": c} for c in codes]}
+
+    def test_fewest_blocking_wins(self):
+        best = choose_best([self._c(1, ["A", "B"]), self._c(2, ["A"]),
+                            self._c(3, ["A", "B", "AMBIGUOUS_MATCH"])])
+        assert best["attempt"] == 2
+
+    def test_an_answerable_finding_beats_an_unanswerable_one(self):
+        best = choose_best([self._c(1, ["AMBIGUOUS_MATCH"]),
+                            self._c(2, ["REQUIRED_FACTS_UNDERUSED"])])
+        assert best["attempt"] == 2
+
+    def test_a_tie_goes_to_the_latest(self):
+        best = choose_best([self._c(1, ["A"]), self._c(2, ["B"])])
+        assert best["attempt"] == 2
+
+    def test_the_measured_case(self):
+        """regenerate sur 29ec0a0b : 3 → 1 → 3 blocages ; le dernier était
+        gardé. C'est le deuxième qui l'est."""
+        best = choose_best([
+            self._c(1, ["HIGH_RISK_CLAIM_ASSERTED", "REGIONAL_SCOPE_NOT_STATED",
+                        "REQUIRED_FACTS_UNDERUSED"]),
+            self._c(2, ["REQUIRED_FACTS_UNDERUSED"]),
+            self._c(3, ["AMBIGUOUS_MATCH", "REGIONAL_SCOPE_NOT_STATED",
+                        "X", "Y", "Z"])])
+        assert best["attempt"] == 2
+
+
+class _VersionedLLM:
+    """A writer whose every call returns a different body."""
+    code = "stub"
+    configured = True
+
+    def __init__(self):
+        self.n = 0
+
+    async def generate(self, request):
+        cap = request.capability.value
+        if cap == "SEO_QA":
+            payload = {"findings": []}
+        else:
+            self.n += 1
+            payload = {"title": f"Version {self.n}", "meta_title": "t",
+                       "meta_description": "d", "body": f"Version {self.n}."}
+        return LLMResponse(content=json.dumps(payload), provider="stub",
+                           model="stub", usage=LLMUsage(input_tokens=1,
+                                                       output_tokens=1,
+                                                       total_tokens=2),
+                           latency_ms=1)
+
+
+@pytest.mark.asyncio
+class TestTheKeptDraftIsTheBest:
+    async def test_attempt_two_is_persisted_when_three_is_worse(
+            self, session, sealed_brief, solar_profile, monkeypatch):
+        from app.cli import _brief_payload, _package_payload
+        from app.services import draft_stage
+
+        verdicts = iter([
+            [{"code": "HIGH_RISK_CLAIM_ASSERTED", "blocking": True},
+             {"code": "REGIONAL_SCOPE_NOT_STATED", "blocking": True}],
+            [{"code": "REGIONAL_SCOPE_NOT_STATED", "blocking": True}],
+            [{"code": "AMBIGUOUS_MATCH", "blocking": True},
+             {"code": "REGIONAL_SCOPE_NOT_STATED", "blocking": True}],
+        ])
+
+        def scripted(draft, package, profile):
+            blocking = next(verdicts)
+            return {"status": "FAILED", "score": 50, "findings": list(blocking),
+                    "blocking_issues": list(blocking), "claim_ledger": {}}
+
+        monkeypatch.setattr(draft_stage.factual_qa_v2, "run_factual_qa_v2",
+                            scripted)
+        monkeypatch.setattr(
+            draft_stage.qa_service, "run_seo_qa_v2",
+            lambda *a, **k: {"status": "PASSED", "score": 100, "findings": [],
+                             "blocking_issues": [],
+                             "offer_registry": {"version": "t"}})
+
+        brief, package, keyword, vertical = sealed_brief
+        outcome = await write_and_judge(
+            session, brief=brief, brief_payload=_brief_payload(brief),
+            package_payload=_package_payload(package), profile=solar_profile,
+            llm=_VersionedLLM(), usage=UsageRecorder(),
+            correlation_id="best", keyword_id=keyword.id,
+            vertical_code=vertical.code)
+
+        assert len(outcome.attempts) == 3
+        assert outcome.kept_attempt == 2
+        assert outcome.draft.body == "Version 2."
+        assert len(outcome.factual["blocking_issues"]) == 1
+        from sqlalchemy import select
+        row = (await session.execute(select(QAReview).where(
+            QAReview.content_draft_id == outcome.draft.id,
+            QAReview.layer == "FACTUAL"))).scalar_one()
+        history = next(f for f in row.findings if f["code"] == "DRAFT_ATTEMPTS")
+        assert history["kept_attempt"] == 2
+        assert "kept attempt 2" in history["message"]
+        assert len(history["attempts"]) == 3

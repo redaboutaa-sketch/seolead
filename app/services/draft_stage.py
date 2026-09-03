@@ -39,12 +39,14 @@ class DraftOutcome:
     advisory: dict = field(default_factory=dict)
     approval: Approval | None = None
     qa_passed: bool = False
+    kept_attempt: int | None = None
     error_code: str | None = None
     error_detail: str | None = None
 
     def as_dict(self) -> dict:
         return {
             "content_draft_id": str(self.draft.id) if self.draft else None,
+            "kept_attempt": self.kept_attempt,
             "draft_status": self.draft.status if self.draft else None,
             "approval_id": str(self.approval.id) if self.approval else None,
             "approval_state": self.approval.state if self.approval else None,
@@ -66,6 +68,21 @@ class DraftOutcome:
             "error_code": self.error_code,
             "error_detail": self.error_detail,
         }
+
+
+def choose_best(candidates: list[dict]) -> dict:
+    """The attempt to keep: fewest blocking findings, then the fewest that
+    no rewrite could answer, then the latest (it carried the most findings
+    and is the writer's most informed answer)."""
+    if not candidates:
+        raise ValueError("no draft attempt to choose from")
+
+    def key(c: dict) -> tuple[int, int, int]:
+        codes = draft_retry.codes(c["blocking"])
+        unanswerable = sum(1 for code in codes if code in draft_retry.NOT_RETRIABLE)
+        return (len(c["blocking"]), unanswerable, -c["attempt"])
+
+    return min(candidates, key=key)
 
 
 async def write_and_judge(
@@ -94,7 +111,7 @@ async def write_and_judge(
     # fail-closed — never as permission.
     offer = offer_for_vertical(vertical_code)
     previous_findings: list[dict] | None = None
-    draft_payload = llm_response = factual = seo = None
+    candidates: list[dict] = []
 
     for attempt in range(1, draft_retry.MAX_ATTEMPTS + 1):
         try:
@@ -125,9 +142,23 @@ async def write_and_judge(
                                  "factual_score": factual["score"],
                                  "seo_score": seo["score"],
                                  "provider": llm_response.provider})
+        candidates.append({"attempt": attempt, "draft": draft_payload,
+                           "response": llm_response, "factual": factual,
+                           "seo": seo, "blocking": blocking_now})
         if not decision.retry:
             break
         previous_findings = draft_retry.carried(blocking_now)
+
+    # ── The draft that is kept is the best one, not the last one ─────────
+    # Measured 2026-09-03 (regenerate on brief 29ec0a0b): attempt 2 was one
+    # SEO finding away from passing, attempt 3 collapsed (SEO 15, an
+    # AMBIGUOUS_MATCH), and attempt 3 was what got persisted, because the
+    # loop kept whatever it ended on. The history of every attempt still
+    # rides along in DRAFT_ATTEMPTS.
+    kept = choose_best(candidates)
+    draft_payload, llm_response = kept["draft"], kept["response"]
+    factual, seo = kept["factual"], kept["seo"]
+    outcome.kept_attempt = kept["attempt"]
 
     draft = ContentDraft(
         content_brief_id=brief.id, provider=llm_response.provider,
@@ -156,9 +187,11 @@ async def write_and_judge(
             # and the reason live here. Without it a re-emitted run is
             # indistinguishable from a first-time pass.
             {"code": "DRAFT_ATTEMPTS",
-             "message": (f"{len(outcome.attempts)} draft call(s); "
+             "message": (f"{len(outcome.attempts)} draft call(s); kept "
+                         f"attempt {outcome.kept_attempt}; "
                          f"{outcome.attempts[-1]['reason']}"),
              "blocking": False, "detail": "",
+             "kept_attempt": outcome.kept_attempt,
              "attempts": outcome.attempts}],
         blocking_issues=factual["blocking_issues"], revision=1,
         engine_version=factual_qa_v2.ENGINE_VERSION)
