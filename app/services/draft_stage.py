@@ -223,8 +223,7 @@ async def write_and_judge(
     # as unsupported what the ledger does not carry.
     advisory = await qa_service.run_llm_qa(
         draft_payload, brief_payload, llm=llm, correlation_id=correlation_id,
-        sourced_claims=[str(c.get("claim", ""))
-                        for c in writer_view.get("supported_claims") or []])
+        sourced_claims=list(writer_view.get("supported_claims") or []))
     advisory_row = QAReview(content_draft_id=draft.id,
                             qa_type=QAType.LLM_ASSISTED.value,
                             layer=QALayer.ADVISORY.value, **advisory)

@@ -25,6 +25,7 @@ import re
 from typing import Iterable
 
 from app.core.enums import QAStatus
+from app.services import factual_qa_v2
 from app.core.errors import SeoLeadError
 from app.providers.llm.base import LLMCapability, LLMProvider, LLMRequest
 from app.services import claim_policy
@@ -419,6 +420,21 @@ def _echoes_reference(message: str, sourced: list[str], body: str) -> bool:
     return any(window in _normalize(str(fact)) for fact in sourced)
 
 
+def _quoted_body_sentence(message: str, sentences: list[str]) -> str | None:
+    """The body sentence a finding quotes, if it quotes one (40-char window
+    either way, so a trimmed or a lightly reworded quote still resolves)."""
+    probe = _normalize(message)
+    if len(probe) < 20:
+        return None
+    for sentence in sentences:
+        norm = _normalize(sentence)
+        if len(norm) < 20:
+            continue
+        if norm[:40] in probe or probe[:40] in norm:
+            return sentence
+    return None
+
+
 def llm_finding_blocks(finding: dict) -> bool:
     """Whether one model-assisted finding stops publication."""
     if str(finding.get("severity", "")).lower() != "high":
@@ -431,7 +447,7 @@ def llm_finding_blocks(finding: dict) -> bool:
 
 async def run_llm_qa(
     draft: dict, brief: dict, *, llm: LLMProvider, correlation_id: str,
-    sourced_claims: list[str] | None = None,
+    sourced_claims: list | None = None,
 ) -> dict:
     """Model-assisted review. High-severity findings on SUBSIDY, ROI and
     GRID_RULE block; everything else is advisory.
@@ -445,14 +461,19 @@ async def run_llm_qa(
         return {"status": QAStatus.SKIPPED.value, "score": None,
                 "findings": [], "blocking_issues": []}
 
+    # Strings or claim dicts: the texts go to the model, the dicts (when
+    # given) let the ledger overrule the model on what is sourced.
+    claim_dicts = [c for c in (sourced_claims or []) if isinstance(c, dict)]
+    sourced_texts = [str(c.get("claim", "")) if isinstance(c, dict) else str(c)
+                     for c in (sourced_claims or [])]
+
     prompt = json.dumps({
         "primary_query": brief["primary_query"],
         "search_intent": brief["search_intent"],
         "content_type": brief["content_type"],
         "target_audience": brief["target_audience"],
         "call_to_action": brief["cta_strategy"],
-        "reference_sourced_facts": [str(c)[:300]
-                                    for c in (sourced_claims or [])[:60]],
+        "reference_sourced_facts": [c[:300] for c in sourced_texts[:60]],
         "title": draft.get("title"),
         "meta_description": draft.get("meta_description"),
         "body": (draft.get("body") or "")[:12000],
@@ -488,8 +509,9 @@ async def run_llm_qa(
     # finding whose text is an echo of the reference and not of the body is
     # not a review of the body: it is kept, visibly, and never blocks.
     body_text = _normalize(draft.get("body") or "")
+    body_sentences = factual_qa_v2._all_sentences(draft.get("body") or "")
     for finding in findings:
-        if _echoes_reference(finding["message"], sourced_claims or [], body_text):
+        if _echoes_reference(finding["message"], sourced_texts, body_text):
             finding["code"] = "reference_echo"
             finding["blocking"] = False
             finding["note"] = ("the finding quotes a sourced fact that is not "
@@ -497,6 +519,20 @@ async def run_llm_qa(
                                "reference, not the draft")
             continue
         finding["blocking"] = llm_finding_blocks(finding)
+        # ── The ledger overrules the model on sourcing (2026-09-03) ────────
+        # Fifth regenerated draft: the reviewer blocked « rentabilisée au
+        # bout de 5 ans en Wallonie » as unsupported while the ledger carries
+        # it from the Walloon portal, official, in the reference it was
+        # handed. A model's opinion that a figure is unsourced cannot stand
+        # against a verified source; it stays visible and stops blocking.
+        if finding["blocking"] and claim_dicts:
+            quoted = _quoted_body_sentence(finding["message"], body_sentences)
+            if quoted and factual_qa_v2.sentence_is_sourced(quoted, claim_dicts):
+                finding["blocking"] = False
+                finding["overruled_by_ledger"] = True
+                finding["note"] = ("the sentence the finding concerns is "
+                                   "carried by a SUPPORTED claim of the "
+                                   "ledger; a model cannot unsource it")
     blocking = [f for f in findings if f["blocking"]]
     return {"status": (QAStatus.FAILED.value if blocking
                        else QAStatus.PASSED.value),
