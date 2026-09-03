@@ -31,7 +31,7 @@ const OFFICIAL: SourceRef = {
   figures: ["7,3%", "8,4%"],
 };
 const SPECIALIST: SourceRef = {
-  name: null,
+  name: "un-installateur.be",
   tier: "SPECIALIST",
   authority_type: null,
   region: "BE",
@@ -62,19 +62,40 @@ describe("SourcesBlock — renders only what it has", () => {
     expect(html).toContain("Wallonie");
   });
 
-  it("names an official authority but never links, and never names a commercial source", () => {
+  it("names every source by its host, as text, and never links", () => {
+    // Réserve 3 (2026-09-03) : « décrite sans être nommée » n'est pas
+    // « source affichée ». A commercial or specialist source is named like
+    // the others — as text, never as an anchor.
     const html = renderToStaticMarkup(
       createElement(SourcesBlock, { sources: REVISED_SOURCES }),
     );
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("http");
-    expect(sourceLine(SPECIALIST)).toMatch(/^Source spécialisée/);
+    expect(html).toContain("un-installateur.be");
+    expect(sourceLine(SPECIALIST)).toMatch(/^un-installateur\.be \(source spécialisée/);
     expect(sourceLine(OFFICIAL)).toMatch(/^energie\.wallonie\.be/);
   });
 
   it("says when a source is undated instead of implying a date", () => {
     expect(sourceLine(OFFICIAL)).toContain("non datée");
     expect(sourceLine(SPECIALIST)).toContain("datée du 2024-03-01");
+  });
+
+  it("says a declared date as a date read on the document, not stated by the page", () => {
+    // Réserve 2 : « non daté » on a document whose date is known is a false
+    // value shown as a measurement. The declared date is shown with its basis.
+    const declared: SourceRef = {
+      ...OFFICIAL,
+      name: "document.environnement.brussels",
+      region: "BE-BRU",
+      date: "2013",
+      date_basis: "declared",
+      freshness: "UNDATED",
+    };
+    expect(sourceLine(declared)).toContain("document daté de 2013");
+    expect(sourceLine(declared)).not.toContain("non datée");
+    expect(sourceLine(declared)).not.toContain("consultée, datée");
+    expect(sourceLine({ ...declared, date_basis: "stated" })).toContain("consultée, datée du 2013");
   });
 });
 
