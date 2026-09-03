@@ -106,6 +106,19 @@ class ConversionConfig(BaseModel):
     marketing_consent_optional: bool = True
 
 
+class ExportConfig(BaseModel):
+    """Ce que le contrat d'ingestion v2 attend du SITE, pas du visiteur.
+
+    `prospect360_campaign` est l'identifiant de campagne côté plateforme
+    (`attribution.campaign`, requis par le contrat). Il n'a pas de valeur par
+    défaut qui ressemblerait à une mesure : tant qu'il est nul, le producteur
+    refuse de frapper une identité d'export plutôt que de geler une charge
+    que la plateforme refuserait à chaque tentative.
+    """
+    prospect360_campaign: str | None = None
+    contact_type: str = "B2C"
+
+
 class SeoConfig(BaseModel):
     # The scheme+host every canonical URL is built against. Explicit rather than
     # derived from `domain`, because the two can legitimately differ (a staging
@@ -457,6 +470,7 @@ class SiteConfig(BaseModel):
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     conversion: ConversionConfig
     seo: SeoConfig = Field(default_factory=SeoConfig)
+    export: ExportConfig = Field(default_factory=ExportConfig)
     offer: OfferConfig = Field(default_factory=OfferConfig)
     organization: OrganizationConfig = Field(default_factory=OrganizationConfig)
 

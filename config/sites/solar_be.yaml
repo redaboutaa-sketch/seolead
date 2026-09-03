@@ -339,6 +339,17 @@ organization:
   certifications: []
   same_as: []
 
+# ── Export vers Prospect 360 (contrat v2) ───────────────────────────────────
+# `attribution.campaign` est REQUIS par le contrat v2 : identifiant de la
+# campagne cible côté plateforme, issu de son registre — une décision du
+# propriétaire des deux dépôts, pas une valeur inventée ici. Tant qu'il est
+# nul, `leads export` refuse de frapper une identité d'export (aucune charge
+# gelée, aucun appel) et le dit. À renseigner avant le premier export réel,
+# puis rebuild de l'image API.
+export:
+  prospect360_campaign: null
+  contact_type: B2C
+
 conversion:
   primary_cta: ESTIMATE_REQUEST
   primary_cta_label: "Obtenir mon estimation personnalisée"

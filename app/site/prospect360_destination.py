@@ -16,7 +16,10 @@ Field set, bounds and values come from
 same document the deployed DTO was built from. Fingerprint v1 is ARMED and
 immutable since 2026-08-16T17:34:58Z: the field set below can never change
 shape. A future canonical change is a v2 published beside v1, never an edit
-here.
+here. That v2 exists since 2026-09-03: `construire_charge_v2` below, on the
+route `/api/v2/lead-ingest`, validated against `prospect360_contract_v2`
+before it is ever frozen. `construire_charge` (v1) is not edited and is no
+longer minted.
 
 `extra: "forbid"` applies on every model on the far side. An unknown key is a
 422, not a silent drop — so this module sends the declared keys and nothing
@@ -64,6 +67,9 @@ class ResultatExport:
     REFUS_AUTH = "UNAUTHORIZED"   # 401/403 — configuration, not business
     RETENTABLE = "RETRYABLE"      # 429, 5xx, timeout, connection failure
     REFUS_DEFINITIF = "REJECTED"  # other 4xx — the body is wrong, retry won't fix
+    # Une charge gelée sous une autre version que celle de la route. Jamais
+    # déposée : elle ferait 422 à chaque tentative (2026-09-03).
+    CONTRAT_PERIME = "STALE_CONTRACT"
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,72 @@ def construire_charge(lead: CapturedLead, *, correlation_id: str,
     }
 
 
+def _cas_de_consentement(lead: CapturedLead, consents: list[Any] | None,
+                        *, consent_version: str | None) -> list[dict[str, Any]]:
+    """`consents[]` : la projection de `lead_consent` sur le fil, une entrée par
+    case OFFERTE, accordée ou refusée, triée par clé explicite.
+
+    Un lead capturé avant la migration 0008 n'a aucune ligne `lead_consent`.
+    Il n'existe pourtant que parce que le consentement au traitement a été
+    donné (`consent_required`), et les colonnes historiques en portent la
+    version, l'instant et la provenance : la même affirmation que le bloc
+    `consent` du v1 faisait. On la projette en UNE entrée PROCESSING, et rien
+    d'autre — aucune case qu'il n'a pas vue n'est inventée.
+    """
+    from app.site.prospect360_contract_v2 import cle_de_tri
+
+    lignes = list(consents or [])
+    if lignes:
+        cas = [{
+            "purpose": c.purpose, "channel": c.channel, "granted": bool(c.granted),
+            "text_version": c.text_version,
+            "timestamp": _instant_utc(c.granted_at), "source": c.source,
+        } for c in lignes]
+    else:
+        cas = [{
+            "purpose": "PROCESSING", "channel": None, "granted": True,
+            "text_version": consent_version,
+            "timestamp": _instant_utc(lead.consent_timestamp),
+            "source": lead.consent_source,
+        }]
+    return sorted(cas, key=cle_de_tri)
+
+
+def construire_charge_v2(lead: CapturedLead, *, correlation_id: str,
+                         consent_version: str | None,
+                         consents: list[Any] | None,
+                         attribution: Any, market: str,
+                         campaign: str | None,
+                         contact_type: str = "B2C") -> dict[str, Any]:
+    """La charge du contrat v2 (`POST /api/v2/lead-ingest`).
+
+    Écrite À CÔTÉ de `construire_charge` (v1, gelée) : le v1 reste lisible
+    pour toute ligne déjà en base, et n'est plus jamais frappé. Ce qui change
+    par rapport au v1, et rien d'autre : `contact.contact_type`, le tableau
+    `consents[]` à la place du bloc `consent`, `attribution.locale` en
+    BCP-47 langue-marché, `attribution.campaign`.
+
+    Appelée UNE FOIS, au moment où l'identité est frappée ; le résultat est
+    validé contre le contrat figé puis gelé.
+    """
+    v1 = construire_charge(lead, correlation_id=correlation_id,
+                           consent_version=consent_version,
+                           attribution=attribution)
+    contact = {**v1["contact"], "contact_type": contact_type}
+    attribution_v2 = {**v1["attribution"],
+                      "locale": f"{lead.language}-{market}",
+                      "campaign": campaign}
+    return {
+        "external_correlation_id": correlation_id,
+        "source_system": SOURCE_SYSTEM,
+        "contact": contact,
+        "project": v1["project"],
+        "consents": _cas_de_consentement(lead, consents,
+                                         consent_version=consent_version),
+        "attribution": attribution_v2,
+    }
+
+
 class Prospect360Destination:
     """L'adaptateur HTTP. Il transporte et classe ; il ne décide de rien."""
 
@@ -170,6 +242,10 @@ class Prospect360Destination:
         self._credential = settings.prospect360_credential.strip()
         self._timeout = settings.prospect360_timeout_seconds
         self._transport = transport
+
+    @property
+    def url(self) -> str:
+        return self._url
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=self._timeout,

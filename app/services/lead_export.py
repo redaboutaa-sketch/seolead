@@ -39,11 +39,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import LeadState
-from app.models import CapturedLead, LeadAttribution
+from app.models import CapturedLead, LeadAttribution, LeadConsent
 from app.site.config import SiteConfig
+from app.site.prospect360_contract_v2 import (ContratV2Invalide,
+                                              route_est_v2,
+                                              valider_charge_v2,
+                                              version_de_charge)
 from app.site.prospect360_destination import (Prospect360Destination,
                                               ResultatExport,
-                                              construire_charge)
+                                              construire_charge_v2)
 
 logger = logging.getLogger(__name__)
 
@@ -81,25 +85,62 @@ def verifier_consentement(config: SiteConfig) -> None:
             "would be an assertion nobody made")
 
 
+def verifier_campagne(config: SiteConfig) -> None:
+    """`attribution.campaign` est requis par le contrat v2. Sans identifiant
+    configuré, on refuse de frapper une identité : une charge gelée sans
+    campagne ferait 422 à chaque tentative, pour toujours."""
+    if not (config.export.prospect360_campaign or "").strip():
+        raise ExportRefuse(
+            "export.prospect360_campaign is not configured for this site: the "
+            "v2 contract requires attribution.campaign, and a frozen payload "
+            "without it would be refused on every attempt")
+
+
+def verifier_route(destination: Prospect360Destination) -> None:
+    """Le producteur émet le contrat v2 ; la route configurée doit le nommer.
+    Une URL v1 recevrait des charges v2 et répondrait 422 — à chaque lead."""
+    if not route_est_v2(destination.url):
+        raise ExportRefuse(
+            "PROSPECT360_INGEST_URL does not name the v2 route "
+            "(/api/v2/lead-ingest): the producer emits contract v2 and would "
+            "be refused on a v1 route")
+
+
 async def preparer_identite_export(session: AsyncSession, lead: CapturedLead, *,
                                    config: SiteConfig) -> str:
-    """Frapper l'identité d'export UNE FOIS et geler la charge. Idempotent.
+    """Frapper l'identité d'export UNE FOIS et geler la charge v2. Idempotent.
 
     Committe AVANT toute tentative HTTP : c'est ce qui rend une réponse perdue
-    rattrapable par un rejeu plutôt que par un second prospect.
+    rattrapable par un rejeu plutôt que par un second prospect. La charge est
+    validée contre le contrat figé AVANT d'être gelée : ce qui est en base
+    est, par construction, une charge v2 valide.
     """
     if lead.external_correlation_id and lead.export_payload:
         return lead.external_correlation_id
 
     verifier_consentement(config)
+    verifier_campagne(config)
     attribution = (await session.execute(
         select(LeadAttribution)
         .where(LeadAttribution.captured_lead_id == lead.id))).scalar_one_or_none()
+    consents = list((await session.execute(
+        select(LeadConsent)
+        .where(LeadConsent.captured_lead_id == lead.id)
+        .order_by(LeadConsent.consent_key))).scalars().all())
     correlation = f"{PREFIXE_CORRELATION}-{uuid.uuid4()}"
-    lead.external_correlation_id = correlation
-    lead.export_payload = construire_charge(
+    charge = construire_charge_v2(
         lead, correlation_id=correlation, attribution=attribution,
-        consent_version=lead.consent_version or config.legal.consent_version)
+        consents=consents,
+        consent_version=lead.consent_version or config.legal.consent_version,
+        market=config.market, campaign=config.export.prospect360_campaign,
+        contact_type=config.export.contact_type)
+    try:
+        valider_charge_v2(charge)
+    except ContratV2Invalide as exc:
+        # Rien n'est frappé, rien n'est gelé : le lead reste tel quel.
+        raise ExportRefuse(f"payload does not satisfy contract v2: {exc}") from exc
+    lead.external_correlation_id = correlation
+    lead.export_payload = charge
     if lead.state == LeadState.NEW.value:
         lead.state = LeadState.PENDING_EXPORT.value
     await session.flush()
@@ -112,8 +153,26 @@ async def exporter_lead(session: AsyncSession, lead: CapturedLead, *,
                         config: SiteConfig,
                         max_attempts: int = 5) -> ResultatTentative:
     """Une tentative, puis l'écriture de son issue."""
+    verifier_route(destination)
     correlation = await preparer_identite_export(session, lead, config=config)
     charge = dict(lead.export_payload or {})
+
+    if version_de_charge(charge) != 2:
+        # Une identité frappée ne change jamais de version, et la route est
+        # v2 : cette charge ne sera jamais acceptée. On ne la dépose pas, on
+        # ne la re-frappe pas, on le dit. Le lead reste en attente d'un regard
+        # humain ; son état ne bouge pas.
+        lead.export_error = ("STALE_CONTRACT: frozen payload is not contract "
+                             "v2 and cannot be replayed on the v2 route")
+        await session.flush()
+        await session.commit()
+        logger.info("lead export refused",
+                    extra={"lead_id": str(lead.id),
+                           "external_correlation_id": correlation,
+                           "outcome": ResultatExport.CONTRAT_PERIME})
+        return ResultatTentative(lead_id=str(lead.id), correlation_id=correlation,
+                                 resultat=ResultatExport.CONTRAT_PERIME,
+                                 etat=lead.state, http_status=None)
 
     reponse = await destination.deposer(charge)
     lead.export_attempts = int(lead.export_attempts or 0) + 1
@@ -179,3 +238,55 @@ async def leads_a_exporter(session: AsyncSession, *, vertical_code: str,
         .order_by(CapturedLead.created_at)
         .limit(limit))
     return list(resultat.scalars().all())
+
+
+# ── Archiver un lead (2026-09-03) ────────────────────────────────────────────
+# Un lead de test du propriétaire attend en PENDING_EXPORT et serait déposé au
+# premier `leads export`. Aucune commande ne l'écartait. L'archivage est
+# l'acte humain qui le sort de la sélection d'export sans l'effacer.
+
+ETATS_ARCHIVABLES = (LeadState.NEW.value, LeadState.PENDING_EXPORT.value,
+                     LeadState.EXPORT_FAILED.value, LeadState.REJECTED_SPAM.value)
+
+
+@dataclass(frozen=True)
+class ResultatArchivage:
+    lead_id: str
+    previous_state: str
+    state: str
+    applied: bool
+
+
+async def archiver_lead(session: AsyncSession, lead: CapturedLead, *,
+                        by: str, reason: str, apply: bool) -> ResultatArchivage:
+    """Passer un lead en ARCHIVED — hors sélection d'export, journalisé.
+
+    Refusé pour un lead exporté ou en cours d'export : il est déjà chez la
+    destination, et l'archiver ici prétendrait le contraire. Sans `apply`,
+    rien n'est écrit : la commande dit ce qu'elle ferait.
+    """
+    if not by.strip() or not reason.strip():
+        raise ValueError("archiving needs who and why")
+    if lead.state not in ETATS_ARCHIVABLES:
+        raise ExportRefuse(
+            f"a lead in state {lead.state} cannot be archived: it is, or is "
+            f"being, exported")
+    previous = lead.state
+    if not apply:
+        return ResultatArchivage(lead_id=str(lead.id), previous_state=previous,
+                                 state=previous, applied=False)
+    now = datetime.now(timezone.utc)
+    lead.state = LeadState.ARCHIVED.value
+    # Réaffectation complète : muter le dict en place échappe au détecteur de
+    # changement de la colonne JSON. Même clé réservée que `_manual_followup`.
+    lead.qualification = {**(lead.qualification or {}),
+                          "_archive": {"recorded_by": by.strip(),
+                                       "reason": reason.strip(),
+                                       "previous_state": previous,
+                                       "recorded_at": now.isoformat()}}
+    await session.flush()
+    await session.commit()
+    logger.info("lead archived", extra={"lead_id": str(lead.id),
+                                        "previous_state": previous})
+    return ResultatArchivage(lead_id=str(lead.id), previous_state=previous,
+                             state=lead.state, applied=True)

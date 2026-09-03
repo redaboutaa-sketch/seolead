@@ -243,3 +243,41 @@ la question qu'un régulateur pose.
   la question n'est pas urgente — mais elle doit être tranchée **avant** la
   première charge portant une locale `nl`.
 - Le digest golden v2 et son arming record.
+
+---
+
+## Addendum du 2026-09-03 — côté producteur : armé
+
+**Mesuré dans le code avant ce commit** : `leads export` émettait le contrat
+**v1** (`construire_charge` : bloc `consent`, pas de `contact_type`, pas de
+`attribution.campaign`). Aucune charge n'avait encore été gelée en production
+(producteur jamais configuré), donc aucune charge v1 gelée n'existe à rejouer.
+
+**Depuis ce commit, le producteur émet le v2** tel que figé par le
+propriétaire : route `POST /api/v2/lead-ingest`, modèle strict, `consents[]`
+non vide avec une entrée PROCESSING accordée, `contact.contact_type`,
+`attribution.campaign` requis.
+
+- `construire_charge_v2` (à côté de `construire_charge`, v1, jamais éditée,
+  plus jamais frappée) ; `prospect360_contract_v2` porte le contrat comme
+  validateur (`extra: forbid`), la clé de tri explicite de `consents[]`
+  (addendum §1) et l'identité producteur `empreinte_v2`.
+- La charge est **validée avant d'être gelée** : ce qui est en base est, par
+  construction, une charge v2 valide. Sans campagne configurée
+  (`export.prospect360_campaign` du site, nul tant que le registre n'a pas
+  tranché), rien n'est frappé ni gelé, et `leads export` le dit.
+- Une URL qui ne nomme pas la route v2 est refusée avant toute frappe. Une
+  charge v1 déjà gelée (il n'y en a aucune) ne serait jamais déposée sur la
+  route v2 : issue `STALE_CONTRACT`, lead inchangé, regard humain.
+- Un lead d'avant la migration 0008 (aucune ligne `lead_consent`) projette
+  UNE entrée PROCESSING depuis les colonnes historiques — la même affirmation
+  que le bloc `consent` du v1 — et rien d'autre.
+- `TestGoldenV2Producteur` épingle le digest et les octets canoniques d'une
+  charge synthétique gelée : `ed33052f4994ce7da7cdf6142c8b27d747d26f8af9aeb8781bfebf4161431b11`.
+
+**Ce qui n'est pas dans ce dépôt, et ne l'a jamais été** : le digest golden v2
+de la plateforme et son arming record. L'empreinte épinglée ici est
+l'identité **producteur** (rejeu octet pour octet sous la même corrélation) ;
+seul un `201` de la plateforme prouve qu'une charge est acceptée. La ligne
+« export réel » reste « non fait » jusqu'au geste 5 et à la seconde
+soumission de bout en bout.

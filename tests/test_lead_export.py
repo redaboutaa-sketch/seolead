@@ -53,10 +53,24 @@ SECRET = "sa_0123456789abcdef.tres-secret-qui-ne-doit-jamais-fuir"
 
 
 def _settings(**o) -> Settings:
-    base = dict(PROSPECT360_INGEST_URL="https://p360.invalid/api/v1/lead-ingest",
+    # Le producteur émet le contrat v2 depuis le 2026-09-03 : la route l'est.
+    base = dict(PROSPECT360_INGEST_URL="https://p360.invalid/api/v2/lead-ingest",
                 PROSPECT360_CREDENTIAL=SECRET, PROSPECT360_TIMEOUT_SECONDS=5)
     base.update(o)
     return Settings(**base)
+
+
+CAMPAGNE = "solar-be-test-campaign"
+
+
+def _config(**update):
+    """La configuration du site avec la campagne requise par le contrat v2 —
+    déclarée ici, pas lue du YAML : le registre des identifiants de campagne
+    appartient à la plateforme, et le YAML ne porte encore aucune valeur."""
+    from app.site.config import ExportConfig
+    return load_site("solar_be").model_copy(
+        update={"export": ExportConfig(prospect360_campaign=CAMPAGNE),
+                **update})
 
 
 @pytest_asyncio.fixture
@@ -145,7 +159,7 @@ def _destination(faux: FauxProspect360, **o) -> Prospect360Destination:
 async def _exporter(session, lead, faux, **o):
     return await lead_export.exporter_lead(
         session, lead, destination=_destination(faux, **o),
-        config=load_site("solar_be"),
+        config=_config(),
         max_attempts=o.pop("max_attempts", 5))
 
 
@@ -181,7 +195,7 @@ class TestIdentiteExport:
         """DoD-2 — la corrélation existe en base AVANT le premier HTTP."""
         lead = await _capturer(session, solar_site)
         correlation = await lead_export.preparer_identite_export(
-            session, lead, config=load_site("solar_be"))
+            session, lead, config=_config())
         assert correlation and lead.external_correlation_id == correlation
         assert lead.export_payload["external_correlation_id"] == correlation
 
@@ -202,7 +216,7 @@ class TestIdentiteExport:
         """DoD-5 — la charge est GELÉE, pas reconstruite depuis une ligne qui a bougé."""
         lead = await _capturer(session, solar_site)
         await lead_export.preparer_identite_export(
-            session, lead, config=load_site("solar_be"))
+            session, lead, config=_config())
         gelee = json.dumps(lead.export_payload, sort_keys=True)
 
         # La ligne locale bouge APRÈS le gel — exactement le cas qui produirait
@@ -395,7 +409,7 @@ class TestFenetreDePanne:
 
         # 1. Le dépôt réussit RÉELLEMENT en face…
         await lead_export.preparer_identite_export(
-            session, lead, config=load_site("solar_be"))
+            session, lead, config=_config())
         charge = dict(lead.export_payload)
         reponse = await _destination(faux).deposer(charge)
         assert reponse.resultat == ResultatExport.CREE
