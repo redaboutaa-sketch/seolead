@@ -435,6 +435,15 @@ def _quoted_body_sentence(message: str, sentences: list[str]) -> str | None:
     return None
 
 
+def overruled_by_ledger(finding: dict, body: str, supported: list[dict]) -> bool:
+    """Whether a finding unsources a body sentence the ledger carries."""
+    if not supported:
+        return False
+    quoted = _quoted_body_sentence(str(finding.get("message", "")),
+                                   factual_qa_v2._all_sentences(body))
+    return bool(quoted) and factual_qa_v2.sentence_is_sourced(quoted, supported)
+
+
 def llm_finding_blocks(finding: dict) -> bool:
     """Whether one model-assisted finding stops publication."""
     if str(finding.get("severity", "")).lower() != "high":
@@ -526,8 +535,7 @@ async def run_llm_qa(
         # handed. A model's opinion that a figure is unsourced cannot stand
         # against a verified source; it stays visible and stops blocking.
         if finding["blocking"] and claim_dicts:
-            quoted = _quoted_body_sentence(finding["message"], body_sentences)
-            if quoted and factual_qa_v2.sentence_is_sourced(quoted, claim_dicts):
+            if overruled_by_ledger(finding, draft.get("body") or "", claim_dicts):
                 finding["blocking"] = False
                 finding["overruled_by_ledger"] = True
                 finding["note"] = ("the sentence the finding concerns is "
