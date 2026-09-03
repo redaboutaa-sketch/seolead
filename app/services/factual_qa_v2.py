@@ -146,6 +146,13 @@ _ROI_SHAPE = re.compile(
     r"rendement\s+(?:financier|annuel|de l'investissement)", re.IGNORECASE)
 
 
+# What the writer must actually write. Three regenerated drafts in a row
+# (2026-09-03) failed the same sentence on the same rule while the finding
+# named the region as « BE-WAL » and the writer answered with « y ».
+_REGION_FRENCH = {"BE-WAL": "en Wallonie", "BE-BRU": "à Bruxelles",
+                  "BE-VLG": "en Flandre", "BE": "en Belgique"}
+
+
 def risky_segments(text: str) -> set[str]:
     """The figures of a sentence that a source must carry: quantities with a
     unit, both ends of a range, and years (a dated rule is a figure too)."""
@@ -663,7 +670,9 @@ def run_factual_qa_v2(draft: dict, package: dict,
                     f"The draft states a {claim.get('category')} figure that "
                     f"holds for {claim_region.value} without naming the "
                     f"region. Written flat it reads as country-wide, and no "
-                    f"source establishes it for the country.",
+                    f"source establishes it for the country. Name the region "
+                    f"IN THIS SENTENCE — « {_REGION_FRENCH.get(claim_region.value, claim_region.value)} » — "
+                    f"not by a pronoun and not in a previous sentence.",
                     blocking=True, detail=sentence[:280]))
                 break
 

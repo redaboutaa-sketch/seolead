@@ -350,10 +350,12 @@ _QA_SYSTEM = (
     "You review a draft web page against its brief. Report concerns, do not "
     "approve. Judge only: search-intent alignment, usefulness to the reader, "
     "repetition, keyword stuffing, unsupported claims, and whether the call to "
-    "action fits. The `sourced_facts` array lists statements that carry a "
-    "published source: a figure or statement present there IS sourced and must "
-    "never be reported as unsupported. Report as unsupported only figures and "
-    "claims that appear in none of them, quoting the figure. "
+    "action fits. Review ONLY the `body`. The `reference_sourced_facts` array "
+    "is background, not text under review: it lists statements that carry a "
+    "published source, so a figure or statement of the body that matches one "
+    "of them IS sourced and must never be reported as unsupported. Never "
+    "report an entry of that array itself. Report as unsupported only figures "
+    "and claims OF THE BODY that match none of them, quoting the body's words. "
     "For every finding name the category of claim it concerns: "
     "SUBSIDY (premiums, grants, public support), ROI (payback, profitability, "
     "return on investment, yield), GRID_RULE (metering, injection, prosumer or "
@@ -379,6 +381,26 @@ _LLM_CATEGORY_HINT = re.compile(
     r"rentab|profitab|payback|retour sur invest|return on invest|"
     r"prosumer|tarif|injection|compteur|grid|réseau|reseau|net.?metering",
     re.IGNORECASE)
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9àâäéèêëîïôöùûüç%]+", " ", text.lower()).strip()
+
+
+def _echoes_reference(message: str, sourced: list[str], body: str) -> bool:
+    """Whether a finding quotes a sourced fact absent from the body.
+
+    Compared on a 40-character window of the finding's normalized text: long
+    enough that a real sentence of the body cannot match by accident, short
+    enough to survive the reviewer's trimming of the quote.
+    """
+    probe = _normalize(message)
+    if len(probe) < 40:
+        return False
+    window = probe[:40]
+    if window in body:
+        return False
+    return any(window in _normalize(str(fact)) for fact in sourced)
 
 
 def llm_finding_blocks(finding: dict) -> bool:
@@ -413,7 +435,8 @@ async def run_llm_qa(
         "content_type": brief["content_type"],
         "target_audience": brief["target_audience"],
         "call_to_action": brief["cta_strategy"],
-        "sourced_facts": [str(c)[:300] for c in (sourced_claims or [])[:60]],
+        "reference_sourced_facts": [str(c)[:300]
+                                    for c in (sourced_claims or [])[:60]],
         "title": draft.get("title"),
         "meta_description": draft.get("meta_description"),
         "body": (draft.get("body") or "")[:12000],
@@ -443,7 +466,20 @@ async def run_llm_qa(
         for f in raw_findings if isinstance(f, dict)
     ][:25]
 
+    # Measured 2026-09-03 (draft 86255f33): handed the sourced facts, the
+    # reviewer reviewed THEM — five « unsupported » findings quoting ledger
+    # sentences that appear nowhere in the draft — and blocked on that. A
+    # finding whose text is an echo of the reference and not of the body is
+    # not a review of the body: it is kept, visibly, and never blocks.
+    body_text = _normalize(draft.get("body") or "")
     for finding in findings:
+        if _echoes_reference(finding["message"], sourced_claims or [], body_text):
+            finding["code"] = "reference_echo"
+            finding["blocking"] = False
+            finding["note"] = ("the finding quotes a sourced fact that is not "
+                               "in the body; the reviewer reviewed the "
+                               "reference, not the draft")
+            continue
         finding["blocking"] = llm_finding_blocks(finding)
     blocking = [f for f in findings if f["blocking"]]
     return {"status": (QAStatus.FAILED.value if blocking
