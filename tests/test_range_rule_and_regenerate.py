@@ -694,3 +694,46 @@ class TestLedgerOverrulesReviewer:
     async def test_the_mutation_an_unsourced_five_years_still_blocks(self):
         result = await self._run([CLAIM_PROSUMER_MECHANISM_TRUNCATED])
         assert len(result["blocking_issues"]) == 2
+
+
+@pytest.mark.asyncio
+class TestGateAppliesTheLedgerOverride:
+    async def test_a_stored_advisory_row_unsourcing_a_sourced_sentence_does_not_block(
+            self, session, sealed_brief):
+        """La même règle à la porte : la ligne du relecteur est relue avec le
+        registre du paquet, et le 5 ans wallon ne la fait plus refuser."""
+        from app.core.enums import QALayer, QAStatus, QAType
+        from app.site.publication import evaluate_gate
+
+        brief, package, keyword, vertical = sealed_brief
+        from sqlalchemy import select
+        draft = (await session.execute(select(ContentDraft).where(
+            ContentDraft.content_brief_id == brief.id))).scalars().first()
+        draft.body = ("En Wallonie, une installation standard est rentabilisée "
+                      "au bout de 5 ans.")
+        session.add(QAReview(
+            content_draft_id=draft.id, qa_type=QAType.LLM_ASSISTED.value,
+            layer=QALayer.ADVISORY.value, status=QAStatus.FAILED.value,
+            findings=[{"code": "unsupported_claim", "severity": "high",
+                       "category": "ROI", "blocking": True,
+                       "message": "En Wallonie, une installation standard est "
+                                  "rentabilisée au bout de 5 ans."}],
+            blocking_issues=[]))
+        await session.flush()
+        gate = await evaluate_gate(session, draft)
+        assert gate.advisory_qa is True, gate.reasons
+
+        # La mutation : le même constat sur une phrase que rien ne porte.
+        draft.body = "Une installation coûte 9 999 euros en moyenne."
+        session.add(QAReview(
+            content_draft_id=draft.id, qa_type=QAType.LLM_ASSISTED.value,
+            layer=QALayer.ADVISORY.value, status=QAStatus.FAILED.value,
+            revision=2,
+            findings=[{"code": "unsupported_claim", "severity": "high",
+                       "category": "ROI", "blocking": True,
+                       "message": "Une installation coûte 9 999 euros en "
+                                  "moyenne."}],
+            blocking_issues=[]))
+        await session.flush()
+        gate = await evaluate_gate(session, draft)
+        assert gate.advisory_qa is False

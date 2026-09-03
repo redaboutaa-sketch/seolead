@@ -199,14 +199,23 @@ async def evaluate_gate(session: AsyncSession, draft: ContentDraft) -> GateResul
     # public support, because in August nothing the model said could block.
     advisory = _governing([r for r in reviews
                            if r.qa_type == QAType.LLM_ASSISTED.value])
-    advisory_blocking = [f for f in (advisory.findings or [])
-                         if qa_service.llm_finding_blocks(f)] if advisory else []
-    advisory_ok = not advisory_blocking
 
-    # ── Proposed research that nobody launched or gave up on ────────────────
     brief = await session.get(ContentBrief, draft.content_brief_id)
     package = (await session.get(ResearchPackage, brief.research_package_id)
                if brief is not None else None)
+    # The same rule the reviewer applies at judgement time, applied again
+    # here on the stored row: a finding that unsources a sentence the ledger
+    # carries does not block. Rows judged before the rule existed are read
+    # under it, like every other rule of this gate.
+    supported = [c for c in _claims_of(package)
+                 if c.get("evidence_status") == EvidenceStatus.SUPPORTED.value]
+    advisory_blocking = [
+        f for f in ((advisory.findings if advisory else None) or [])
+        if qa_service.llm_finding_blocks(f)
+        and not qa_service.overruled_by_ledger(f, draft.body or "", supported)]
+    advisory_ok = not advisory_blocking
+
+    # ── Proposed research that nobody launched or gave up on ────────────────
     pending_searches, research_reason = await _pending_searches(session, package)
     research_ok = not pending_searches and research_reason is None
 
