@@ -193,13 +193,27 @@ async def _persist_serp(session, *, keyword, snapshot: SerpSnapshot, analysis: d
     return row
 
 
-async def _persist_research(session, *, keyword, result, decisions, correlation_id):
-    """One ResearchRun per provider, with relevance decisions on every source."""
+def second_round_key(round_no: int) -> str:
+    """The idempotency-key suffix of an authoritative round: empty for the
+    first (its key is historical), `:round<n>` for every later one."""
+    return "" if round_no <= 1 else f":round{round_no}"
+
+
+async def _persist_research(session, *, keyword, result, decisions, correlation_id,
+                            key_suffix: str = ""):
+    """One ResearchRun per provider, with relevance decisions on every source.
+
+    `key_suffix` distinguishes two runs of the SAME provider within one job.
+    Measured on the host the 2026-09-03: the second authoritative round wrote
+    its run under the first round's key `<correlation>:tavily_authoritative`
+    and the whole job died on `uq_research_run_idempotency` — after every
+    query had been paid for. The first round keeps the historical key.
+    """
     run = ResearchRun(
         keyword_id=keyword.id, provider=result.provider,
         status=(RunStatus.PARTIAL.value if result.status == "PARTIAL"
                 else RunStatus.SUCCEEDED.value),
-        idempotency_key=f"{correlation_id}:{result.provider}",
+        idempotency_key=f"{correlation_id}:{result.provider}{key_suffix}",
         correlation_id=correlation_id,
         started_at=result.started_at, completed_at=result.completed_at,
         duration_ms=result.duration_ms, engine_commit=result.engine_commit,
@@ -525,7 +539,8 @@ async def run_pipeline_v2(
 
                 run_row = await _persist_research(
                     session, keyword=keyword, result=official_result,
-                    decisions=decisions, correlation_id=correlation_id)
+                    decisions=decisions, correlation_id=correlation_id,
+                    key_suffix=second_round_key(round_no))
                 result.research_run_ids.append(run_row.id)
                 await session.commit()
 
