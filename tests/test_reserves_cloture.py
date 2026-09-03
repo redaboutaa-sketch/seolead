@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services import freshness
+from app.site.publication import render_sources
 
 NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
 PRIME_HABITATION = (
@@ -46,3 +47,15 @@ class TestFreshnessDefectDirection:
     def test_what_the_right_reading_would_be(self):
         verdict = freshness.assess(PRIME_HABITATION, now=NOW)
         assert verdict.status is freshness.FreshnessStatus.DATED_CURRENT
+
+
+class TestEverySourceIsNamed:
+    def test_a_commercial_source_is_named_by_its_host_without_a_link(self):
+        claim = {"claim": "Une famille de 4 personnes consomme 5000 kWh.",
+                 "evidence_status": "SUPPORTED", "region": "BE",
+                 "evidence": [{"url": "https://www.un-installateur.be/blog/x",
+                               "source_quality": "COMMERCIAL", "supports": True,
+                               "published_at": None, "freshness_status": "UNDATED"}]}
+        sources = render_sources("Une famille de 4 personnes consomme 5000 kWh.", [claim])
+        assert sources[0]["name"] == "un-installateur.be"
+        assert "url" not in sources[0] and "http" not in str(sources[0])

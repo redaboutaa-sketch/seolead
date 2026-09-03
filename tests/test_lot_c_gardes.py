@@ -623,18 +623,22 @@ class TestRenderedSources:
         assert official[0]["date"] is None
         assert official[0]["freshness"] == "UNDATED_CURRENT"
 
-    def test_a_commercial_source_is_described_never_named(self):
+    def test_a_commercial_source_is_named_by_its_host(self):
+        """Réserve 3 (2026-09-03) : « décrite sans être nommée » n'est pas
+        « source affichée ». Une source commerciale porte son hôte et sa
+        date, comme les autres — sans URL."""
         sources = render_sources(REVISED_BODY, CLAIMS_WITH_EVIDENCE)
         commercial = [s for s in sources if s["tier"] == "COMMERCIAL"]
-        assert commercial and commercial[0]["name"] is None
+        assert commercial
+        assert commercial[0]["name"] == "un-installateur-concurrent.be"
         assert commercial[0]["date"] == "2024-03-01"
         assert any("5000 kWh" in f for f in commercial[0]["figures"])
 
     def test_no_entry_carries_a_url_or_a_claim_identifier(self):
         for entry in render_sources(REVISED_BODY, CLAIMS_WITH_EVIDENCE):
             assert "url" not in entry and "source_ref" not in entry
-            assert "concurrent" not in str(entry)
             assert "http" not in str(entry)
+            assert "/blog/" not in str(entry)
 
     def test_official_sources_come_first(self):
         tiers = [s["tier"] for s in render_sources(REVISED_BODY,

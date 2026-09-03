@@ -13,9 +13,9 @@ import type { SourceRef } from "@/lib/types";
  * the promise only when this block has something to show. A template block
  * that announces data it does not have is a claim, not a layout.
  *
- * No link, no URL. An official authority is named (its host, as text). A
- * commercial or specialist source is described by its tier: naming it would
- * be advertising a competitor on a page about prices.
+ * No link, no URL. Every source is named by its host, as text, whatever its
+ * tier (owner, 2026-09-03: a source described but not named is not a source
+ * shown). Naming is not linking: nothing here is an anchor.
  */
 
 const TIER_LABEL: Record<string, string> = {

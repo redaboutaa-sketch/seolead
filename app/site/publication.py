@@ -388,7 +388,10 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
                     continue
                 tier = str(evidence.get("source_quality") or "UNKNOWN").upper()
                 entry = found.setdefault(key, {
-                    "name": _host_of(url) if tier == "OFFICIAL" else None,
+                    # Named by host, as text, whatever the tier (owner,
+                    # 2026-09-03: « décrite sans être nommée » n'est pas
+                    # « source affichée »). Still no link, still no URL.
+                    "name": _host_of(url),
                     "tier": tier,
                     "authority_type": evidence.get("authority_type"),
                     "region": evidence.get("region") or claim.get("region"),

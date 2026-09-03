@@ -31,7 +31,7 @@ const OFFICIAL: SourceRef = {
   figures: ["7,3%", "8,4%"],
 };
 const SPECIALIST: SourceRef = {
-  name: null,
+  name: "un-installateur.be",
   tier: "SPECIALIST",
   authority_type: null,
   region: "BE",
@@ -62,13 +62,17 @@ describe("SourcesBlock — renders only what it has", () => {
     expect(html).toContain("Wallonie");
   });
 
-  it("names an official authority but never links, and never names a commercial source", () => {
+  it("names every source by its host, as text, and never links", () => {
+    // Réserve 3 (2026-09-03) : « décrite sans être nommée » n'est pas
+    // « source affichée ». A commercial or specialist source is named like
+    // the others — as text, never as an anchor.
     const html = renderToStaticMarkup(
       createElement(SourcesBlock, { sources: REVISED_SOURCES }),
     );
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("http");
-    expect(sourceLine(SPECIALIST)).toMatch(/^Source spécialisée/);
+    expect(html).toContain("un-installateur.be");
+    expect(sourceLine(SPECIALIST)).toMatch(/^un-installateur\.be \(source spécialisée/);
     expect(sourceLine(OFFICIAL)).toMatch(/^energie\.wallonie\.be/);
   });
 
