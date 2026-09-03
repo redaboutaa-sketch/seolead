@@ -149,7 +149,9 @@ def build_generation_prompt(brief: dict, package: dict, *,
             "what you write — drop an assertion the evidence does not carry, "
             "name the region a figure holds for, use the supplied facts you "
             "left unused. Do not restate a refused claim in softer words: an "
-            "unsourced figure is refused however it is phrased.\n")
+            "unsourced figure is refused however it is phrased. Each entry "
+            "quotes the sentence concerned in `in_your_text` and says what to "
+            "do in `fix`: apply the fix to THAT sentence, exactly as stated.\n")
 
     user = json.dumps({
         "language": package.get("language"),

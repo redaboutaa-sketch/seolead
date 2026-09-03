@@ -106,8 +106,46 @@ def decide(blocking: list[dict] | None, *, attempt: int,
                          attempt, left, tuple(sorted(set(present))))
 
 
+# What to do about a finding, in the writer's terms. Measured 2026-09-03: four
+# regenerations, and at every one the writer answered REGIONAL_SCOPE_NOT_STATED
+# by naming the region in the sentence BEFORE the figure, or by « y ». The
+# finding said what was wrong; nobody had said what to write.
+FIXES: dict[str, str] = {
+    "REGIONAL_SCOPE_NOT_STATED": (
+        "Rewrite the sentence quoted in `in_your_text` so that the region's "
+        "name appears INSIDE that same sentence (for example « en Wallonie »), "
+        "not in the sentence before it and not as « y »."),
+    "REQUIRED_FACTS_UNDERUSED": (
+        "Add sentences that state the unused facts listed in `in_your_text`, "
+        "each with its region; do not rewrite the facts you already used."),
+    "NUMBER_WITHOUT_SOURCE": (
+        "Remove the figure, or state the full range the evidence gives — never "
+        "one end of it alone."),
+    "ROI_WITHOUT_DATED_SOURCE": (
+        "Remove the payback statement, or attribute it to the dated official "
+        "figure the facts supply."),
+    "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE": (
+        "Delete the statement about profitability without public support."),
+    "HIGH_RISK_CLAIM_ASSERTED": (
+        "Drop the assertion; the evidence does not carry it in any wording."),
+    "CONFLICTING_EVIDENCE_ASSERTED": (
+        "Drop the figure; the sources disagree on it."),
+    "UNSUPPORTED_DRAFT_CLAIM": (
+        "Drop the sentence, or restate it as one of the supplied facts."),
+    "RESTRICTED_CLAIM_QUANTIFIED": (
+        "Mention the topic without any figure."),
+}
+
+
 def carried(blocking: list[dict] | None, *, limit: int = 12) -> list[dict]:
-    """The findings handed to the next attempt, smallest useful form."""
-    return [{"code": str(f.get("code")), "problem": str(f.get("message") or ""),
-             "in_your_text": str(f.get("detail") or "")}
-            for f in (blocking or [])[:limit]]
+    """The findings handed to the next attempt, smallest useful form: the
+    code, the problem in the gate's words, the sentence concerned, and what
+    to do about it."""
+    out = []
+    for f in (blocking or [])[:limit]:
+        code = str(f.get("code"))
+        out.append({"code": code, "problem": str(f.get("message") or ""),
+                    "in_your_text": str(f.get("detail") or ""),
+                    "fix": FIXES.get(code, "Change what you write so that this "
+                                           "finding cannot be raised again.")})
+    return out

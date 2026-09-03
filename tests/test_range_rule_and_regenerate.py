@@ -601,3 +601,45 @@ class TestTheKeptDraftIsTheBest:
         assert history["kept_attempt"] == 2
         assert "kept attempt 2" in history["message"]
         assert len(history["attempts"]) == 3
+
+
+# ─── 9. Ce que le rédacteur reçoit dit quoi faire ───────────────────────────
+
+class TestWriterFeedbackNamesTheFix:
+    def test_a_region_finding_tells_the_writer_where_to_put_the_name(self):
+        carried = draft_retry.carried([{
+            "code": "REGIONAL_SCOPE_NOT_STATED",
+            "message": "…without naming the region…",
+            "detail": "En effet, la rentabilité est comprise entre 7,3% et 8,4%."}])
+        assert carried[0]["fix"].startswith("Rewrite the sentence quoted")
+        assert "INSIDE that same sentence" in carried[0]["fix"]
+        assert carried[0]["in_your_text"].startswith("En effet")
+
+    def test_every_carried_finding_has_a_fix(self):
+        carried = draft_retry.carried([{"code": "SOMETHING_NEW", "message": "m"}])
+        assert carried[0]["fix"]
+
+    def test_the_facts_floor_names_the_unused_facts(self):
+        required = [{"fact": "La rentabilité est comprise entre 7,3% et 8,4%.",
+                     "region": "BE-WAL"},
+                    {"fact": "Un ménage de 4 personnes consomme 5000 kWh.",
+                     "region": "BE"}]
+        body = "la rentabilité est comprise entre 7,3% et 8,4% en wallonie"
+        unused = qa_service.unused_required_facts(required, body)
+        assert [f["fact"] for f in unused] == [required[1]["fact"]]
+
+    def test_the_prompt_tells_the_writer_to_apply_each_fix(self):
+        from app.services.draft_service import build_generation_prompt
+        system, user = build_generation_prompt(
+            {"primary_query": "q", "content_type": "GUIDE",
+             "search_intent": "INFORMATIONAL", "target_audience": "a",
+             "objective": "o", "recommended_title": "t", "outline": [],
+             "key_questions": [], "required_facts": [], "required_sources": [],
+             "missing_information": [], "cta_strategy": {},
+             "cautionary_claims": []},
+            {"language": "fr", "market": "BE", "writer_view": {}},
+            previous_findings=draft_retry.carried([
+                {"code": "REGIONAL_SCOPE_NOT_STATED", "message": "m",
+                 "detail": "phrase"}]))
+        assert "apply the fix to THAT sentence" in system
+        assert '"fix"' in user and "INSIDE that same sentence" in user
