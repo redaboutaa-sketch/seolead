@@ -263,12 +263,22 @@ def run_deterministic_qa(
                 f"the floor of {floor}; the research, not the draft, is what is "
                 f"missing", blocking=True))
         elif floor and used < floor:
+            # The writer answered this finding three times in a row with the
+            # same count (2026-09-03): told « use more of the supplied facts »
+            # and not which, it rewrote the ones it had. The unused facts
+            # travel with the finding, and the count still owed is stated.
+            unused = unused_required_facts(required, normalized_body)
             findings.append(_finding(
                 "REQUIRED_FACTS_UNDERUSED",
                 f"The body uses {used} supported fact(s) of {len(required)} "
                 f"supplied, below the floor of {floor}. A page that states a "
-                f"handful of what was established is padding around them.",
-                blocking=True))
+                f"handful of what was established is padding around them. "
+                f"State at least {floor - used} more of the unused facts, in "
+                f"substance and with their region.",
+                blocking=True,
+                detail=" || ".join(
+                    f"[{f.get('region') or 'BE'}] {str(f.get('fact', ''))[:160]}"
+                    for f in unused[:6])))
         elif not floor and used < max(1, len(required) // 3):
             findings.append(_finding(
                 "REQUIRED_FACTS_UNDERUSED",
@@ -318,6 +328,12 @@ def run_deterministic_qa(
             "publishable", blocking=True))
 
     return _verdict(findings)
+
+
+def unused_required_facts(required: list[dict], normalized_body: str) -> list[dict]:
+    """The supplied facts the body does not echo, in the brief's order."""
+    return [f for f in required
+            if not _fact_echoed(str(f.get("fact", "")), normalized_body)]
 
 
 def _fact_echoed(fact: str, normalized_body: str) -> bool:
