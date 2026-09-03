@@ -350,7 +350,11 @@ _QA_SYSTEM = (
     "You review a draft web page against its brief. Report concerns, do not "
     "approve. Judge only: search-intent alignment, usefulness to the reader, "
     "repetition, keyword stuffing, unsupported claims, and whether the call to "
-    "action fits. For every finding name the category of claim it concerns: "
+    "action fits. The `sourced_facts` array lists statements that carry a "
+    "published source: a figure or statement present there IS sourced and must "
+    "never be reported as unsupported. Report as unsupported only figures and "
+    "claims that appear in none of them, quoting the figure. "
+    "For every finding name the category of claim it concerns: "
     "SUBSIDY (premiums, grants, public support), ROI (payback, profitability, "
     "return on investment, yield), GRID_RULE (metering, injection, prosumer or "
     "network tariffs), or OTHER. Reply with JSON only: "
@@ -389,9 +393,16 @@ def llm_finding_blocks(finding: dict) -> bool:
 
 async def run_llm_qa(
     draft: dict, brief: dict, *, llm: LLMProvider, correlation_id: str,
+    sourced_claims: list[str] | None = None,
 ) -> dict:
     """Model-assisted review. High-severity findings on SUBSIDY, ROI and
-    GRID_RULE block; everything else is advisory."""
+    GRID_RULE block; everything else is advisory.
+
+    `sourced_claims` are the SUPPORTED claims the writer built on. Without
+    them the reviewer reads the body alone and, since it now blocks, blocked
+    the one figure of the payback article that IS official — « entre 7,3% et
+    8,4% en Wallonie » — as « lacks supporting evidence » (2026-09-03).
+    """
     if not llm.configured:
         return {"status": QAStatus.SKIPPED.value, "score": None,
                 "findings": [], "blocking_issues": []}
@@ -402,6 +413,7 @@ async def run_llm_qa(
         "content_type": brief["content_type"],
         "target_audience": brief["target_audience"],
         "call_to_action": brief["cta_strategy"],
+        "sourced_facts": [str(c)[:300] for c in (sourced_claims or [])[:60]],
         "title": draft.get("title"),
         "meta_description": draft.get("meta_description"),
         "body": (draft.get("body") or "")[:12000],

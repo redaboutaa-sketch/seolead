@@ -179,16 +179,28 @@ async def cmd_authoritative_run(args: argparse.Namespace) -> int:
             topic=package.query, market=package.market, unresolved=unresolved,
             profile=profile)
 
+        # Only what is still owed is launched (2026-09-03): a query already
+        # executed or abandoned on this package is resolved, and paying for it
+        # again resolves nothing. `--all` re-runs the whole plan on purpose.
+        pending = (plan if args.run_all
+                   else research_planner.pending_plan(
+                       plan, package.authoritative_research))
         if args.plan_only or plan.is_empty:
             _emit({"package_id": str(package.id), "query": package.query,
                    "unresolved_high_risk": len(unresolved),
-                   "plan": plan.as_dict(),
+                   "plan": plan.as_dict(), "pending": pending.as_dict(),
                    "executed": False})
             return EXIT_OK if not plan.is_empty else EXIT_BLOCKED
+        if pending.is_empty:
+            _emit({"package_id": str(package.id), "query": package.query,
+                   "plan": plan.as_dict(), "executed": False,
+                   "note": "every proposed query is already executed or "
+                           "abandoned on this package; pass --all to re-run"})
+            return EXIT_OK
 
         usage = UsageRecorder()
         run = await execute_plan(
-            plan, profile=profile, registry=registry,
+            pending, profile=profile, registry=registry,
             web_provider=TavilyResearchProvider(settings, usage=usage),
             market=package.market, language=package.language,
             correlation_id=f"authoritative-{package.id.hex[:16]}", usage=usage)
@@ -199,7 +211,7 @@ async def cmd_authoritative_run(args: argparse.Namespace) -> int:
         # command wrote nothing — five searches proposed for f9534a41 stayed
         # « proposed » with no trace of whether anyone had looked.
         research_planner.record_resolution(
-            package, plan, run.as_dict(), by="authoritative-run")
+            package, pending, run.as_dict(), by="authoritative-run")
         await session.commit()
 
         _emit({"package_id": str(package.id), "query": package.query,
@@ -759,6 +771,50 @@ async def cmd_draft_show(args: argparse.Namespace) -> int:
             payload["body"] = draft.body
         _emit(payload)
     return EXIT_OK
+
+
+async def cmd_draft_regenerate(args: argparse.Namespace) -> int:
+    """Ask the writer again against a brief and package that already exist.
+
+    The research is not re-bought and no new package is created: the draft is
+    judged by the gates as they stand now, persisted with its QA rows and a
+    PENDING approval, beside the drafts the brief already has. Costs the
+    writer's call(s) and the model-assisted review, nothing else.
+    """
+    from app.services.draft_stage import write_and_judge
+    from app.services.pipeline_v2 import _persist_usage
+
+    settings = get_settings()
+    llm = get_llm_provider(settings)
+    async with get_sessionmaker()() as session:
+        brief = await session.get(ContentBrief, uuid.UUID(args.brief_id))
+        if brief is None:
+            _emit({"error": "no such brief"})
+            return EXIT_ERROR
+        package = await session.get(ResearchPackage, brief.research_package_id)
+        if package is None:
+            _emit({"error": "the brief's package no longer exists"})
+            return EXIT_ERROR
+        keyword = await session.get(SeedKeyword, package.keyword_id)
+        vertical = await session.get(Vertical, keyword.vertical_id)
+        profile = load_profile(vertical.code)
+
+        usage = UsageRecorder()
+        correlation_id = f"regenerate-{brief.id.hex[:16]}-{uuid.uuid4().hex[:6]}"
+        outcome = await write_and_judge(
+            session, brief=brief, brief_payload=_brief_payload(brief),
+            package_payload=_package_payload(package), profile=profile,
+            llm=llm, usage=usage, correlation_id=correlation_id,
+            keyword_id=keyword.id, vertical_code=vertical.code)
+        await _persist_usage(session, usage, correlation_id)
+        await session.commit()
+
+    _emit({"brief_id": str(brief.id), "package_id": str(package.id),
+           "correlation_id": correlation_id, **outcome.as_dict(),
+           "provider_usage": usage.summary()})
+    if outcome.draft is None:
+        return EXIT_ERROR
+    return EXIT_OK if outcome.qa_passed else EXIT_BLOCKED
 
 
 async def cmd_content_pending(args: argparse.Namespace) -> int:
@@ -1423,6 +1479,8 @@ def build_parser() -> argparse.ArgumentParser:
     authoritative.add_argument("--package", dest="package_id", required=True)
     authoritative.add_argument("--plan-only", action="store_true",
                                help="show the plan without spending on queries")
+    authoritative.add_argument("--all", dest="run_all", action="store_true",
+                               help="re-run every proposed query, resolved or not")
     authoritative.set_defaults(func=cmd_authoritative_run)
 
     abandon = research_sub.add_parser(
@@ -1501,6 +1559,12 @@ def build_parser() -> argparse.ArgumentParser:
     draft_show.add_argument("id")
     draft_show.add_argument("--body", action="store_true", help="include the body")
     draft_show.set_defaults(func=cmd_draft_show)
+    draft_regen = draft_sub.add_parser(
+        "regenerate",
+        help="ask the writer again against an existing brief and package")
+    draft_regen.add_argument("brief_id")
+    draft_regen.set_defaults(func=cmd_draft_regenerate)
+
     draft_rejudge = draft_sub.add_parser(
         "rejudge", help="re-run the deterministic QA gates on a stored draft — "
                         "read-only, no provider call")

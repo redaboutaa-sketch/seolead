@@ -176,14 +176,17 @@ class TestLlmHighSeverityBlocksOnLegalCategories:
 # ─── C.3 — couverture numérique et canari d'extraction ───────────────────────
 
 class TestNumericCoverage:
-    def test_every_figure_of_the_published_article_exists_in_a_supported_claim(
+    def test_the_published_five_years_is_one_end_of_a_range_and_fails(
             self, solar_profile):
-        """Dit explicitement : cette garde seule n'aurait PAS arrêté 8a1f6e46.
-        Le « 5 » de « 5 ans » existe dans une affirmation étayée (« 5 à 7
-        ans », source spécialiste non datée). Ce sont C.1 et C.4 qui
-        condamnent la phrase ; C.3 condamne un chiffre que rien ne porte."""
+        """Première version de cette garde (matin du 2026-09-03) : le « 5 »
+        de « 5 ans » existait dans « 5 à 7 ans » et la garde le laissait
+        passer — elle ne mordait pas sur l'article. L'après-midi, le
+        brouillon régénéré a refait exactement cela : « 5 à 7 ans » réduit à
+        « 5 ans ». Une borne n'est pas la fourchette ; la garde mord."""
         verdict = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
-        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict)
+        hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
+        assert hits and any(SENTENCE_A[:60] in f["detail"] for f in hits)
+        assert any("one end of a range" in f["message"] for f in hits)
         assert "NUMERIC_EXTRACTION_FAILED" not in _codes(verdict)
 
     def test_the_published_sentence_fails_once_no_supported_claim_carries_its_figure(
@@ -226,9 +229,18 @@ class TestNumericCoverage:
 
 class TestRoiNeedsDatedSupport:
     def test_published_fails(self, solar_profile):
+        """Le « 5 ans » publié tombe d'abord sous C.3 (une borne n'est pas la
+        fourchette : aucun chiffre sourcé). Écrit honnêtement — la fourchette
+        entière, « 5 à 7 ans » — il tombe sous C.4 : la seule source qui la
+        porte est spécialiste et non datée. Les deux versions échouent."""
         verdict = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
+        assert any(SENTENCE_A[:60] in f["detail"]
+                   for f in _findings(verdict, "NUMBER_WITHOUT_SOURCE"))
+        honest = SENTENCE_A.replace("au bout de 5 ans", "en 5 à 7 ans")
+        verdict = _run(honest, PUBLISHED_CLAIMS, solar_profile)
         hits = _findings(verdict, "ROI_WITHOUT_DATED_SOURCE")
-        assert hits and any(SENTENCE_A[:60] in f["detail"] for f in hits)
+        assert hits and any(honest[:60] in f["detail"] for f in hits)
+        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict)
 
     def test_the_category_of_the_matched_claim_does_not_matter(self, solar_profile):
         """« rentabilisation en 5 à 7 ans » est classée GENERAL par le

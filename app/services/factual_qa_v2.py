@@ -51,7 +51,7 @@ _MATCH_MARGIN = 0.05
 # string on purpose: it is the knob that decides every arbitration, and a
 # re-judgement under a different setting must read as a different engine rather
 # than as an unexplained reversal.
-ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}/segments-1"
+ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}/segments-2"
 # Conflicting evidence blocks by default; a vertical may downgrade it to an
 # explicit unresolved note instead.
 _CONFLICT_POLICY_BLOCK = True
@@ -90,8 +90,10 @@ _RISKY_SEGMENT = re.compile(
     rf"(?<![\w/])({_QUANTITY})\s*(?:{_RISKY_UNIT})", re.IGNORECASE)
 # « entre 7 et 11 ans », « 2 à 3 personnes » : le premier chiffre d'une
 # fourchette n'a pas d'unité à lui, il emprunte celle du second.
+# « entre 7,3% et 8,4% » : the first end may carry its own unit.
 _RISKY_RANGE = re.compile(
-    rf"(?<![\w/])({_QUANTITY})\s*(?:à|a|-|–|et|ou)\s*({_QUANTITY})\s*(?:{_RISKY_UNIT})",
+    rf"(?<![\w/])({_QUANTITY})\s*(?:{_RISKY_UNIT})?\s*(?:à|a|-|–|et|ou)\s*"
+    rf"({_QUANTITY})\s*(?:{_RISKY_UNIT})",
     re.IGNORECASE)
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 _ANY_QUANTITY = re.compile(rf"(?<![\w/])({_QUANTITY})")
@@ -132,9 +134,60 @@ def _quantities(text: str) -> set[str]:
     return {f for f in found if f}
 
 
-def covers(claim: dict, segments: set[str]) -> bool:
-    """Whether a claim carries every risky segment of a sentence."""
-    return segments <= _quantities(str(claim.get("claim", "")))
+def _range_spans(text: str) -> list[tuple[int, int, str, str]]:
+    return [(m.start(), m.end(), _digits(m.group(1)), _digits(m.group(2)))
+            for m in _RISKY_RANGE.finditer(text)]
+
+
+def risky_ranges(text: str) -> set[tuple[str, str]]:
+    """The ranges a text states, as (low, high) digit pairs."""
+    return {(lo, hi) for _, _, lo, hi in _range_spans(text) if lo and hi}
+
+
+def claim_figures(text: str) -> tuple[set[str], set[tuple[str, str]]]:
+    """What a claim states: its standalone figures, and its ranges.
+
+    A figure that appears only as one end of a range is NOT a standalone
+    figure. Measured 2026-09-03 on the second draft of the payback article:
+    the writer read « rentabilisation en 5 à 7 ans » and wrote « rentabilisée
+    au bout de 5 ans » — the low end of a range, presented as the value.
+    The « 5 » existed in the ledger; the statement did not.
+    """
+    spans = _range_spans(text)
+    ranges = {(lo, hi) for _, _, lo, hi in spans if lo and hi}
+    standalone: set[str] = set()
+    for m in _ANY_QUANTITY.finditer(text):
+        if any(start <= m.start() < end for start, end, _, _ in spans):
+            continue
+        digits = _digits(m.group(1))
+        if digits:
+            standalone.add(digits)
+    standalone |= set(_YEAR.findall(text))
+    return standalone, ranges
+
+
+def covers(claim: dict, segments: set[str],
+           ranges: set[tuple[str, str]] | frozenset = frozenset()) -> bool:
+    """Whether a claim carries every risky segment of a sentence.
+
+    A segment is carried by a standalone figure of the claim, or by a range
+    of the claim that the sentence states in full (`ranges` are the
+    sentence's own). One end of a range is not the range.
+    """
+    standalone, claim_ranges = claim_figures(str(claim.get("claim", "")))
+    for segment in segments:
+        if segment in standalone:
+            continue
+        if any(segment in r and r in ranges for r in claim_ranges):
+            continue
+        return False
+    return True
+
+
+def endpoint_only(claim: dict, segment: str) -> bool:
+    """Whether a claim carries this figure only as one end of a range."""
+    standalone, claim_ranges = claim_figures(str(claim.get("claim", "")))
+    return segment not in standalone and any(segment in r for r in claim_ranges)
 
 
 def quantity_labels(text: str) -> dict[str, str]:
@@ -160,6 +213,13 @@ def body_segments(body: str) -> set[str]:
     for sentence in _all_sentences(body):
         segments |= risky_segments(sentence)
     return segments
+
+
+def body_ranges(body: str) -> set[tuple[str, str]]:
+    ranges: set[tuple[str, str]] = set()
+    for sentence in _all_sentences(body):
+        ranges |= risky_ranges(sentence)
+    return ranges
 
 
 def _clean_markdown(body: str) -> str:
@@ -236,6 +296,14 @@ def _matches_claim(sentence: str, claim: dict) -> bool:
 _ASSERTED = "ASSERTED"      # the blockable claim is the better reading
 _RIVAL = "RIVAL"            # a supported claim is the better reading
 _AMBIGUOUS = "AMBIGUOUS"    # neither wins; block and say so
+# The sentence states neither reading: the contested claim only faintly, and
+# no supported claim carries its figures. There is nothing to be ambiguous
+# between — what there is, is a figure without a source, and check 3 says so
+# in those words. Measured 2026-09-03: one sentence, « rentabilisée au bout de
+# 5 ans », drew ten AMBIGUOUS_MATCH findings, one per contested claim it
+# faintly resembled, and every one of them forbade the rewrite that would
+# have fixed it.
+_UNREAD = "UNREAD"
 
 
 def _match_strength(sentence: str, claim: dict) -> float:
@@ -271,6 +339,7 @@ def _best_rival(sentence: str, claim: dict,
     shows it as the nearest non-covering reading so the exclusion is visible.
     """
     segments = risky_segments(sentence)
+    ranges = risky_ranges(sentence)
     best, rival = 0.0, None
     for candidate in supported:
         if candidate is claim:
@@ -278,7 +347,7 @@ def _best_rival(sentence: str, claim: dict,
         strength = _match_strength(sentence, candidate)
         if strength <= 0.0:
             continue
-        if segments and not covers(candidate, segments):
+        if segments and not covers(candidate, segments, ranges):
             continue
         if strength > best:
             best, rival = strength, candidate
@@ -294,6 +363,8 @@ def _arbitrate(sentence: str, claim: dict,
         return _ASSERTED, rival
     if best - this > _MATCH_MARGIN:
         return _RIVAL, rival
+    if rival is None:
+        return _UNREAD, None
     return _AMBIGUOUS, rival
 
 
@@ -373,13 +444,15 @@ def explain_arbitration(draft: dict, package: dict,
             if strength > nearest_strength:
                 nearest_strength, nearest = strength, candidate
         verdict, _ = _arbitrate(sentence, claim, supported)
+        ranges = risky_ranges(sentence)
         rows.append({
             "risky_segments": sorted(segments),
-            "rival_covers_segments": bool(rival) and covers(rival, segments),
+            "rival_covers_segments": bool(rival) and covers(rival, segments,
+                                                            ranges),
             "nearest_supported_claim": (str(nearest.get("claim"))[:200]
                                         if nearest is not None else None),
-            "nearest_excluded_for": (sorted(segments - _quantities(
-                str(nearest.get("claim", ""))))
+            "nearest_excluded_for": (
+                sorted(s for s in segments if not covers(nearest, {s}, ranges))
                 if nearest is not None and nearest is not rival else []),
             "check": check,
             "verdict": verdict,
@@ -487,9 +560,10 @@ def run_factual_qa_v2(draft: dict, package: dict,
                 if names_region(sentence, claim_region):
                     break
                 verdict, rival = _arbitrate(sentence, claim, supported)
-                if verdict == _RIVAL:
-                    # The sentence is really stating another supported claim; the
-                    # scope of this one is not what it failed to name.
+                if verdict in (_RIVAL, _UNREAD):
+                    # The sentence is really stating another supported claim —
+                    # or none at all; the scope of this one is not what it
+                    # failed to name.
                     break
                 if verdict == _AMBIGUOUS:
                     add(_ambiguous_finding(sentence, claim, rival,
@@ -542,23 +616,30 @@ def run_factual_qa_v2(draft: dict, package: dict,
     # `_numbers`, et parce que la phrase ressemblait à autre chose. Chaque
     # segment à risque du rendu doit se retrouver dans une affirmation
     # étayée, ou dans un calcul explicite. Rien d'autre ne le couvre.
-    pool: set[str] = set()
-    for claim in supported:
-        pool |= _quantities(str(claim.get("claim", "")))
     extracted_any = False
     for sentence in _all_sentences(body):
         segments = risky_segments(sentence)
+        ranges = risky_ranges(sentence)
         extracted_any = extracted_any or bool(segments) or bool(_numbers(sentence))
         if not segments or _ARITHMETIC.search(sentence):
             continue
-        missing = sorted(segments - pool)
+        missing = sorted(s for s in segments
+                         if not any(covers(c, {s}, ranges) for c in supported))
         if missing:
+            # A figure the ledger carries only as one end of a range is the
+            # case worth naming: the writer did not invent it, it collapsed a
+            # range to its edge, and the fix is to state the range.
+            collapsed = sorted(s for s in missing
+                               if any(endpoint_only(c, s) for c in supported))
+            hint = (f" Figure(s) {', '.join(collapsed)} exist in the evidence "
+                    f"only as one end of a range: state the range, not its "
+                    f"edge." if collapsed else "")
             add(_finding(
                 "NUMBER_WITHOUT_SOURCE",
                 f"The draft states figure(s) {', '.join(missing)} that no "
                 f"SUPPORTED claim carries and no explicit calculation "
                 f"produces. A number the evidence does not state is a "
-                f"number the page invents.",
+                f"number the page invents.{hint}",
                 blocking=True, detail=sentence[:280]))
     # The canary: a body that contains digits from which the extractor read
     # no figure at all is an extractor that stopped working, not a body
@@ -579,9 +660,11 @@ def run_factual_qa_v2(draft: dict, package: dict,
         if not _ROI_SHAPE.search(sentence):
             continue
         segments = risky_segments(sentence)
+        ranges = risky_ranges(sentence)
         # The claims that could carry this statement: those stating its
         # figures — or, for a figure-less one, those it lexically matches.
-        candidates = ([c for c in supported if covers(c, segments)] if segments
+        candidates = ([c for c in supported if covers(c, segments, ranges)]
+                      if segments
                       else [c for c in supported if _matches_claim(sentence, c)])
         if not candidates:
             continue   # nothing supports it at all: the checks above say so

@@ -1,0 +1,331 @@
+"""Après-midi du 2026-09-03 : ce que le premier brouillon régénéré a appris.
+
+Le pipeline a été relancé sur « rentabilité panneaux solaires Belgique » avec
+les six gardes du lot C. Le rédacteur a écrit, à nouveau : « une installation
+standard est rentabilisée au bout de 5 ans ». Trois choses sont sorties de la
+lecture des verdicts, et chacune a son test ici.
+
+1. Le « 5 » existait dans le registre — comme borne basse de « rentabilisation
+   en 5 à 7 ans ». La couverture par segments l'acceptait. Une borne n'est pas
+   la fourchette.
+2. La phrase a produit dix AMBIGUOUS_MATCH, un par affirmation contestée à
+   laquelle elle ressemblait faiblement, et AMBIGUOUS_MATCH interdit toute
+   relance du rédacteur. Quand aucune lecture étayée ne couvre les chiffres,
+   il n'y a pas d'ambiguïté : il y a un chiffre sans source, réécrivable.
+3. Le relecteur assisté, désormais bloquant, a bloqué « entre 7,3% et 8,4% en
+   Wallonie » — la seule figure OFFICIELLE de l'article — faute de voir les
+   affirmations étayées. Il les voit.
+"""
+from __future__ import annotations
+
+import json
+import uuid
+
+import pytest
+import pytest_asyncio
+
+from app.core.enums import ApprovalState, ContentType, SearchIntent
+from app.models import (Approval, ContentBrief, ContentDraft, QAReview,
+                        ResearchPackage, ResearchRun, SeedKeyword, Vertical)
+from app.providers.llm.base import LLMResponse, LLMUsage
+from app.services import draft_retry, factual_qa_v2, qa_service
+from app.services.draft_stage import write_and_judge
+from app.services.factual_qa_v2 import (_UNREAD, _arbitrate, claim_figures,
+                                        covers, endpoint_only, risky_ranges)
+from app.services.provider_usage import UsageRecorder
+from app.services.research_planner import (AuthoritativeQuery, ResearchPlan,
+                                           pending_plan)
+from app.services.claim_policy import ClaimCategory
+from tests.fixtures.article_8a1f6e46 import (
+    CLAIM_FAMILY_5000, CLAIM_PROSUMER_MECHANISM, CLAIM_REVERSE_METER_2030,
+    CLAIM_ROI_5_TO_7_SPECIALIST, CLAIM_ROI_UNDER_7,
+    CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, PUBLISHED_CLAIMS, REVISED_BODY)
+
+# La phrase du brouillon régénéré, au caractère près (draft dc2a88d9).
+REGENERATED_SENTENCE = (
+    "Les données montrent que l'installation de panneaux solaires peut être "
+    "rentable, notamment en Wallonie où une installation standard est "
+    "rentabilisée au bout de 5 ans.")
+
+
+def _run(body, claims, profile):
+    return factual_qa_v2.run_factual_qa_v2(
+        {"title": "t", "body": body, "meta_title": "t", "meta_description": "d"},
+        {"claims": claims}, profile)
+
+
+def _codes(verdict):
+    return [f["code"] for f in verdict["findings"]]
+
+
+def _findings(verdict, code):
+    return [f for f in verdict["findings"] if f["code"] == code]
+
+
+# ─── 1. Une borne n'est pas la fourchette ───────────────────────────────────
+
+class TestRangeEndpoints:
+    def test_a_range_yields_no_standalone_figure(self):
+        standalone, ranges = claim_figures(CLAIM_ROI_5_TO_7_SPECIALIST["claim"])
+        assert ("5", "7") in ranges
+        assert "5" not in standalone and "7" not in standalone
+
+    def test_a_percentage_range_is_a_range(self):
+        assert ("73", "84") in risky_ranges("comprise entre 7,3% et 8,4%")
+
+    def test_one_end_alone_is_not_covered(self):
+        assert not covers(CLAIM_ROI_5_TO_7_SPECIALIST, {"5"})
+        assert endpoint_only(CLAIM_ROI_5_TO_7_SPECIALIST, "5")
+
+    def test_the_same_range_stated_in_full_is_covered(self):
+        assert covers(CLAIM_ROI_5_TO_7_SPECIALIST, {"5", "7"}, {("5", "7")})
+        assert covers(CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, {"73", "84"},
+                      risky_ranges("comprise entre 7,3% et 8,4%"))
+
+    def test_a_standalone_figure_still_covers(self):
+        assert covers(CLAIM_FAMILY_5000, {"4", "5000"})
+        assert not endpoint_only(CLAIM_FAMILY_5000, "4")
+
+    def test_the_regenerated_sentence_fails_on_its_collapsed_range(
+            self, solar_profile):
+        verdict = _run(REGENERATED_SENTENCE, PUBLISHED_CLAIMS, solar_profile)
+        hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
+        assert hits and "one end of a range" in hits[0]["message"]
+        assert verdict["status"] == "FAILED"
+
+    def test_the_high_end_alone_fails_too(self, solar_profile):
+        verdict = _run("En Wallonie, la rentabilité atteint 8,4%.",
+                       [CLAIM_YIELD_7_3_TO_8_4_OFFICIAL], solar_profile)
+        assert "NUMBER_WITHOUT_SOURCE" in _codes(verdict)
+
+    def test_the_revised_article_states_its_ranges_in_full_and_passes(
+            self, solar_profile):
+        verdict = _run(REVISED_BODY, PUBLISHED_CLAIMS, solar_profile)
+        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict), verdict["findings"]
+        assert verdict["status"] == "PASSED", verdict["findings"]
+
+
+# ─── 2. Pas d'ambiguïté sans deux lectures ──────────────────────────────────
+
+class TestUnreadIsNotAmbiguous:
+    # Ce que le brouillon a rencontré : des affirmations contestées auxquelles
+    # la phrase ressemble faiblement, et aucune lecture étayée portant « 5 ».
+    CONTESTED = [
+        {**CLAIM_ROI_UNDER_7,
+         "claim": "Retour sur investissement des panneaux solaires en Belgique "
+                  "en 2026 : guide complet de la rentabilité d'une installation."},
+        {**CLAIM_ROI_UNDER_7,
+         "claim": "Le rendement des panneaux solaires est la clé d'une "
+                  "rentabilité réelle sur le long terme de l'installation."},
+    ]
+
+    def test_arbitration_says_unread_when_nothing_covers_the_figures(self):
+        supported = [CLAIM_PROSUMER_MECHANISM, CLAIM_ROI_5_TO_7_SPECIALIST]
+        for claim in self.CONTESTED:
+            verdict, rival = _arbitrate(REGENERATED_SENTENCE, claim, supported)
+            assert verdict != "AMBIGUOUS", (claim["claim"], verdict)
+            assert verdict in (_UNREAD, "ASSERTED")
+            if verdict == _UNREAD:
+                assert rival is None
+
+    def test_no_ambiguous_match_and_a_rewritable_finding_instead(
+            self, solar_profile):
+        claims = self.CONTESTED + [CLAIM_PROSUMER_MECHANISM,
+                                   CLAIM_ROI_5_TO_7_SPECIALIST]
+        verdict = _run(REGENERATED_SENTENCE, claims, solar_profile)
+        assert "AMBIGUOUS_MATCH" not in _codes(verdict), verdict["findings"]
+        assert "NUMBER_WITHOUT_SOURCE" in _codes(verdict)
+        decision = draft_retry.decide(verdict["blocking_issues"], attempt=1)
+        assert decision.retry is True, decision
+
+    def test_two_real_readings_are_still_ambiguous(self):
+        """La mutation : deux lectures qui couvrent toutes deux les chiffres,
+        à égalité, restent une ambiguïté — la garde d'août n'est pas retirée."""
+        sentence = "Une installation de 5000 euros se rentabilise en 12 ans."
+        contested = {"claim": "Une installation de 5000 euros se rentabilise en "
+                              "12 ans selon les sources.",
+                     "evidence_status": "UNSUPPORTED", "claim_risk": "HIGH",
+                     "category": "ROI", "region": "BE"}
+        supported = [{"claim": "Une installation de 5000 euros se rentabilise "
+                               "en 12 ans d'après les sources.",
+                      "evidence_status": "SUPPORTED", "claim_risk": "LOW",
+                      "category": "GENERAL", "region": "BE",
+                      "has_dated_support": True}]
+        verdict, rival = _arbitrate(sentence, contested, supported)
+        assert verdict == "AMBIGUOUS" and rival is not None
+
+
+# ─── 3. Le relecteur assisté voit ce qui est sourcé ─────────────────────────
+
+class _CapturingLLM:
+    configured = True
+
+    def __init__(self):
+        self.requests = []
+
+    async def generate(self, request):
+        self.requests.append(request)
+        return LLMResponse(content=json.dumps({"findings": []}),
+                           provider="stub", model="stub",
+                           usage=LLMUsage(input_tokens=1, output_tokens=1,
+                                          total_tokens=2), latency_ms=1)
+
+
+@pytest.mark.asyncio
+class TestReviewerSeesSourcedFacts:
+    async def test_the_prompt_carries_the_supported_claims(self):
+        llm = _CapturingLLM()
+        await qa_service.run_llm_qa(
+            {"title": "t", "body": REVISED_BODY, "meta_description": "d"},
+            {"primary_query": "q", "search_intent": "INFORMATIONAL",
+             "content_type": "GUIDE", "target_audience": "a",
+             "cta_strategy": {}},
+            llm=llm, correlation_id="t",
+            sourced_claims=[CLAIM_YIELD_7_3_TO_8_4_OFFICIAL["claim"]])
+        request = llm.requests[0]
+        prompt = json.loads(request.prompt)
+        assert prompt["sourced_facts"] == [CLAIM_YIELD_7_3_TO_8_4_OFFICIAL["claim"]]
+        assert "sourced_facts" in request.system
+        assert "never be reported as unsupported" in request.system
+
+    async def test_without_the_list_the_prompt_says_so(self):
+        llm = _CapturingLLM()
+        await qa_service.run_llm_qa(
+            {"title": "t", "body": "x", "meta_description": "d"},
+            {"primary_query": "q", "search_intent": "INFORMATIONAL",
+             "content_type": "GUIDE", "target_audience": "a",
+             "cta_strategy": {}},
+            llm=llm, correlation_id="t")
+        assert json.loads(llm.requests[0].prompt)["sourced_facts"] == []
+
+
+# ─── 4. Relancer le rédacteur sur un paquet existant ────────────────────────
+
+@pytest_asyncio.fixture
+async def sealed_brief(session):
+    vertical = Vertical(code="SOLAR_BE", name="Solar Belgium", market="BE",
+                        default_language="fr", active=True)
+    session.add(vertical)
+    await session.flush()
+    keyword = SeedKeyword(vertical_id=vertical.id,
+                          query="rentabilité panneaux solaires Belgique",
+                          normalized_query="rentabilite panneaux solaires belgique",
+                          market="BE", language="fr")
+    session.add(keyword)
+    await session.flush()
+    run = ResearchRun(keyword_id=keyword.id, provider="tavily",
+                      status="SUCCEEDED", idempotency_key=str(uuid.uuid4()),
+                      correlation_id="test")
+    session.add(run)
+    await session.flush()
+    package = ResearchPackage(
+        keyword_id=keyword.id, research_run_id=run.id, version=1,
+        package_version=4, query=keyword.query, market="BE", language="fr",
+        intent="INFORMATIONAL", summary="sealed", facts=list(PUBLISHED_CLAIMS),
+        authoritative_research={"resolution": []})
+    session.add(package)
+    await session.flush()
+    brief = ContentBrief(
+        research_package_id=package.id, content_type=ContentType.GUIDE.value,
+        primary_query=keyword.query,
+        search_intent=SearchIntent.INFORMATIONAL.value,
+        target_audience="propriétaires", objective="leads",
+        recommended_title="Rentabilité des panneaux solaires en Belgique",
+        recommended_slug="rentabilite-panneaux-solaires-belgique",
+        outline=[], key_questions=[], required_facts=[], required_sources=[],
+        cautionary_claims=[], cta_strategy={"code": "quote_request"},
+        missing_information=[], core_question=keyword.query,
+        core_answer_status="NOT_APPLICABLE", core_answer_evidence={},
+        must_answer_directly=False)
+    session.add(brief)
+    await session.flush()
+    first = ContentDraft(content_brief_id=brief.id, provider="openai",
+                         model="m", title="v1", body=REVISED_BODY,
+                         meta_title="v1", meta_description="d")
+    session.add(first)
+    await session.flush()
+    return brief, package, keyword, vertical
+
+
+@pytest.mark.asyncio
+class TestRegenerate:
+    async def test_a_second_draft_is_written_beside_the_first(
+            self, session, sealed_brief, solar_profile):
+        from sqlalchemy import select
+
+        from app.cli import _brief_payload, _package_payload
+        from tests.test_pipeline_v2 import StubLLM
+
+        brief, package, keyword, vertical = sealed_brief
+        llm = StubLLM(body=REVISED_BODY)
+        outcome = await write_and_judge(
+            session, brief=brief, brief_payload=_brief_payload(brief),
+            package_payload=_package_payload(package), profile=solar_profile,
+            llm=llm, usage=UsageRecorder(), correlation_id="regen-test",
+            keyword_id=keyword.id, vertical_code=vertical.code)
+
+        assert outcome.draft is not None
+        drafts = (await session.execute(select(ContentDraft).where(
+            ContentDraft.content_brief_id == brief.id))).scalars().all()
+        assert len(drafts) == 2
+        reviews = (await session.execute(select(QAReview).where(
+            QAReview.content_draft_id == outcome.draft.id))).scalars().all()
+        assert {r.qa_type for r in reviews} == {"DETERMINISTIC", "LLM_ASSISTED"}
+        assert len(reviews) == 3
+        approval = (await session.execute(select(Approval).where(
+            Approval.content_draft_id == outcome.draft.id))).scalar_one()
+        assert approval.state == ApprovalState.PENDING.value
+        assert approval.render_fingerprint is None
+        # The reviewer was handed the sourced facts of this package.
+        seo_qa_calls = [r for r in llm.requests
+                        if r.capability.value == "SEO_QA"] \
+            if hasattr(llm, "requests") else []
+        assert "SEO_QA" in llm.calls
+        assert outcome.as_dict()["content_draft_id"] == str(outcome.draft.id)
+        assert isinstance(outcome.qa_passed, bool)
+        del seo_qa_calls
+
+    async def test_the_research_resolution_is_untouched(self, session,
+                                                        sealed_brief,
+                                                        solar_profile):
+        from app.cli import _brief_payload, _package_payload
+        from tests.test_pipeline_v2 import StubLLM
+
+        brief, package, keyword, vertical = sealed_brief
+        before = dict(package.authoritative_research)
+        await write_and_judge(
+            session, brief=brief, brief_payload=_brief_payload(brief),
+            package_payload=_package_payload(package), profile=solar_profile,
+            llm=StubLLM(body=REVISED_BODY), usage=UsageRecorder(),
+            correlation_id="regen-test-2", keyword_id=keyword.id,
+            vertical_code=vertical.code)
+        assert package.authoritative_research == before
+
+
+# ─── 5. Ne relancer que ce qui est dû ───────────────────────────────────────
+
+class TestPendingPlan:
+    def _plan(self):
+        return ResearchPlan(queries=[
+            AuthoritativeQuery(query="a", category=ClaimCategory.ROI,
+                               domains=[], reason="r"),
+            AuthoritativeQuery(query="b", category=ClaimCategory.REGULATION,
+                               domains=[], reason="r"),
+        ])
+
+    def test_executed_and_abandoned_queries_are_not_relaunched(self):
+        record = {"resolution": [
+            {"query": "a", "status": "EXECUTED"},
+        ]}
+        pending = pending_plan(self._plan(), record)
+        assert [q.query for q in pending.queries] == ["b"]
+
+    def test_nothing_pending_is_an_empty_plan_with_a_reason(self):
+        record = {"resolution": [{"query": "a", "status": "EXECUTED"},
+                                 {"query": "b", "status": "ABANDONED",
+                                  "reason": "hors périmètre"}]}
+        pending = pending_plan(self._plan(), record)
+        assert pending.is_empty and pending.skipped_reason
+
+    def test_an_unrecorded_package_owes_everything(self):
+        assert len(pending_plan(self._plan(), None).queries) == 2
