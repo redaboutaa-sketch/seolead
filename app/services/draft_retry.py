@@ -113,8 +113,8 @@ def decide(blocking: list[dict] | None, *, attempt: int,
 FIXES: dict[str, str] = {
     "REGIONAL_SCOPE_NOT_STATED": (
         "Rewrite the sentence quoted in `in_your_text` so that the region's "
-        "name appears INSIDE that same sentence (for example « en Wallonie »), "
-        "not in the sentence before it and not as « y »."),
+        "name (for example « en Wallonie ») appears in that sentence, or open "
+        "its paragraph with the region; « y » alone does not name a region."),
     "REQUIRED_FACTS_UNDERUSED": (
         "Add sentences that state the unused facts listed in `in_your_text`, "
         "each with its region; do not rewrite the facts you already used."),

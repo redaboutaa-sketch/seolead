@@ -345,50 +345,60 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
 
     The « méthode » block promises « chaque montant affiché provient d'une
     source publiée ». Until 2026-09-03 the page showed no source at all, so
-    the promise was unverifiable by the reader. This lists, for every figure
-    the body states (unit, range end, year), the SUPPORTED claims carrying it
-    and the evidence behind them — name, tier, region, date, and the figures
-    it carries. No URL: an official authority is named by its host as text;
-    a commercial or specialist source is described, not advertised (Phase
-    3.3 shipped a competitor link the one time a page carried references).
+    the promise was unverifiable by the reader. This lists, sentence by
+    sentence, the SUPPORTED claims carrying a sentence's figures (same unit,
+    full range) and the evidence behind them — name, tier, region, date, and
+    the figures carried. No URL: an official authority is named by its host
+    as text; a commercial or specialist source is described, not advertised
+    (Phase 3.3 shipped a competitor link the one time a page carried
+    references).
+
+    Attribution is by sentence, and a claim covering only part of a
+    sentence's figures is not listed when another covers those and more:
+    the seventh regenerated draft listed a Flemish page under a Walloon
+    rule because both carried « 2023 ».
     """
-    needed = factual_qa_v2.body_segments(body)
-    ranges = factual_qa_v2.body_ranges(body)
-    units = factual_qa_v2.body_units(body)
-    if not needed:
-        return []
     supported = [c for c in claims
                  if c.get("evidence_status") == EvidenceStatus.SUPPORTED.value]
+    if not supported:
+        return []
     found: dict[str, dict] = {}
-    for claim in supported:
-        text = str(claim.get("claim", ""))
-        labels = factual_qa_v2.quantity_labels(text)
-        # The same coverage rule as the gate: one end of a range does not
-        # source a figure, so it is not listed as its source either.
-        figures = {s for s in needed
-                   if s in labels
-                   and factual_qa_v2.covers(claim, {s}, ranges, units)}
-        if not figures:
+    for sentence in factual_qa_v2._all_sentences(body):
+        segments = factual_qa_v2.risky_segments(sentence)
+        if not segments:
             continue
-        for evidence in claim.get("evidence") or []:
-            if not evidence.get("supports"):
-                continue
-            url = str(evidence.get("url") or "")
-            key = url or f"{evidence.get('source_ref')}"
-            if not key:
-                continue
-            tier = str(evidence.get("source_quality") or "UNKNOWN").upper()
-            entry = found.setdefault(key, {
-                "name": _host_of(url) if tier == "OFFICIAL" else None,
-                "tier": tier,
-                "authority_type": evidence.get("authority_type"),
-                "region": evidence.get("region") or claim.get("region"),
-                "date": _source_date(evidence),
-                "freshness": evidence.get("freshness_status"),
-                "_figures": {},
-            })
-            for figure in figures:
-                entry["_figures"].setdefault(figure, labels[figure])
+        ranges = factual_qa_v2.risky_ranges(sentence)
+        units = factual_qa_v2.risky_units(sentence)
+        coverage: list[tuple[dict, set[str]]] = []
+        for claim in supported:
+            covered = {s for s in segments
+                       if factual_qa_v2.covers(claim, {s}, ranges, units)}
+            if covered:
+                coverage.append((claim, covered))
+        for claim, covered in coverage:
+            if any(covered < other for _, other in coverage):
+                continue   # dominated: another claim carries these and more
+            labels = factual_qa_v2.quantity_labels(str(claim.get("claim", "")))
+            for evidence in claim.get("evidence") or []:
+                if not evidence.get("supports"):
+                    continue
+                url = str(evidence.get("url") or "")
+                key = url or f"{evidence.get('source_ref')}"
+                if not key:
+                    continue
+                tier = str(evidence.get("source_quality") or "UNKNOWN").upper()
+                entry = found.setdefault(key, {
+                    "name": _host_of(url) if tier == "OFFICIAL" else None,
+                    "tier": tier,
+                    "authority_type": evidence.get("authority_type"),
+                    "region": evidence.get("region") or claim.get("region"),
+                    "date": _source_date(evidence),
+                    "freshness": evidence.get("freshness_status"),
+                    "_figures": {},
+                })
+                for figure in covered:
+                    if figure in labels:
+                        entry["_figures"].setdefault(figure, labels[figure])
     out = []
     for entry in found.values():
         figures = entry.pop("_figures")
@@ -412,7 +422,11 @@ def _source_date(evidence: dict) -> str | None:
     for key in ("effective_from", "published_at"):
         value = evidence.get(key)
         if value:
-            return str(value)[:10]
+            text = str(value).strip()
+            # An ISO timestamp keeps its day; a date written in words
+            # (« 1 januari 2024 ») is kept whole — cut at ten characters it
+            # lost its year on the seventh regenerated draft.
+            return text[:10] if re.match(r"\d{4}-\d{2}-\d{2}", text) else text[:40]
     return None
 
 
