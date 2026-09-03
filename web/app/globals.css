@@ -1116,3 +1116,23 @@ main { display: block; }
   }
   .button:hover, .page-link:hover { transform: none; }
 }
+
+/* ── Sources des chiffres (2026-09-03) ───────────────────────────────────── */
+.sources__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+.sources__item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+.sources__item:last-child {
+  border-bottom: none;
+}
+.sources__name {
+  font-weight: 600;
+}
+.sources__figures {
+  color: var(--muted, #4b5563);
+}

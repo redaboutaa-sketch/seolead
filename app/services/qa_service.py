@@ -347,19 +347,51 @@ def _verdict(findings: list[dict]) -> dict:
 
 
 _QA_SYSTEM = (
-    "You review a draft web page against its brief. You are an advisor, not a "
-    "gate: report concerns, do not approve. Judge only: search-intent alignment, "
-    "usefulness to the reader, repetition, keyword stuffing, unsupported claims, "
-    "and whether the call to action fits. Reply with JSON only: "
+    "You review a draft web page against its brief. Report concerns, do not "
+    "approve. Judge only: search-intent alignment, usefulness to the reader, "
+    "repetition, keyword stuffing, unsupported claims, and whether the call to "
+    "action fits. For every finding name the category of claim it concerns: "
+    "SUBSIDY (premiums, grants, public support), ROI (payback, profitability, "
+    "return on investment, yield), GRID_RULE (metering, injection, prosumer or "
+    "network tariffs), or OTHER. Reply with JSON only: "
     "{\"findings\": [{\"code\": str, \"message\": str, \"severity\": "
-    "\"low\"|\"medium\"|\"high\"}]}"
+    "\"low\"|\"medium\"|\"high\", \"category\": "
+    "\"SUBSIDY\"|\"ROI\"|\"GRID_RULE\"|\"OTHER\"}]}"
 )
+
+# ── Which model-assisted findings block (2026-09-03) ─────────────────────────
+# The advisory reviewer read draft 8a1f6e46 and wrote, at severity high: « the
+# claim that installations in Wallonia remain profitable without public support
+# needs more data or references to support it, as it may mislead readers ». It
+# was right, it said so before publication, and it stopped nothing — advisory
+# by construction. On the three categories where a wrong sentence is a legal
+# fact rather than a quality problem, a high-severity finding now blocks.
+#
+# Rows written before the reviewer named categories are classified from their
+# message: the finding above carries no category and must still block.
+LLM_BLOCKING_CATEGORIES = frozenset({"SUBSIDY", "ROI", "GRID_RULE"})
+_LLM_CATEGORY_HINT = re.compile(
+    r"subsid|prime|premium|public support|soutien public|aide financi|"
+    r"rentab|profitab|payback|retour sur invest|return on invest|"
+    r"prosumer|tarif|injection|compteur|grid|réseau|reseau|net.?metering",
+    re.IGNORECASE)
+
+
+def llm_finding_blocks(finding: dict) -> bool:
+    """Whether one model-assisted finding stops publication."""
+    if str(finding.get("severity", "")).lower() != "high":
+        return False
+    category = str(finding.get("category") or "").upper()
+    if category:
+        return category in LLM_BLOCKING_CATEGORIES
+    return bool(_LLM_CATEGORY_HINT.search(str(finding.get("message", ""))))
 
 
 async def run_llm_qa(
     draft: dict, brief: dict, *, llm: LLMProvider, correlation_id: str,
 ) -> dict:
-    """Advisory only. Its findings are never blocking, by construction."""
+    """Model-assisted review. High-severity findings on SUBSIDY, ROI and
+    GRID_RULE block; everything else is advisory."""
     if not llm.configured:
         return {"status": QAStatus.SKIPPED.value, "score": None,
                 "findings": [], "blocking_issues": []}
@@ -390,16 +422,21 @@ async def run_llm_qa(
                 "findings": [], "blocking_issues": []}
 
     findings = [
-        {"code": str(f.get("code", "LLM_FINDING"))[:64],
+        {"category": str(f.get("category") or "OTHER")[:16].upper(),
+         "code": str(f.get("code", "LLM_FINDING"))[:64],
          "message": str(f.get("message", ""))[:500],
          "severity": str(f.get("severity", "low"))[:16],
          # Always false. An LLM does not get to block, and does not get to pass.
-         "blocking": False}
+         "blocking": False}   # decided below
         for f in raw_findings if isinstance(f, dict)
     ][:25]
 
-    return {"status": QAStatus.PASSED.value, "score": None,
-            "findings": findings, "blocking_issues": []}
+    for finding in findings:
+        finding["blocking"] = llm_finding_blocks(finding)
+    blocking = [f for f in findings if f["blocking"]]
+    return {"status": (QAStatus.FAILED.value if blocking
+                       else QAStatus.PASSED.value),
+            "score": None, "findings": findings, "blocking_issues": blocking}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

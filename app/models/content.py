@@ -187,6 +187,12 @@ class Approval(Base):
     decided_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The render this approval approved, by SHA-256 of the rendered content
+    # (2026-09-03). An approval is a statement about a specific page, never
+    # about an intention: the gate compares this against the draft's current
+    # render and refuses on any difference — and on its absence.
+    render_fingerprint: Mapped[str | None] = mapped_column(String(64),
+                                                           nullable=True)
     created_at = created_column()
 
     draft: Mapped[ContentDraft] = relationship(back_populates="approval")

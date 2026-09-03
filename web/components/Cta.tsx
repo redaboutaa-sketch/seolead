@@ -11,26 +11,43 @@ import type { SiteConfigDTO } from "@/lib/types";
  * the honest reason to act is that the visitor wants one. Manufactured urgency on
  * a page whose whole credibility rests on sourced evidence would undo the evidence.
  */
+/**
+ * The sentence the block opens with depends on what the page actually showed.
+ *
+ * « Les fourchettes ci-dessus viennent de sources publiées » was hardcoded,
+ * and rendered under the payback article — a page with no price block and no
+ * fourchette at all. A template sentence that describes data the page does
+ * not have is a false statement with a layout. It is now conditional on the
+ * price evidence being there; without it, the block says only what is true
+ * of every page.
+ */
+export function ctaBody(hasPriceEvidence: boolean): string {
+  const tail =
+    "Le prix de votre installation dépend de votre toiture, de votre consommation et du matériel retenu — quelques questions suffisent pour cadrer le projet.";
+  return hasPriceEvidence
+    ? `Les fourchettes ci-dessus viennent de sources publiées. ${tail}`
+    : tail;
+}
+
 export function CtaBlock({
   config,
   locale,
   heading = "Obtenir une estimation pour votre toiture",
   body,
+  hasPriceEvidence = false,
 }: {
   config: SiteConfigDTO | null;
   locale: string;
   heading?: string;
   body?: string;
+  hasPriceEvidence?: boolean;
 }) {
   const formPath = "/demande-etude";
   const toolPath = "/outils/estimation-solaire";
   return (
     <section className="cta-block" aria-labelledby="cta-heading">
       <h2 id="cta-heading">{heading}</h2>
-      <p>
-        {body ??
-          "Les fourchettes ci-dessus viennent de sources publiées. Le prix de votre installation dépend de votre toiture, de votre consommation et du matériel retenu — quelques questions suffisent pour cadrer le projet."}
-      </p>
+      <p>{body ?? ctaBody(hasPriceEvidence)}</p>
       <div className="cta-actions">
         {isKnownRoute(config, formPath) ? (
           <Link
@@ -60,8 +77,15 @@ export function CtaBlock({
  * Same three properties as the homepage's assurance strip, at the length a
  * content page can carry — and for the same reason: this is the only trust
  * material the project actually holds.
+ *
+ * Rendered only when the page shows the sources the promise refers to
+ * (`hasSources`). « Chaque montant affiché provient d'une source publiée »
+ * stood under an article whose central figure came from no source; the
+ * promise is a claim about the page, and a page that cannot show its sources
+ * may not make it.
  */
-export function TrustSection() {
+export function TrustSection({ hasSources = false }: { hasSources?: boolean }) {
+  if (!hasSources) return null;
   return (
     <section className="section" aria-labelledby="methode">
       <h2 id="methode">Comment ces informations sont établies</h2>

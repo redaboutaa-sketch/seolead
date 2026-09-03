@@ -148,3 +148,118 @@ def plan_authoritative_research(
         plan.skipped_reason = (
             "unresolved categories have no configured query template")
     return plan
+
+
+# The categories that answer a price question. A price gap widens what the
+# planner looks for; the tuple lives here so the gate and the pipeline agree.
+PRICE_ANSWER_CATEGORIES = ("OBSERVED_PRICE_RANGE", "MARKET_AVERAGE",
+                           "MARKET_PRICE", "VENDOR_PRICE")
+
+
+def as_evaluated(claims: list[dict], profile: VerticalProfile, *,
+                 price_gap: bool = False) -> list:
+    """Rehydrate the package claims the planner should find better sources for.
+
+    The planner reasons over `EvaluatedClaim` and the package carries dicts. It
+    lives beside the planner (2026-09-03) because the publication gate now asks
+    the same question the pipeline asks — « what did this package leave
+    unresolved? » — and two copies of the answer would drift.
+    """
+    from app.core.enums import EvidenceStatus
+    from app.services.claim_extraction import AtomicClaim
+    from app.services.claim_policy import requirements_for
+    from app.services.evidence_model import EvaluatedClaim
+
+    out = []
+    for claim in claims or []:
+        wanted = (claim.get("claim_risk") == "HIGH"
+                  or (price_gap
+                      and claim.get("category") in PRICE_ANSWER_CATEGORIES))
+        if not wanted:
+            continue
+        if claim.get("evidence_status") == EvidenceStatus.SUPPORTED.value:
+            continue
+        atomic = AtomicClaim(text=claim["claim"], passage=claim.get("passage", ""),
+                             source_ref=claim.get("source_ref", ""), offset=0)
+        evaluated = EvaluatedClaim(claim=atomic,
+                                   requirements=requirements_for(claim["claim"],
+                                                                 profile))
+        evaluated.status = EvidenceStatus(claim["evidence_status"])
+        out.append(evaluated)
+    return out
+
+
+# ── Resolution of a plan (2026-09-03) ───────────────────────────────────────
+RESOLUTION_EXECUTED = "EXECUTED"
+RESOLUTION_ABANDONED = "ABANDONED"
+
+
+def record_resolution(package, plan: ResearchPlan, run: dict, *,
+                      by: str) -> dict:
+    """Append, for every query the run executed, an EXECUTED entry carrying
+    what came back — accepted sources by name, tier, region and date, no
+    URL — to `package.authoritative_research`. Returns the record."""
+    from datetime import datetime, timezone
+
+    record = dict(package.authoritative_research or {})
+    resolution = list(record.get("resolution") or [])
+    executed = {str(q.get("query")): q for q in run.get("queries_executed") or []}
+    accepted_by_query: dict[str, list[dict]] = {}
+    for source in run.get("accepted") or []:
+        accepted_by_query.setdefault(str(source.get("query")), []).append({
+            "name": source.get("name") or source.get("domain"),
+            "tier": "OFFICIAL", "authority_type": source.get("authority_type"),
+            "region": source.get("region"),
+            "date": (str(source.get("effective_from")
+                         or source.get("published_at") or "")[:10] or None),
+            "freshness": source.get("status") or source.get("freshness_status"),
+        })
+    now = datetime.now(timezone.utc).isoformat()
+    for planned in plan.queries:
+        if planned.query not in executed:
+            continue
+        summary = executed[planned.query]
+        resolution.append({
+            "query": planned.query, "category": planned.category.value,
+            "status": RESOLUTION_EXECUTED, "at": now, "by": by,
+            "returned": summary.get("returned", 0),
+            "accepted": summary.get("accepted", 0),
+            "error": summary.get("error"),
+            "sources": accepted_by_query.get(planned.query, []),
+        })
+    record["resolution"] = resolution
+    record["plan"] = plan.as_dict()
+    package.authoritative_research = record
+    return record
+
+
+def abandon_query(package, query: str, *, reason: str, by: str) -> dict:
+    """Record that a proposed query will not be launched. The reason is
+    mandatory and stored verbatim."""
+    from datetime import datetime, timezone
+
+    if not reason.strip():
+        raise ValueError("an abandoned search needs a written reason")
+    record = dict(package.authoritative_research or {})
+    resolution = list(record.get("resolution") or [])
+    resolution.append({
+        "query": query, "status": RESOLUTION_ABANDONED,
+        "reason": reason.strip(), "by": by,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    record["resolution"] = resolution
+    package.authoritative_research = record
+    return record
+
+
+def unresolved_queries(plan: ResearchPlan, record: dict | None) -> list[dict]:
+    """Planned queries that were neither executed nor abandoned with a reason.
+
+    A query counts as resolved by its text: launched once is launched, even if
+    the planner proposes it again because the gap it targeted survived.
+    """
+    resolved = {str(r.get("query")) for r in (record or {}).get("resolution", [])
+                if r.get("status") in (RESOLUTION_EXECUTED, RESOLUTION_ABANDONED)
+                and (r.get("status") != RESOLUTION_ABANDONED
+                     or str(r.get("reason") or "").strip())}
+    return [q.as_dict() for q in plan.queries if q.query not in resolved]

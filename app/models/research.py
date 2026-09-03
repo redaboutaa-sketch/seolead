@@ -216,6 +216,12 @@ class ResearchPackage(Base):
     keyword_metrics: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     source_quality_summary: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     claim_risk_summary: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    # What the planner proposed and what became of it (2026-09-03):
+    #   {"plan": {...}, "resolution": [{"query", "category", "status":
+    #    EXECUTED|ABANDONED, "reason", "at", "sources_accepted"}]}
+    # The gate refuses publication while a proposed query has no resolution.
+    authoritative_research: Mapped[dict | None] = mapped_column(JSONType,
+                                                                nullable=True)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     market: Mapped[str] = mapped_column(String(8), nullable=False)
     language: Mapped[str] = mapped_column(String(8), nullable=False)

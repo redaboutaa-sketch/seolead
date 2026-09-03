@@ -24,13 +24,43 @@ Check specifically:
 - no outbound link,
 - the CTA matches what the page can honestly offer.
 
-## 3. Approve — a human act
+## 3. Approve — a human act, on a render named by its fingerprint
 
 ```bash
-seolead content approve <draft-id> --by "your name" --note "reviewed"
+seolead content fingerprint <draft-id>
+seolead content approve <draft-id> --by "your name" --note "reviewed" \
+    --fingerprint <sha256 from the line above>
 ```
 
 QA passing is not approval, and nothing in this system will approve on its own.
+
+**Plus d'approbation anticipée.** L'approbation porte sur un rendu identifié
+par son empreinte, jamais sur une intention. L'empreinte est le SHA-256 de ce
+que le visiteur lirait (titre, métas, sections, réponses prix, sources
+rendues) ; la prévisualisation l'affiche (`fingerprint`), `content fingerprint`
+la recalcule, et `content approve` refuse une empreinte qui n'est pas celle du
+rendu tel qu'il est au moment de l'approbation. Toute modification ultérieure
+du rendu (nouveau brouillon, re-jugement, nouvelles sources) change l'empreinte
+et rend l'approbation caduque : la porte le dit, et il faut relire puis
+ré-approuver. Une approbation donnée sur une version antérieure ne vaut rien
+pour la suivante.
+
+L'article `8a1f6e46` a été approuvé « rev 2 APPROVED » et publié le
+2026-08-31 avec un « rentabilisée au bout de 5 ans » qu'aucune source ne
+portait. C'est le cas d'épreuve de cette règle.
+
+### Ce que la porte exige depuis le 2026-09-03
+
+En plus des quatre conditions historiques (QA factuelle, QA SEO, approbation,
+aucun lien sortant) :
+
+- `advisory_qa` — aucune constatation de sévérité *high* du relecteur assisté
+  sur SUBSIDY, ROI ou GRID_RULE ;
+- `research_resolved` — chaque recherche autoritaire proposée par le
+  planificateur a été lancée (`research authoritative-run --package <id>`)
+  ou abandonnée avec une raison écrite
+  (`research abandon-search --package <id> --query "…" --reason "…" --by …`) ;
+- `approved_render` — l'approbation nomme l'empreinte du rendu courant.
 
 ## 4. Stage
 

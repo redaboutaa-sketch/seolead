@@ -32,7 +32,8 @@ from app.models import (CapturedLead, ContentBrief, ContentDraft,
 from app.site.config import InvalidSite, SiteConfig, load_site
 from app.site.lead_capture import (LeadRejected, LeadSubmission, capture_lead)
 from app.site.lead_notification import notify_lead
-from app.site.publication import draft_preview_dto, evaluate_gate, to_dto
+from app.site.publication import (compute_fingerprint, draft_preview_dto,
+                                  evaluate_gate, to_dto)
 from app.site.spam_protection import SubmissionSignals
 
 logger = logging.getLogger(__name__)
@@ -285,7 +286,8 @@ async def preview_draft(site_id: str, draft_id: uuid.UUID, request: Request,
                             detail={"code": "DRAFT_HAS_NO_BRIEF"})
 
     gate = await evaluate_gate(session, draft)
-    return draft_preview_dto(draft, brief, config, gate)
+    _, sources = await compute_fingerprint(session, draft)
+    return draft_preview_dto(draft, brief, config, gate, sources)
 
 
 @router.post("/sites/{site_id}/leads", status_code=status.HTTP_201_CREATED)

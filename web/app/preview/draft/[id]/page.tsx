@@ -28,6 +28,7 @@ export default async function DraftPreviewPage({
   if (!content) notFound();
 
   const gate = (content as unknown as { gate?: { reasons?: string[] } }).gate;
+  const fingerprint = content.fingerprint;
 
   return (
     <>
@@ -36,6 +37,15 @@ export default async function DraftPreviewPage({
           <strong>Relecture</strong> — brouillon non approuvé, non publiable en
           l&apos;état.
           {gate?.reasons?.length ? ` Blocage : ${gate.reasons.join(" ; ")}.` : ""}
+          {/* The render being read, named. `content approve --fingerprint`
+              takes exactly this value; any later change to the render
+              changes it, and the approval with it. */}
+          {fingerprint ? (
+            <>
+              {" "}
+              Empreinte du rendu&nbsp;: <code>{fingerprint}</code>
+            </>
+          ) : null}
         </div>
       </div>
       <ContentView
