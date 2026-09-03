@@ -818,6 +818,14 @@ def run_factual_qa_v2(draft: dict, package: dict,
         segments = risky_segments(sentence)
         ranges = risky_ranges(sentence)
         units = risky_units(sentence)
+        # A payback statement states a payback figure — a duration or a
+        # rate. « Un ménage de 4 personnes consomme 5000 kWh par an, ce qui
+        # compte dans l'évaluation de la rentabilité » (seventh draft) is a
+        # consumption fact that pronounces the word; its figures are not
+        # what the freshness rule is about.
+        if segments and not any(
+                classes & {"duration", "percent"} for classes in units.values()):
+            continue
         # The claims that could carry this statement: those stating its
         # figures — or, for a figure-less one, those it lexically matches.
         candidates = ([c for c in supported

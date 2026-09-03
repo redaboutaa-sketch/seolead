@@ -239,8 +239,10 @@ def run_deterministic_qa(
     required = usable_required_facts(brief.get("required_facts") or [],
                                      (package or {}).get("language"))
     if required:
+        figures = _body_figures(draft.get("body") or "")
         used = sum(1 for f in required
-                   if _fact_echoed(str(f.get("fact", "")), normalized_body))
+                   if _fact_echoed(str(f.get("fact", "")), normalized_body,
+                                   figures))
         # ── The substance floor ─────────────────────────────────────────
         # This check already existed and had no teeth: its bar was a third of
         # whatever happened to be supplied, and missing it was advisory. That is
@@ -271,7 +273,8 @@ def run_deterministic_qa(
             # same count (2026-09-03): told « use more of the supplied facts »
             # and not which, it rewrote the ones it had. The unused facts
             # travel with the finding, and the count still owed is stated.
-            unused = unused_required_facts(required, normalized_body)
+            unused = unused_required_facts(required, normalized_body,
+                                           draft.get("body") or "")
             findings.append(_finding(
                 "REQUIRED_FACTS_UNDERUSED",
                 f"The body uses {used} supported fact(s) of {len(required)} "
@@ -334,23 +337,45 @@ def run_deterministic_qa(
     return _verdict(findings)
 
 
-def unused_required_facts(required: list[dict], normalized_body: str) -> list[dict]:
+def unused_required_facts(required: list[dict], normalized_body: str,
+                          body: str = "") -> list[dict]:
     """The supplied facts the body does not echo, in the brief's order."""
+    figures = _body_figures(body)
     return [f for f in required
-            if not _fact_echoed(str(f.get("fact", "")), normalized_body)]
+            if not _fact_echoed(str(f.get("fact", "")), normalized_body, figures)]
 
 
-def _fact_echoed(fact: str, normalized_body: str) -> bool:
+def _body_figures(body: str) -> tuple[set[str], dict[str, set[str]]]:
+    return (factual_qa_v2.body_segments(body or ""),
+            factual_qa_v2.body_units(body or ""))
+
+
+def _fact_echoed(fact: str, normalized_body: str,
+                 figures: tuple[set[str], dict[str, set[str]]] | None = None
+                 ) -> bool:
     """Whether a fact's substance shows up in the body.
 
     Exact-substring matching would fail on any rewording, which is most of them.
-    Instead: does a majority of the fact's distinctive words appear?
+    Two readings count: a majority of the fact's distinctive words appear, or
+    — for a fact that states figures — every one of its figures is stated,
+    with its unit. The seventh regenerated draft (2026-09-03) wrote
+    « rentabilisée au bout de 5 ans » and was told it had not used the
+    Walloon portal's fact, because that fact opens with forty words on the
+    prosumer tariff's purpose that nobody would copy.
     """
     tokens = [t for t in normalize_query(fact).split() if len(t) > 4]
-    if not tokens:
-        return False
-    hits = sum(1 for t in tokens if t in normalized_body)
-    return hits >= max(2, len(tokens) // 2)
+    if tokens:
+        hits = sum(1 for t in tokens if t in normalized_body)
+        if hits >= max(2, len(tokens) // 2):
+            return True
+    if figures is not None:
+        body_segments, body_units = figures
+        fact_units = factual_qa_v2.risky_units(fact)
+        if fact_units and all(
+                seg in body_segments and (classes & body_units.get(seg, set()))
+                for seg, classes in fact_units.items()):
+            return True
+    return False
 
 
 def _verdict(findings: list[dict]) -> dict:
