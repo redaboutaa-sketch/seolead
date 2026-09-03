@@ -26,7 +26,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0014_fingerprint_and_research_resolution"
+revision: str = "0014_fingerprint_resolution"
 down_revision: Union[str, None] = "0013_lead_notification_state"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
