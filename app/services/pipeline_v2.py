@@ -12,6 +12,7 @@ is the question an operator asks when relevance misbehaves.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,7 +38,10 @@ from app.providers.search.base import SearchIntelligenceProvider
 from app.providers.search.location import get_search_context
 from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
-from app.services.research_planner import plan_authoritative_research
+from app.services.research_planner import (ResearchPlan,
+                                           plan_authoritative_research,
+                                           record_resolution,
+                                           unresolved_queries)
 from app.schemas.serp import KeywordMetric, SerpSnapshot
 from app.services import (brief_service, draft_retry, draft_service,
                           factual_qa_v2, opportunity_score,
@@ -77,6 +81,7 @@ class PipelineV2Result:
     opportunity_summary: dict = field(default_factory=dict)
     factual_qa: dict = field(default_factory=dict)
     seo_qa: dict = field(default_factory=dict)
+    advisory_qa: dict = field(default_factory=dict)
     # One entry per draft call: what the gate said, and whether it was worth
     # another attempt. Empty until the writer runs.
     draft_attempts: list[dict] = field(default_factory=list)
@@ -111,6 +116,7 @@ class PipelineV2Result:
             "opportunity": self.opportunity_summary,
             "factual_qa": self.factual_qa,
             "seo_qa": self.seo_qa,
+            "advisory_qa": self.advisory_qa,
             "draft_attempts": self.draft_attempts,
             "provider_usage": self.usage_summary,
             "approval_state": self.approval_state,
@@ -476,76 +482,109 @@ async def run_pipeline_v2(
     # It runs only when something is actually blocked, and only against domains
     # the vertical configured.
     authoritative_summary: dict = {}
+    # What became of every proposed search, persisted on the package
+    # (2026-09-03). The gate refuses publication while a proposed search is
+    # neither executed nor abandoned with a reason; before this record
+    # existed, « 5 targeted authoritative search(es) proposed » was a note in
+    # `unresolved_questions` and nothing ever said whether anyone had looked.
+    resolution = SimpleNamespace(authoritative_research=None)
     if authoritative:
-        unresolved = [c for c in payload["claims"]
-                      if c["claim_risk"] == "HIGH"
-                      and c["evidence_status"] != EvidenceStatus.SUPPORTED.value]
-        # Phase 3.4: an unanswered core question is also a research gap. The
-        # HIGH-risk trigger alone never fired for pricing — price claims are
-        # MEDIUM and LOW risk — so a price query whose evidence answered nothing
-        # produced no second look at all.
-        price_gap = _price_answer_missing(query, payload["claims"], profile)
-        if unresolved or price_gap:
-            plan = plan_authoritative_research(
+        async def run_round(plan, round_no: int) -> None:
+            nonlocal payload, authoritative_summary
+            run = await execute_plan(
+                plan, profile=profile, registry=registry,
+                web_provider=web_provider, market=market, language=language,
+                correlation_id=correlation_id, usage=usage)
+            summary = run.as_dict()
+            authoritative_summary = (
+                summary if round_no == 1
+                else {**authoritative_summary, "second_round": summary})
+            result.authoritative = authoritative_summary
+            record_resolution(resolution, plan, summary,
+                              by=f"pipeline-round-{round_no}")
+
+            if run.accepted:
+                official_result = run.to_provider_result(
+                    query=query, market=market, language=language)
+                research_results.append(official_result)
+
+                # Official pages go through the same relevance gate as
+                # everything else — being official does not make a page
+                # on-topic. What changed is the question they are held to:
+                # each page is scored against the targeted query that
+                # fetched it, not against the article's query, which was
+                # never put to it. Same gate, same thresholds.
+                for index, source in enumerate(official_result.sources):
+                    ref = source.candidate_id or f"official-{index:03d}"
+                    decisions[ref] = score_source(
+                        query=query_that_fetched(source.metadata,
+                                                 default=query),
+                        profile=profile, title=source.title,
+                        body=source.summary, url=source.url,
+                        thresholds=thresholds)
+
+                run_row = await _persist_research(
+                    session, keyword=keyword, result=official_result,
+                    decisions=decisions, correlation_id=correlation_id)
+                result.research_run_ids.append(run_row.id)
+                await session.commit()
+
+                # The summary was taken before the official pass existed, so
+                # a run that retrieved 50 sources and rejected 22 reported
+                # "evaluated 10, rejected 0" — reading as a clean sweep while
+                # the gate was in fact discarding the sources that matter
+                # most. It is retaken over every decision now made.
+                result.relevance_summary = _relevance_summary(decisions)
+
+                # Rebuild rather than patch: the enriched package supersedes
+                # the first, and its version records what it replaced.
+                payload = package_builder_v3.build_package_v3(
+                    query=query, market=market, language=language,
+                    intent=intent, profile=profile, serp=snapshot,
+                    serp_analysis=analysis, keyword_metrics=metrics,
+                    research_results=research_results,
+                    relevance_decisions=decisions, thresholds=thresholds,
+                    registry=registry,
+                    authoritative_run=authoritative_summary,
+                    previous_package_version=package_builder_v3.PACKAGE_VERSION,
+                )
+            else:
+                payload["authoritative_run"] = authoritative_summary
+
+        def plan_for(claims: list[dict]):
+            unresolved = [c for c in claims
+                          if c["claim_risk"] == "HIGH"
+                          and c["evidence_status"] != EvidenceStatus.SUPPORTED.value]
+            # Phase 3.4: an unanswered core question is also a research gap.
+            # The HIGH-risk trigger alone never fired for pricing — price
+            # claims are MEDIUM and LOW risk — so a price query whose
+            # evidence answered nothing produced no second look at all.
+            price_gap = _price_answer_missing(query, claims, profile)
+            if not (unresolved or price_gap):
+                return None
+            return plan_authoritative_research(
                 topic=query, market=market,
-                unresolved=_as_evaluated(payload["claims"], profile,
-                                         price_gap=price_gap),
+                unresolved=_as_evaluated(claims, profile, price_gap=price_gap),
                 profile=profile)
-            if not plan.is_empty:
-                run = await execute_plan(
-                    plan, profile=profile, registry=registry,
-                    web_provider=web_provider, market=market, language=language,
-                    correlation_id=correlation_id, usage=usage)
-                authoritative_summary = run.as_dict()
-                result.authoritative = authoritative_summary
 
-                if run.accepted:
-                    official_result = run.to_provider_result(
-                        query=query, market=market, language=language)
-                    research_results.append(official_result)
+        plan = plan_for(payload["claims"])
+        if plan is not None and not plan.is_empty:
+            await run_round(plan, 1)
 
-                    # Official pages go through the same relevance gate as
-                    # everything else — being official does not make a page
-                    # on-topic. What changed is the question they are held to:
-                    # each page is scored against the targeted query that
-                    # fetched it, not against the article's query, which was
-                    # never put to it. Same gate, same thresholds.
-                    for index, source in enumerate(official_result.sources):
-                        ref = source.candidate_id or f"official-{index:03d}"
-                        decisions[ref] = score_source(
-                            query=query_that_fetched(source.metadata,
-                                                     default=query),
-                            profile=profile, title=source.title,
-                            body=source.summary, url=source.url,
-                            thresholds=thresholds)
-
-                    run_row = await _persist_research(
-                        session, keyword=keyword, result=official_result,
-                        decisions=decisions, correlation_id=correlation_id)
-                    result.research_run_ids.append(run_row.id)
-                    await session.commit()
-
-                    # The summary was taken before the official pass existed, so
-                    # a run that retrieved 50 sources and rejected 22 reported
-                    # "evaluated 10, rejected 0" — reading as a clean sweep while
-                    # the gate was in fact discarding the sources that matter
-                    # most. It is retaken over every decision now made.
-                    result.relevance_summary = _relevance_summary(decisions)
-
-                    # Rebuild rather than patch: the enriched package supersedes
-                    # the first, and its version records what it replaced.
-                    payload = package_builder_v3.build_package_v3(
-                        query=query, market=market, language=language,
-                        intent=intent, profile=profile, serp=snapshot,
-                        serp_analysis=analysis, keyword_metrics=metrics,
-                        research_results=research_results,
-                        relevance_decisions=decisions, thresholds=thresholds,
-                        registry=registry,
-                        authoritative_run=authoritative_summary,
-                        previous_package_version=package_builder_v3.PACKAGE_VERSION,
-                    )
-                else:
-                    payload["authoritative_run"] = authoritative_summary
+            # ── One bounded second round ─────────────────────────────────
+            # The rebuilt package plans again over what the first round left
+            # unresolved, and until now that second plan was only ever
+            # « proposed » (package f9534a41: five queries, none run). Every
+            # query it proposes that was not already launched is launched
+            # once, here. A third plan is not run: what it still proposes is
+            # for the operator to launch or abandon, explicitly.
+            second = plan_for(payload["claims"])
+            if second is not None and not second.is_empty:
+                pending = {q["query"] for q in unresolved_queries(
+                    second, resolution.authoritative_research)}
+                if pending:
+                    await run_round(ResearchPlan(queries=[
+                        q for q in second.queries if q.query in pending]), 2)
 
     # Attach claim risk to the persisted evidence rows.
     await _persist_evidence(session, result.research_run_ids, payload, profile)
@@ -594,6 +633,7 @@ async def run_pipeline_v2(
         unresolved_questions=payload["unresolved_questions"],
         confidence_summary=payload["confidence_summary"],
         provider_provenance=payload["provider_provenance"],
+        authoritative_research=resolution.authoritative_research,
     )
     session.add(package)
     await session.commit()
@@ -768,7 +808,15 @@ async def run_pipeline_v2(
     await session.flush()
     result.qa_review_ids.append(advisory_row.id)
 
-    qa_passed = not (factual["blocking_issues"] or seo["blocking_issues"])
+    # The model-assisted reviewer blocks on SUBSIDY, ROI and GRID_RULE at
+    # severity high (2026-09-03). It said « needs more data or references »
+    # about profitability without public support on draft 8a1f6e46, and the
+    # draft went to approval as QA_PASSED because nothing it said counted.
+    qa_passed = not (factual["blocking_issues"] or seo["blocking_issues"]
+                     or advisory["blocking_issues"])
+    result.advisory_qa = {"status": advisory["status"],
+                          "findings": len(advisory["findings"]),
+                          "blocking": len(advisory["blocking_issues"])}
     draft.status = (ContentStatus.QA_PASSED.value if qa_passed
                     else ContentStatus.QA_FAILED.value)
 
@@ -785,8 +833,9 @@ async def run_pipeline_v2(
     if not qa_passed:
         result.error_code = ErrorCode.QA_FAILED
         result.error_detail = (
-            f"{len(factual['blocking_issues'])} factual and "
-            f"{len(seo['blocking_issues'])} SEO blocking issue(s)")
+            f"{len(factual['blocking_issues'])} factual, "
+            f"{len(seo['blocking_issues'])} SEO and "
+            f"{len(advisory['blocking_issues'])} model-assisted blocking issue(s)")
 
     result.usage_summary = usage.summary()
     await _persist_usage(session, usage, correlation_id)
@@ -875,8 +924,8 @@ async def _persist_usage(session, usage: UsageRecorder, correlation_id: str) -> 
     await session.commit()
 
 
-_PRICE_ANSWER_CATEGORIES = ("OBSERVED_PRICE_RANGE", "MARKET_AVERAGE",
-                            "MARKET_PRICE", "VENDOR_PRICE")
+from app.services.research_planner import (  # noqa: E402
+    PRICE_ANSWER_CATEGORIES as _PRICE_ANSWER_CATEGORIES)
 
 
 def _price_answer_missing(query: str, claims: list[dict], profile) -> bool:
@@ -929,30 +978,6 @@ def _relevance_summary(decisions: dict[str, RelevanceDecision]) -> dict:
 
 
 def _as_evaluated(claims: list[dict], profile, *, price_gap: bool = False) -> list:
-    """Rehydrate claims the planner should look for better sources for.
-
-    The planner reasons over `EvaluatedClaim`, and the package carries dicts. A
-    thin shim beats threading the objects through the whole builder just so one
-    consumer can read two fields.
-    """
-    from app.services.claim_extraction import AtomicClaim
-    from app.services.claim_policy import requirements_for
-    from app.services.evidence_model import EvaluatedClaim
-
-    out = []
-    for claim in claims:
-        wanted = (claim.get("claim_risk") == "HIGH"
-                  or (price_gap
-                      and claim.get("category") in _PRICE_ANSWER_CATEGORIES))
-        if not wanted:
-            continue
-        if claim.get("evidence_status") == EvidenceStatus.SUPPORTED.value:
-            continue
-        atomic = AtomicClaim(text=claim["claim"], passage=claim.get("passage", ""),
-                             source_ref=claim.get("source_ref", ""), offset=0)
-        evaluated = EvaluatedClaim(claim=atomic,
-                                   requirements=requirements_for(claim["claim"],
-                                                                 profile))
-        evaluated.status = EvidenceStatus(claim["evidence_status"])
-        out.append(evaluated)
-    return out
+    """Kept as a name; the body moved beside the planner (2026-09-03)."""
+    from app.services.research_planner import as_evaluated
+    return as_evaluated(claims, profile, price_gap=price_gap)

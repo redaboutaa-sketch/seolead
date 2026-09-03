@@ -77,6 +77,10 @@ class PublishedContent(Base):
     price_evidence: Mapped[dict] = mapped_column(JSONType, nullable=False,
                                                  default=dict)
     cta: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    # The sources behind the figures, as the page shows them (name, tier,
+    # region, date, figures — never a URL). Frozen at staging like the
+    # sections. Nullable: rows staged before 2026-09-03 showed none.
+    sources: Mapped[list | None] = mapped_column(JSONType, nullable=True)
     # Provenance: which QA reviews and approval let this snapshot exist. Recorded
     # so an audit does not have to reconstruct it from timestamps.
     qa_provenance: Mapped[dict] = mapped_column(JSONType, nullable=False,

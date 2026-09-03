@@ -26,22 +26,30 @@ is served.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import (ApprovalState, PublicationState, QALayer, QAStatus,
-                            QAType)
-from app.core.errors import SeoLeadError
+from app.core.enums import (ApprovalState, EvidenceStatus, PublicationState,
+                            QALayer, QAStatus, QAType)
+from app.core.errors import InvalidVertical, SeoLeadError
 from app.models import (Approval, ContentBrief, ContentDraft, PublishedContent,
-                        QAReview, Site)
+                        QAReview, ResearchPackage, SeedKeyword, Site, Vertical)
+from app.services import factual_qa_v2, qa_service
+from app.services.research_planner import (as_evaluated,
+                                           plan_authoritative_research,
+                                           unresolved_queries)
 from app.site.config import SiteConfig
 from app.db.base import utcnow
 from app.site.content_sanitizer import (contains_external_link, parse_sections,
                                         section_text)
+from app.verticals.profile import load_profile
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +115,34 @@ class GateResult:
     approved: bool
     no_external_links: bool
     reasons: list[str]
+    # ── Tranche structurelle du 2026-09-03 ──────────────────────────────────
+    # Three more conditions, each one the absence of which let the article
+    # 8a1f6e46 reach the public with a payback figure no source carried:
+    #   advisory_qa       the model-assisted reviewer raised no HIGH finding
+    #                     on SUBSIDY, ROI or GRID_RULE (it had, and it was
+    #                     advisory by construction);
+    #   research_resolved every authoritative search the planner proposed was
+    #                     launched or abandoned with a written reason (five
+    #                     were proposed for package f9534a41; none ran);
+    #   approved_render   the approval names, by fingerprint, the render the
+    #                     owner read — not an earlier revision, not an intent.
+    # Defaults keep the older call sites readable; the gate always sets them.
+    advisory_qa: bool = True
+    research_resolved: bool = True
+    approved_render: bool = True
 
     @property
     def passed(self) -> bool:
         return (self.factual_qa and self.seo_qa and self.approved
-                and self.no_external_links)
+                and self.no_external_links and self.advisory_qa
+                and self.research_resolved and self.approved_render)
 
     def as_dict(self) -> dict:
         return {"factual_qa": self.factual_qa, "seo_qa": self.seo_qa,
+                "advisory_qa": self.advisory_qa,
+                "research_resolved": self.research_resolved,
                 "approved": self.approved,
+                "approved_render": self.approved_render,
                 "no_external_links": self.no_external_links,
                 "passed": self.passed, "reasons": list(self.reasons)}
 
@@ -165,6 +192,31 @@ async def evaluate_gate(session: AsyncSession, draft: ContentDraft) -> GateResul
 
     clean_links = not contains_external_link(draft.body or "")
 
+    # ── The model-assisted reviewer, on the categories where it blocks ──────
+    # Its governing row is re-read under today's rule rather than trusted on
+    # the `blocking` flag it was written with: the row for draft 8a1f6e46 says
+    # PASSED and blocking=False on a HIGH finding about profitability without
+    # public support, because in August nothing the model said could block.
+    advisory = _governing([r for r in reviews
+                           if r.qa_type == QAType.LLM_ASSISTED.value])
+    advisory_blocking = [f for f in (advisory.findings or [])
+                         if qa_service.llm_finding_blocks(f)] if advisory else []
+    advisory_ok = not advisory_blocking
+
+    # ── Proposed research that nobody launched or gave up on ────────────────
+    brief = await session.get(ContentBrief, draft.content_brief_id)
+    package = (await session.get(ResearchPackage, brief.research_package_id)
+               if brief is not None else None)
+    pending_searches, research_reason = await _pending_searches(session, package)
+    research_ok = not pending_searches and research_reason is None
+
+    # ── What was approved is what is rendered ───────────────────────────────
+    current_fingerprint = (render_fingerprint(
+        draft, brief, render_sources(draft.body or "", _claims_of(package)))
+        if brief is not None else None)
+    recorded = getattr(approval, "render_fingerprint", None) if approval else None
+    render_ok = bool(approved and recorded and recorded == current_fingerprint)
+
     reasons: list[str] = []
     if not factual:
         reasons.append("no factual QA review is recorded for this draft")
@@ -174,16 +226,179 @@ async def evaluate_gate(session: AsyncSession, draft: ContentDraft) -> GateResul
         reasons.append("no SEO QA review is recorded for this draft")
     elif not seo_ok:
         reasons.append("SEO QA did not pass")
+    if not advisory_ok:
+        reasons.append(
+            f"model-assisted QA raised {len(advisory_blocking)} HIGH finding(s) "
+            f"on a blocking category: "
+            + "; ".join(
+                f"[{str(f.get('category') or 'inferred')}] "
+                f"{str(f.get('message', ''))[:120]}"
+                for f in advisory_blocking[:3]))
+    if research_reason:
+        reasons.append(research_reason)
+    elif pending_searches:
+        reasons.append(
+            f"{len(pending_searches)} proposed authoritative search(es) neither "
+            f"executed nor abandoned with a reason: "
+            + "; ".join(f"«{q['query']}»" for q in pending_searches[:5]))
     if not approved:
         reasons.append(
             "no human approval recorded"
             if approval is None else
             f"approval state is {approval.state}, not APPROVED")
+    elif not recorded:
+        reasons.append(
+            "the approval names no render fingerprint: it approved an "
+            "intention, not a render (re-approve with --fingerprint)")
+    elif not render_ok:
+        reasons.append(
+            f"the approval names render {recorded[:12]}… but the current "
+            f"render is {(current_fingerprint or '')[:12]}…: what was approved "
+            f"is not what would be published")
     if not clean_links:
         reasons.append("the draft body contains an outbound link")
 
     return GateResult(factual_qa=factual_ok, seo_qa=seo_ok, approved=approved,
-                      no_external_links=clean_links, reasons=reasons)
+                      no_external_links=clean_links, reasons=reasons,
+                      advisory_qa=advisory_ok, research_resolved=research_ok,
+                      approved_render=render_ok)
+
+
+def _claims_of(package: ResearchPackage | None) -> list[dict]:
+    return list((package.facts or []) if package is not None else [])
+
+
+async def _pending_searches(session: AsyncSession,
+                            package: ResearchPackage | None
+                            ) -> tuple[list[dict], str | None]:
+    """The authoritative searches a package still owes, recomputed from its
+    facts — the plan itself was never persisted before 2026-09-03, only a
+    note saying « 5 targeted authoritative search(es) proposed »."""
+    if package is None:
+        return [], None
+    keyword = await session.get(SeedKeyword, package.keyword_id)
+    vertical = (await session.get(Vertical, keyword.vertical_id)
+                if keyword is not None else None)
+    if vertical is None:
+        return [], "the package has no vertical: its research plan cannot be recomputed"
+    try:
+        profile = load_profile(vertical.code)
+    except InvalidVertical as exc:
+        return [], f"the package's vertical profile cannot be loaded: {exc}"
+    plan = plan_authoritative_research(
+        topic=package.query, market=package.market,
+        unresolved=as_evaluated(package.facts or [], profile), profile=profile)
+    return unresolved_queries(plan, package.authoritative_research), None
+
+
+# ── The render, identified ───────────────────────────────────────────────────
+
+def render_fingerprint(draft: ContentDraft, brief: ContentBrief,
+                       sources: list[dict]) -> str:
+    """SHA-256 of what a visitor would read: title, metas, sanitized
+    sections, public price answers and rendered sources.
+
+    Everything the fingerprint covers is derived from stored rows the same
+    way the DTOs derive it, so the CLI, the preview and the gate compute the
+    same value for the same render — and a different value for any other.
+    """
+    core_evidence = brief.core_answer_evidence or {}
+    payload = {
+        "title": draft.title,
+        "meta_title": draft.meta_title,
+        "meta_description": draft.meta_description,
+        "sections": parse_sections(draft.body or ""),
+        "answers": [_public_answer(a)
+                    for a in (core_evidence.get("answers") or [])],
+        "sources": sources,
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                           separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def compute_fingerprint(session: AsyncSession,
+                              draft: ContentDraft) -> tuple[str, list[dict]]:
+    """The one entry point for « what is the fingerprint of this draft's
+    render »: the CLI shows it, the approval records it, the gate checks it."""
+    brief = await session.get(ContentBrief, draft.content_brief_id)
+    if brief is None:
+        raise PublicationRefused("the draft has no brief; nothing to render")
+    package = await session.get(ResearchPackage, brief.research_package_id)
+    sources = render_sources(draft.body or "", _claims_of(package))
+    return render_fingerprint(draft, brief, sources), sources
+
+
+# ── The sources a page shows ─────────────────────────────────────────────────
+
+def render_sources(body: str, claims: list[dict]) -> list[dict]:
+    """The sources behind the figures a body states, as the page may show them.
+
+    The « méthode » block promises « chaque montant affiché provient d'une
+    source publiée ». Until 2026-09-03 the page showed no source at all, so
+    the promise was unverifiable by the reader. This lists, for every figure
+    the body states (unit, range end, year), the SUPPORTED claims carrying it
+    and the evidence behind them — name, tier, region, date, and the figures
+    it carries. No URL: an official authority is named by its host as text;
+    a commercial or specialist source is described, not advertised (Phase
+    3.3 shipped a competitor link the one time a page carried references).
+    """
+    needed = factual_qa_v2.body_segments(body)
+    if not needed:
+        return []
+    supported = [c for c in claims
+                 if c.get("evidence_status") == EvidenceStatus.SUPPORTED.value]
+    found: dict[str, dict] = {}
+    for claim in supported:
+        text = str(claim.get("claim", ""))
+        labels = factual_qa_v2.quantity_labels(text)
+        figures = set(labels) & needed
+        if not figures:
+            continue
+        for evidence in claim.get("evidence") or []:
+            if not evidence.get("supports"):
+                continue
+            url = str(evidence.get("url") or "")
+            key = url or f"{evidence.get('source_ref')}"
+            if not key:
+                continue
+            tier = str(evidence.get("source_quality") or "UNKNOWN").upper()
+            entry = found.setdefault(key, {
+                "name": _host_of(url) if tier == "OFFICIAL" else None,
+                "tier": tier,
+                "authority_type": evidence.get("authority_type"),
+                "region": evidence.get("region") or claim.get("region"),
+                "date": _source_date(evidence),
+                "freshness": evidence.get("freshness_status"),
+                "_figures": {},
+            })
+            for figure in figures:
+                entry["_figures"].setdefault(figure, labels[figure])
+    out = []
+    for entry in found.values():
+        figures = entry.pop("_figures")
+        entry["figures"] = [figures[k] for k in sorted(figures)]
+        out.append(entry)
+    # Official first, then by name, then by date — stable across runs, which
+    # the fingerprint depends on.
+    out.sort(key=lambda e: (e["tier"] != "OFFICIAL", e["name"] or "~",
+                            e["date"] or "~", e["figures"]))
+    return out
+
+
+def _host_of(url: str) -> str | None:
+    host = urlsplit(url).hostname if url else None
+    return host.removeprefix("www.") if host else None
+
+
+def _source_date(evidence: dict) -> str | None:
+    """The date a source is shown with: what it says about itself, else the
+    day it was published, else nothing — never the day it was retrieved."""
+    for key in ("effective_from", "published_at"):
+        value = evidence.get(key)
+        if value:
+            return str(value)[:10]
+    return None
 
 
 def _governing(reviews: list[QAReview]) -> QAReview | None:
@@ -253,6 +468,8 @@ async def stage_content(
     )).scalar_one() + 1
 
     core_evidence = brief.core_answer_evidence or {}
+    package = await session.get(ResearchPackage, brief.research_package_id)
+    sources = render_sources(draft.body or "", _claims_of(package))
     snapshot = PublishedContent(
         site_id=site.id, content_draft_id=draft.id, locale=locale, slug=slug,
         version=next_version, content_type=brief.content_type,
@@ -271,6 +488,10 @@ async def stage_content(
             "observed_range": core_evidence.get("observed_range"),
         },
         cta=brief.cta_strategy or {},
+        # The sources behind the figures, frozen with the figures: a page
+        # re-rendered after the research tables move on still shows what it
+        # rested on the day it was approved.
+        sources=sources,
         qa_provenance=gate.as_dict(),
         canonical_path=_canonical_path(config, locale, slug),
         # Forced on, whatever the site-wide gate says: a STAGED page is never
@@ -311,7 +532,8 @@ def _public_answer(answer: dict) -> dict:
 
 
 def draft_preview_dto(draft: ContentDraft, brief: ContentBrief,
-                      config: SiteConfig, gate: GateResult) -> dict:
+                      config: SiteConfig, gate: GateResult,
+                      sources: list[dict] | None = None) -> dict:
     """Render an unapproved draft for owner review, without staging it.
 
     §38 of the Phase 4 brief allows exactly this: a page whose approval is still
@@ -325,6 +547,7 @@ def draft_preview_dto(draft: ContentDraft, brief: ContentBrief,
     locale = config.default_language
     slug = slugify(brief.recommended_slug or brief.primary_query)
     core_evidence = brief.core_answer_evidence or {}
+    sources = list(sources or [])
     return {
         "slug": slug, "locale": locale, "type": brief.content_type,
         "search_intent": brief.search_intent, "title": draft.title,
@@ -348,11 +571,14 @@ def draft_preview_dto(draft: ContentDraft, brief: ContentBrief,
                 "secondary": config.conversion.secondary_cta,
                 "secondary_label": config.conversion.secondary_cta_label,
                 "brief_cta": (brief.cta_strategy or {}).get("code")},
+        "sources": sources,
         "version": 0, "state": "DRAFT_PREVIEW",
         "updated_at": None, "preview": True,
         # The reviewer needs to see what is still missing. This is the one place
         # gate detail is shown, and it is behind the preview token.
         "gate": gate.as_dict(),
+        # What the reviewer is looking at, named. An approval must quote it.
+        "fingerprint": render_fingerprint(draft, brief, sources),
     }
 
 
@@ -421,6 +647,7 @@ def to_dto(snapshot: PublishedContent, config: SiteConfig) -> dict:
         },
         "sections": snapshot.sections or [],
         "price_evidence": snapshot.price_evidence or {},
+        "sources": list(getattr(snapshot, "sources", None) or []),
         "cta": {
             "primary": config.conversion.primary_cta,
             "primary_label": config.conversion.primary_cta_label,

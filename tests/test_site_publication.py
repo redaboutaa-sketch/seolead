@@ -22,8 +22,8 @@ from app.site.config import InvalidSite, SiteConfig, available_sites, load_site
 from app.site.content_sanitizer import (contains_external_link, parse_sections,
                                         section_text, strip_unsafe)
 from app.site.publication import (PublicationRefused, can_transition,
-                                  evaluate_gate, publish_content, stage_content,
-                                  to_dto)
+                                  compute_fingerprint, evaluate_gate,
+                                  publish_content, stage_content, to_dto)
 
 PRICE_BODY = """# Prix des panneaux solaires en Belgique
 
@@ -151,10 +151,19 @@ async def _add_qa(session, draft: ContentDraft, *, factual_pass: bool = True,
 
 
 async def _approve(session, draft: ContentDraft,
-                   state: ApprovalState = ApprovalState.APPROVED) -> None:
+                   state: ApprovalState = ApprovalState.APPROVED, *,
+                   fingerprint: str | None = "current") -> None:
+    """Record a decision. By default an APPROVED one names the current render
+    by fingerprint, as `content approve --fingerprint` does since 2026-09-03;
+    pass `fingerprint=None` for the older shape (an approval of an intention)
+    or a literal to approve some other render."""
+    if fingerprint == "current" and state == ApprovalState.APPROVED:
+        fingerprint, _ = await compute_fingerprint(session, draft)
+    elif fingerprint == "current":
+        fingerprint = None
     session.add(Approval(content_draft_id=draft.id, state=state.value,
                          decided_by="owner" if state != ApprovalState.PENDING
-                         else None))
+                         else None, render_fingerprint=fingerprint))
     await session.flush()
 
 
@@ -446,9 +455,16 @@ class TestPricePageRendering:
         assert "qa_provenance" not in dto
         # `published_at` joined on 2026-08-31 for the Article schema's
         # datePublished — a date, not a QA internal.
+        # `sources` joined on 2026-09-03: the sources behind the figures, as
+        # name / tier / region / date / figures — never a URL, never a claim
+        # identifier. That is content, and the test right below pins its shape.
         assert set(dto) == {"slug", "locale", "type", "search_intent", "title",
-                            "meta", "sections", "price_evidence", "cta",
-                            "version", "state", "published_at", "updated_at"}
+                            "meta", "sections", "price_evidence", "sources",
+                            "cta", "version", "state", "published_at",
+                            "updated_at"}
+        for entry in dto["sources"]:
+            assert set(entry) <= {"name", "tier", "authority_type", "region",
+                                  "date", "freshness", "figures"}
 
 
 # ─── Sanitization ────────────────────────────────────────────────────────────

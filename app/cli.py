@@ -58,6 +58,7 @@ from app.services.authoritative_research import execute_plan
 from app.services.authority_registry import build_registry
 from app.services.pipeline import run_pipeline
 from app.services import (authority_probe, factual_qa_v2, qa_service,
+                          research_planner,
                           title_registry)
 from app.services.claim_policy import requirements_for
 from app.services.pipeline_v2 import _as_evaluated, run_pipeline_v2
@@ -192,10 +193,60 @@ async def cmd_authoritative_run(args: argparse.Namespace) -> int:
             market=package.market, language=package.language,
             correlation_id=f"authoritative-{package.id.hex[:16]}", usage=usage)
 
+        # What was launched is recorded on the package, per query, with what
+        # it brought back: the gate refuses publication while a proposed
+        # search is neither executed nor abandoned, and until 2026-09-03 this
+        # command wrote nothing — five searches proposed for f9534a41 stayed
+        # « proposed » with no trace of whether anyone had looked.
+        research_planner.record_resolution(
+            package, plan, run.as_dict(), by="authoritative-run")
+        await session.commit()
+
         _emit({"package_id": str(package.id), "query": package.query,
                "unresolved_high_risk_before": len(unresolved),
                "plan": plan.as_dict(), "run": run.as_dict(),
+               "resolution": package.authoritative_research,
                "provider_usage": usage.summary()})
+    return EXIT_OK
+
+
+async def cmd_abandon_search(args: argparse.Namespace) -> int:
+    """Record that a proposed authoritative search will not be launched, and why.
+
+    The other half of the resolution rule: a search may be given up, but never
+    silently. The reason is stored verbatim and the gate quotes it.
+    """
+    async with get_sessionmaker()() as session:
+        package = await session.get(ResearchPackage, uuid.UUID(args.package_id))
+        if package is None:
+            _emit({"error": "package not found"})
+            return EXIT_ERROR
+        if not args.reason.strip():
+            _emit({"error": "REASON_REQUIRED",
+                   "detail": "an abandoned search needs a written reason"})
+            return EXIT_ERROR
+        keyword = await session.get(SeedKeyword, package.keyword_id)
+        profile = load_profile(
+            (await session.get(Vertical, keyword.vertical_id)).code)
+        plan = plan_authoritative_research(
+            topic=package.query, market=package.market,
+            unresolved=_as_evaluated(package.facts or [], profile),
+            profile=profile)
+        proposed = {q.query for q in plan.queries}
+        if args.query not in proposed:
+            _emit({"error": "NOT_PROPOSED",
+                   "detail": "this query is not one the planner proposes for "
+                             "the package; nothing to abandon",
+                   "proposed": sorted(proposed)})
+            return EXIT_ERROR
+        research_planner.abandon_query(package, args.query, reason=args.reason,
+                                       by=args.by)
+        await session.commit()
+        pending = research_planner.unresolved_queries(
+            plan, package.authoritative_research)
+    _emit({"package_id": str(package.id), "query": args.query,
+           "status": research_planner.RESOLUTION_ABANDONED,
+           "still_pending": [q["query"] for q in pending]})
     return EXIT_OK
 
 
@@ -729,7 +780,9 @@ async def cmd_content_pending(args: argparse.Namespace) -> int:
 
 
 async def _decide(draft_id: str, target: ApprovalState, by: str,
-                  note: str | None) -> int:
+                  note: str | None, fingerprint: str | None = None) -> int:
+    from app.site.publication import PublicationRefused, compute_fingerprint
+
     async with get_sessionmaker()() as session:
         approval = (
             await session.execute(
@@ -748,23 +801,59 @@ async def _decide(draft_id: str, target: ApprovalState, by: str,
                    "current_state": current.value})
             return EXIT_ERROR
 
+        draft = await session.get(ContentDraft, uuid.UUID(draft_id))
+
+        # ── An approval names a render, never an intention (2026-09-03) ──
+        # Article 8a1f6e46 was approved as « rev 2 APPROVED » and published
+        # with a figure its approver never saw defended. The approval now
+        # quotes the fingerprint of the render the owner read, and the CLI
+        # verifies it against the render as it stands BEFORE recording
+        # anything: a stale fingerprint is refused, not stored.
+        if target is ApprovalState.APPROVED:
+            if not fingerprint:
+                _emit({"error": "FINGERPRINT_REQUIRED",
+                       "detail": ("an approval must name the render it "
+                                  "approves: run `content fingerprint "
+                                  f"{draft_id}` and pass --fingerprint")})
+                return EXIT_ERROR
+            if draft is None:
+                _emit({"error": "no such draft"})
+                return EXIT_ERROR
+            try:
+                current_fp, _ = await compute_fingerprint(session, draft)
+            except PublicationRefused as exc:
+                _emit({"error": exc.detail})
+                return EXIT_ERROR
+            if fingerprint.strip().lower() != current_fp:
+                _emit({"error": "FINGERPRINT_MISMATCH",
+                       "detail": ("the fingerprint given is not the render as "
+                                  "it stands; re-read the preview and approve "
+                                  "what it shows"),
+                       "given": fingerprint.strip().lower()[:16],
+                       "current": current_fp[:16]})
+                return EXIT_ERROR
+            approval.render_fingerprint = current_fp
+        else:
+            approval.render_fingerprint = None
+
         approval.state = target.value
         approval.decided_by = by
         approval.decided_at = datetime.now(timezone.utc)
         approval.note = note
-        draft = await session.get(ContentDraft, uuid.UUID(draft_id))
         if draft is not None:
             draft.status = approval_service.draft_status_for(target).value
         await session.commit()
 
         _emit({"draft_id": draft_id, "approval_state": target.value,
                "decided_by": by,
+               "render_fingerprint": approval.render_fingerprint,
                "publishable": approval_service.is_publishable(target)})
     return EXIT_OK
 
 
 async def cmd_approve(args: argparse.Namespace) -> int:
-    return await _decide(args.id, ApprovalState.APPROVED, args.by, args.note)
+    return await _decide(args.id, ApprovalState.APPROVED, args.by, args.note,
+                         getattr(args, "fingerprint", None))
 
 
 async def cmd_reject(args: argparse.Namespace) -> int:
@@ -867,7 +956,8 @@ async def cmd_site_preview(args: argparse.Namespace) -> int:
 async def cmd_site_preview_draft(args: argparse.Namespace) -> int:
     """Render an unapproved draft for review. Writes nothing."""
     from app.site.config import load_site
-    from app.site.publication import draft_preview_dto, evaluate_gate
+    from app.site.publication import (compute_fingerprint, draft_preview_dto,
+                                      evaluate_gate)
 
     config = load_site(args.site)
     async with get_sessionmaker()() as session:
@@ -881,8 +971,41 @@ async def cmd_site_preview_draft(args: argparse.Namespace) -> int:
             select(ContentBrief).where(ContentBrief.id == draft.content_brief_id)
         )).scalar_one()
         gate = await evaluate_gate(session, draft)
-        payload = draft_preview_dto(draft, brief, config, gate)
+        _, sources = await compute_fingerprint(session, draft)
+        payload = draft_preview_dto(draft, brief, config, gate, sources)
     _emit(payload)
+    return EXIT_OK
+
+
+async def cmd_content_fingerprint(args: argparse.Namespace) -> int:
+    """Name the render of a draft: the SHA-256 an approval must quote.
+
+    Read-only. The value is computed from stored rows exactly as the gate
+    computes it, so an approval that quotes it is an approval of THIS render
+    — and of no later edit, re-judgement or re-rendering.
+    """
+    from app.site.publication import PublicationRefused, compute_fingerprint
+
+    async with get_sessionmaker()() as session:
+        draft = await session.get(ContentDraft, uuid.UUID(args.draft_id))
+        if draft is None:
+            _emit({"error": "no such draft"})
+            return EXIT_ERROR
+        try:
+            fingerprint, sources = await compute_fingerprint(session, draft)
+        except PublicationRefused as exc:
+            _emit({"error": exc.detail})
+            return EXIT_ERROR
+        approval = (await session.execute(
+            select(Approval).where(Approval.content_draft_id == draft.id)
+        )).scalar_one_or_none()
+    _emit({"draft_id": args.draft_id, "fingerprint": fingerprint,
+           "sources_rendered": len(sources),
+           "approval_state": approval.state if approval else None,
+           "approval_fingerprint": (approval.render_fingerprint
+                                    if approval else None),
+           "approval_matches_render": bool(
+               approval and approval.render_fingerprint == fingerprint)})
     return EXIT_OK
 
 
@@ -1302,6 +1425,17 @@ def build_parser() -> argparse.ArgumentParser:
                                help="show the plan without spending on queries")
     authoritative.set_defaults(func=cmd_authoritative_run)
 
+    abandon = research_sub.add_parser(
+        "abandon-search",
+        help="record that a proposed authoritative search will not be run")
+    abandon.add_argument("--package", dest="package_id", required=True)
+    abandon.add_argument("--query", required=True,
+                         help="the proposed query, verbatim")
+    abandon.add_argument("--reason", required=True,
+                         help="why it is not launched (recorded, shown by the gate)")
+    abandon.add_argument("--by", required=True)
+    abandon.set_defaults(func=cmd_abandon_search)
+
     package = sub.add_parser("package", help="research package commands")
     package_sub = package.add_subparsers(dest="action", required=True)
     package_show = package_sub.add_parser("show")
@@ -1397,7 +1531,17 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("id")
         cmd.add_argument("--by", required=True, help="who is deciding (recorded)")
         cmd.add_argument("--note")
+        if name == "approve":
+            cmd.add_argument(
+                "--fingerprint", required=True,
+                help=("the render fingerprint from `content fingerprint`; "
+                      "the approval is refused if it is not the current render"))
         cmd.set_defaults(func=func)
+
+    content_fp = content_sub.add_parser(
+        "fingerprint", help="the SHA-256 of a draft's render, to approve by")
+    content_fp.add_argument("draft_id")
+    content_fp.set_defaults(func=cmd_content_fingerprint)
 
     # ── Site and publication ────────────────────────────────────────────────
     site_cmd = sub.add_parser("site", help="site configuration and preview")
