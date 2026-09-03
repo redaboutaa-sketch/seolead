@@ -737,3 +737,75 @@ class TestGateAppliesTheLedgerOverride:
         await session.flush()
         gate = await evaluate_gate(session, draft)
         assert gate.advisory_qa is False
+
+
+# ─── 11. Un fait que le rédacteur ne peut pas écrire n'est pas un fait fourni ─
+
+class TestWritableFacts:
+    from app.services.brief_service import usable_required_facts, writable
+
+    def test_the_sixth_draft_s_unused_facts_are_not_writable(self):
+        from app.services.brief_service import writable
+        assert not writable("Les conditions dans le document de demande de "
+                            "prime sur [www.bruxellesenvironnement.be]"
+                            "(https://www.bruxellesenvironnement.be) Æ "
+                            "particuliers Æ Gestes pratiques Æ Mes primes "
+                            "Compteur A+/A- obligatoire")
+        assert not writable("Alle voorwaarden leest u op onze webpagina "
+                            "‘Stekkerzonnepanelen en stekkerbatterijen in "
+                            "Vlaanderen’.")
+        assert not writable("toute")
+
+    def test_a_real_french_fact_is_writable(self):
+        from app.services.brief_service import writable
+        assert writable(CLAIM_PROSUMER_5_ANS["claim"])
+        assert writable(CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL["claim"])
+        assert writable("Une carte solaire permet de connaître le potentiel "
+                        "de chaque toit bruxellois.")
+
+    def test_the_floor_counts_usable_facts_only(self):
+        from app.services.brief_service import usable_required_facts
+        required = [{"fact": "toute"}, {"fact": "Alle voorwaarden leest u op "
+                                                "onze webpagina van Fluvius."},
+                    {"fact": CLAIM_PROSUMER_5_ANS["claim"]}]
+        assert len(usable_required_facts(required, "fr")) == 1
+
+    def test_a_dutch_article_keeps_its_dutch_facts(self):
+        from app.services.brief_service import writable
+        assert writable("Alle voorwaarden leest u op onze webpagina van "
+                        "Fluvius over zonnepanelen.", language="nl")
+
+
+# ─── 12. Une lecture contestée qui ne porte pas le chiffre n'est pas une lecture
+
+class TestContestedMustCoverTheFigure:
+    SIXTH = ("Les données montrent qu'une installation standard est "
+             "généralement rentabilisée au bout de 5 ans, offrant ainsi un "
+             "retour sur investissement intéressant.")
+
+    def test_no_ambiguity_when_only_the_supported_reading_carries_the_figure(
+            self, solar_profile):
+        """Sixième brouillon (478a13d1) : quatorze AMBIGUOUS_MATCH sur cette
+        phrase, un par affirmation ROI contestée sans le chiffre, et
+        l'interdiction de réécrire qui va avec."""
+        verdict = _run(self.SIXTH, PUBLISHED_CLAIMS, solar_profile)
+        assert "AMBIGUOUS_MATCH" not in _codes(verdict), verdict["findings"]
+        contested = {**CLAIM_ROI_UNDER_7,
+                     "claim": "Retour sur investissement des panneaux solaires "
+                              "en Belgique en 2026 : guide complet."}
+        supported = [c for c in PUBLISHED_CLAIMS
+                     if c["evidence_status"] == "SUPPORTED"]
+        assert _arbitrate(self.SIXTH, contested, supported)[0] == "RIVAL"
+
+    def test_a_contested_reading_that_carries_the_figure_stays_ambiguous(self):
+        """La mutation : une affirmation contestée qui porte bien « 5 ans »
+        et ressemble autant — là, l'ambiguïté est réelle et reste bloquante."""
+        contested = {**CLAIM_ROI_UNDER_7,
+                     "claim": "Les données montrent qu'une installation "
+                              "standard est généralement rentabilisée au bout "
+                              "de 5 ans selon les installateurs."}
+        supported = [{**CLAIM_PROSUMER_5_ANS,
+                      "claim": "Les données montrent qu'une installation "
+                               "standard est généralement rentabilisée au "
+                               "bout de 5 ans selon le portail wallon."}]
+        assert _arbitrate(self.SIXTH, contested, supported)[0] == "AMBIGUOUS"

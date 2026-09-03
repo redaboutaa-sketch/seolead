@@ -17,6 +17,8 @@ the model's output.
 """
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 
@@ -184,6 +186,46 @@ def _select_cta(intent: SearchIntent, profile: VerticalProfile) -> dict:
 _SUBNATIONAL_PREFIX = "-"
 
 
+# ── What a writer can build on (2026-09-03) ──────────────────────────────
+# The sixth regenerated draft of the payback article was refused for using
+# 6 supported facts of 24 « supplied »; the unused ones it was told to state
+# began with a PDF's navigation crumbs (« … Æ particuliers Æ Gestes pratiques
+# … »), a Dutch sentence, and the fragment « toute ». A fact the writer cannot
+# honestly state in the article's language is not a fact supplied; it must
+# not be counted against the writer, and it must not be shown to it.
+_DUTCH_MARKERS = frozenset({
+    "het", "een", "van", "uw", "u", "op", "onze", "alle", "wordt", "worden",
+    "zijn", "moet", "kunt", "kan", "niet", "voor", "ook", "dat", "bij", "wij",
+    "deze", "door", "binnen", "met", "aan", "over", "geen", "hebt", "heeft",
+    "leest", "webpagina", "voorwaarden", "zonnepanelen", "premie",
+    "aanvragen", "netbeheerder", "digitale", "gemeente", "meter"})
+_NOISE_MARKERS = ("Æ", "•", "> >", "](http")
+_MIN_WORDS = 6
+
+
+def writable(text: str, language: str | None = "fr") -> bool:
+    """Whether a fact can be stated by the writer as a sentence of the
+    article: long enough to be a statement, free of extraction noise, and
+    in the article's language."""
+    if any(marker in text for marker in _NOISE_MARKERS):
+        return False
+    words = re.findall(r"[a-zàâäéèêëîïôöùûüç']+", text.lower())
+    if len(words) < _MIN_WORDS:
+        return False
+    if (language or "fr").lower().startswith("fr"):
+        if len({w for w in words if w in _DUTCH_MARKERS}) >= 2:
+            return False
+    return True
+
+
+def usable_required_facts(required: list[dict] | None,
+                          language: str | None = "fr") -> list[dict]:
+    """The required facts of a brief the writer can actually use. Applied
+    at build time to new briefs and at judgement time to stored ones."""
+    return [f for f in (required or [])
+            if writable(str(f.get("fact", "")), language)]
+
+
 def _spread(facts: list[dict], limit: int) -> list[dict]:
     """Pick facts that cover the subject, not the first `limit` in package order.
 
@@ -305,7 +347,9 @@ def build_brief_payload(
          "region": f.get("region"),
          "regionally_determined": bool(f.get("regionally_determined")),
          "scope_note": f.get("scope_note")}
-        for f in _spread(supported_facts, _MAX_REQUIRED_FACTS)
+        for f in _spread([f for f in supported_facts
+                          if writable(_claim_text(f), package.get("language"))],
+                         _MAX_REQUIRED_FACTS)
     ]
 
     used_refs = {f["source_ref"] for f in required_facts}

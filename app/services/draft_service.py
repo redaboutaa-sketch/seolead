@@ -164,7 +164,8 @@ def build_generation_prompt(brief: dict, package: dict, *,
         "working_title": brief["recommended_title"],
         "outline": brief["outline"],
         "questions_to_answer": brief["key_questions"],
-        "facts_you_must_build_on": brief["required_facts"],
+        "facts_you_must_build_on": brief_service.usable_required_facts(
+            brief["required_facts"], package.get("language")),
         "regional_scope": brief_service.regional_scope(
             brief["required_facts"]),
         "sources": brief["required_sources"],

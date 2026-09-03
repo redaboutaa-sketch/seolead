@@ -234,7 +234,10 @@ def run_deterministic_qa(
                 f"dated source supports it", blocking=True))
 
     # ── Required facts actually used ─────────────────────────────────────────
-    required = brief.get("required_facts") or []
+    # Only facts the writer can state count — for the floor and against it.
+    from app.services.brief_service import usable_required_facts
+    required = usable_required_facts(brief.get("required_facts") or [],
+                                     (package or {}).get("language"))
     if required:
         used = sum(1 for f in required
                    if _fact_echoed(str(f.get("fact", "")), normalized_body))

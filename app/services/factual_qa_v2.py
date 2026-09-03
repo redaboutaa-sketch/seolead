@@ -470,6 +470,16 @@ def _arbitrate(sentence: str, claim: dict,
         return _RIVAL, rival
     if rival is None:
         return _UNREAD, None
+    # The symmetric rule (2026-09-03, sixth regenerated draft): a supported
+    # reading carries the sentence's figures and the contested one does not.
+    # « Retour sur investissement en 2026 » is not what « rentabilisée au
+    # bout de 5 ans » asserts, however much the two resemble each other; the
+    # tie is not between two readings of the figure. Fourteen findings on one
+    # sentence, and a forbidden rewrite, came out of calling it one.
+    segments = risky_segments(sentence)
+    if segments and not covers(claim, segments, risky_ranges(sentence),
+                               risky_units(sentence)):
+        return _RIVAL, rival
     return _AMBIGUOUS, rival
 
 
