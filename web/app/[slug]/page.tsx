@@ -5,6 +5,7 @@ import { CtaBlock, TrustSection } from "@/components/Cta";
 import { Breadcrumbs } from "@/components/Layout";
 import { PriceEvidenceBlock } from "@/components/PriceEvidence";
 import { Prose } from "@/components/Prose";
+import { SourcesBlock } from "@/components/Sources";
 import { getPublished, getSiteConfig } from "@/lib/api";
 import { contentPath, localizedPath } from "@/lib/site";
 import { articleNode, graph, websiteNode } from "@/lib/jsonld";
@@ -61,6 +62,7 @@ export function ContentView({
   content: NonNullable<Awaited<ReturnType<typeof getPublished>>>;
 }) {
   const answers = content.price_evidence?.answers ?? [];
+  const sources = content.sources ?? [];
   const unresolved =
     content.price_evidence?.core_answer_status === "CORE_QUESTION_UNRESOLVED";
 
@@ -109,8 +111,14 @@ export function ContentView({
           observedRange={content.price_evidence?.observed_range ?? null}
         />
 
-        <CtaBlock config={config} locale={locale} />
-        <TrustSection />
+        {/* Conditional blocks (2026-09-03): each renders only what it has. */}
+        <SourcesBlock sources={sources} />
+        <CtaBlock
+          config={config}
+          locale={locale}
+          hasPriceEvidence={answers.length > 0}
+        />
+        <TrustSection hasSources={sources.length > 0} />
       </article>
 
       {jsonLd ? (

@@ -69,6 +69,25 @@ export interface PriceEvidence {
   observed_range?: ObservedRange | null;
 }
 
+/**
+ * A source behind a figure the page states, as the page may show it.
+ *
+ * No URL, by construction: an official authority is named by its host as
+ * plain text; a commercial or specialist source is described by tier only —
+ * the one time a page carried references it shipped a competitor link.
+ * `figures` are the figures of the body this source carries, as the source
+ * writes them, so a reader can match a number on the page to its origin.
+ */
+export interface SourceRef {
+  name: string | null;
+  tier: string;
+  authority_type: string | null;
+  region: string | null;
+  date: string | null;
+  freshness: string | null;
+  figures: string[];
+}
+
 export interface PublishedContentDTO {
   slug: string;
   locale: string;
@@ -85,6 +104,8 @@ export interface PublishedContentDTO {
   };
   sections: Section[];
   price_evidence: PriceEvidence;
+  /** Absent on snapshots staged before 2026-09-03; the page then shows none. */
+  sources?: SourceRef[];
   cta: {
     primary: string;
     primary_label: string;
@@ -97,6 +118,8 @@ export interface PublishedContentDTO {
   published_at: string | null;
   updated_at: string | null;
   preview?: boolean;
+  /** Draft previews only: the render fingerprint an approval must quote. */
+  fingerprint?: string;
 }
 
 /**
