@@ -80,6 +80,23 @@ describe("SourcesBlock — renders only what it has", () => {
     expect(sourceLine(OFFICIAL)).toContain("non datée");
     expect(sourceLine(SPECIALIST)).toContain("datée du 2024-03-01");
   });
+
+  it("says a declared date as a date read on the document, not stated by the page", () => {
+    // Réserve 2 : « non daté » on a document whose date is known is a false
+    // value shown as a measurement. The declared date is shown with its basis.
+    const declared: SourceRef = {
+      ...OFFICIAL,
+      name: "document.environnement.brussels",
+      region: "BE-BRU",
+      date: "2013",
+      date_basis: "declared",
+      freshness: "UNDATED",
+    };
+    expect(sourceLine(declared)).toContain("document daté de 2013");
+    expect(sourceLine(declared)).not.toContain("non datée");
+    expect(sourceLine(declared)).not.toContain("consultée, datée");
+    expect(sourceLine({ ...declared, date_basis: "stated" })).toContain("consultée, datée du 2013");
+  });
 });
 
 describe("TrustSection — the promise is made only when the sources are shown", () => {

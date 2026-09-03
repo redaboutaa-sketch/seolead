@@ -49,6 +49,7 @@ from app.site.config import SiteConfig
 from app.db.base import utcnow
 from app.site.content_sanitizer import (contains_external_link, parse_sections,
                                         section_text)
+from app.site.source_dates import declared_date_for
 from app.verticals.profile import load_profile
 
 logger = logging.getLogger(__name__)
@@ -387,6 +388,7 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
                 if not key:
                     continue
                 tier = str(evidence.get("source_quality") or "UNKNOWN").upper()
+                date, basis = _source_date_with_basis(evidence)
                 entry = found.setdefault(key, {
                     # Named by host, as text, whatever the tier (owner,
                     # 2026-09-03: « décrite sans être nommée » n'est pas
@@ -395,7 +397,8 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
                     "tier": tier,
                     "authority_type": evidence.get("authority_type"),
                     "region": evidence.get("region") or claim.get("region"),
-                    "date": _source_date(evidence),
+                    "date": date,
+                    "date_basis": basis,
                     "freshness": evidence.get("freshness_status"),
                     "_figures": {},
                 })
@@ -417,6 +420,19 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
 def _host_of(url: str) -> str | None:
     host = urlsplit(url).hostname if url else None
     return host.removeprefix("www.") if host else None
+
+
+def _source_date_with_basis(evidence: dict) -> tuple[str | None, str | None]:
+    """The date a source is shown with, and where it comes from: « stated »
+    when the page states it, « declared » when a person read it on the
+    document and recorded it with provenance, nothing otherwise."""
+    stated = _source_date(evidence)
+    if stated:
+        return stated, "stated"
+    declared = declared_date_for(evidence.get("url"))
+    if declared:
+        return declared["date"], "declared"
+    return None, None
 
 
 def _source_date(evidence: dict) -> str | None:

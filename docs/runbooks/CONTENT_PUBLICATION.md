@@ -78,6 +78,34 @@ des recherches proposées (`authoritative-run`, `abandon-search`) reste acquise.
 `research authoritative-run --package <id>` ne lance que les recherches
 encore dues ; `--all` relance tout le plan.
 
+## 3 ter. Dater un document que la page ne date pas
+
+Le bloc Sources affiche la date qu'une source énonce sur elle-même (ou sa
+date de publication), sinon « non datée ». Un document daté sur sa couverture
+mais dont la page ne porte aucune date lisible par le détecteur de fraîcheur
+était affiché « non daté » : une valeur fausse affichée comme une mesure
+(réserve du 2026-09-03 sur la fiche Bruxelles Environnement de 2013).
+
+Une personne qui a lu la date sur le document la déclare dans
+`config/sources/declared_dates.yaml`, avec sa provenance :
+
+```yaml
+documents:
+  - url: https://document.environnement.brussels/…/fiche.pdf   # URL exacte de la preuve
+    date: 2013            # AAAA, AAAA-MM ou AAAA-MM-JJ, rien d'autre
+    declared_by: reda     # qui a lu la date
+    declared_on: 2026-09-03
+    basis: date imprimée sur la couverture du PDF
+```
+
+Une entrée sans `basis`, `declared_by` ou `declared_on` fait échouer le
+chargement ; une date qui n'a pas la forme d'une date aussi. La date déclarée
+ne remplace jamais une date énoncée par la page (celle-ci gagne) et voyage
+jusqu'au visiteur avec sa base : la page dit « document daté de 2013 », pas
+« consultée, datée du 2013 ». Le fichier est dans l'image API : rebuild, puis
+nouveau brouillon ou re-jugement → nouvelle empreinte → relecture et
+ré-approbation.
+
 ## 4. Stage
 
 ```bash

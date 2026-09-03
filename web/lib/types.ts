@@ -84,6 +84,8 @@ export interface SourceRef {
   authority_type: string | null;
   region: string | null;
   date: string | null;
+  /** "stated" when the page states its date, "declared" when a person read it on the document. */
+  date_basis?: "stated" | "declared" | null;
   freshness: string | null;
   figures: string[];
 }

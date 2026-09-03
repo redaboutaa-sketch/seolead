@@ -47,7 +47,15 @@ export function sourceLine(source: SourceRef): string {
   if (source.name) parts.push(tierLabel(source.tier).toLowerCase());
   const region = regionLabel(source.region);
   if (region) parts.push(region);
-  parts.push(source.date ? `consultée, datée du ${source.date}` : "non datée");
+  if (!source.date) {
+    parts.push("non datée");
+  } else if (source.date_basis === "declared") {
+    // A date read on the document by a person, not stated by the page in a
+    // form the assessor parses: said as such.
+    parts.push(`document daté de ${source.date}`);
+  } else {
+    parts.push(`consultée, datée du ${source.date}`);
+  }
   return `${head} (${parts.join(", ")})`;
 }
 
