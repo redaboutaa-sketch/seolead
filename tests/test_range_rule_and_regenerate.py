@@ -38,9 +38,11 @@ from app.services.research_planner import (AuthoritativeQuery, ResearchPlan,
                                            pending_plan)
 from app.services.claim_policy import ClaimCategory
 from tests.fixtures.article_8a1f6e46 import (
-    CLAIM_FAMILY_5000, CLAIM_PROSUMER_MECHANISM, CLAIM_REVERSE_METER_2030,
+    CLAIM_FAMILY_5000, CLAIM_PROSUMER_5_ANS, CLAIM_PROSUMER_MECHANISM,
+    CLAIM_PROSUMER_MECHANISM_TRUNCATED, CLAIM_REVERSE_METER_2030,
     CLAIM_ROI_5_TO_7_SPECIALIST, CLAIM_ROI_UNDER_7,
-    CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, PUBLISHED_CLAIMS, REVISED_BODY)
+    CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL, CLAIM_YIELD_7_3_TO_8_4_OFFICIAL,
+    PUBLISHED_CLAIMS, REVISED_BODY, claims_without)
 
 # La phrase du brouillon régénéré, au caractère près (draft dc2a88d9).
 REGENERATED_SENTENCE = (
@@ -87,9 +89,18 @@ class TestRangeEndpoints:
         assert covers(CLAIM_FAMILY_5000, {"4", "5000"})
         assert not endpoint_only(CLAIM_FAMILY_5000, "4")
 
-    def test_the_regenerated_sentence_fails_on_its_collapsed_range(
+    def test_the_regenerated_sentence_is_sourced_by_the_walloon_portal(
             self, solar_profile):
+        """Le paquet porte « rentabilisée au bout de 5 ans » en source
+        officielle : la phrase du brouillon régénéré est sourcée, et la garde
+        le sait."""
         verdict = _run(REGENERATED_SENTENCE, PUBLISHED_CLAIMS, solar_profile)
+        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict)
+
+    def test_without_that_source_the_sentence_collapses_a_range_and_fails(
+            self, solar_profile):
+        verdict = _run(REGENERATED_SENTENCE,
+                       claims_without(CLAIM_PROSUMER_5_ANS), solar_profile)
         hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
         assert hits and "one end of a range" in hits[0]["message"]
         assert verdict["status"] == "FAILED"
@@ -121,7 +132,7 @@ class TestUnreadIsNotAmbiguous:
     ]
 
     def test_arbitration_says_unread_when_nothing_covers_the_figures(self):
-        supported = [CLAIM_PROSUMER_MECHANISM, CLAIM_ROI_5_TO_7_SPECIALIST]
+        supported = [CLAIM_PROSUMER_MECHANISM_TRUNCATED, CLAIM_ROI_5_TO_7_SPECIALIST]
         for claim in self.CONTESTED:
             verdict, rival = _arbitrate(REGENERATED_SENTENCE, claim, supported)
             assert verdict != "AMBIGUOUS", (claim["claim"], verdict)
@@ -131,7 +142,7 @@ class TestUnreadIsNotAmbiguous:
 
     def test_no_ambiguous_match_and_a_rewritable_finding_instead(
             self, solar_profile):
-        claims = self.CONTESTED + [CLAIM_PROSUMER_MECHANISM,
+        claims = self.CONTESTED + [CLAIM_PROSUMER_MECHANISM_TRUNCATED,
                                    CLAIM_ROI_5_TO_7_SPECIALIST]
         verdict = _run(REGENERATED_SENTENCE, claims, solar_profile)
         assert "AMBIGUOUS_MATCH" not in _codes(verdict), verdict["findings"]
@@ -185,8 +196,10 @@ class TestReviewerSeesSourcedFacts:
             sourced_claims=[CLAIM_YIELD_7_3_TO_8_4_OFFICIAL["claim"]])
         request = llm.requests[0]
         prompt = json.loads(request.prompt)
-        assert prompt["sourced_facts"] == [CLAIM_YIELD_7_3_TO_8_4_OFFICIAL["claim"]]
-        assert "sourced_facts" in request.system
+        assert prompt["reference_sourced_facts"] == [
+            CLAIM_YIELD_7_3_TO_8_4_OFFICIAL["claim"]]
+        assert "reference_sourced_facts" in request.system
+        assert "Review ONLY the `body`" in request.system
         assert "never be reported as unsupported" in request.system
 
     async def test_without_the_list_the_prompt_says_so(self):
@@ -197,7 +210,44 @@ class TestReviewerSeesSourcedFacts:
              "content_type": "GUIDE", "target_audience": "a",
              "cta_strategy": {}},
             llm=llm, correlation_id="t")
-        assert json.loads(llm.requests[0].prompt)["sourced_facts"] == []
+        assert json.loads(llm.requests[0].prompt)["reference_sourced_facts"] == []
+
+    async def test_a_finding_that_quotes_the_reference_not_the_body_never_blocks(self):
+        """Mesuré sur le brouillon 86255f33 : cinq « unsupported » high ROI
+        citant des phrases du registre absentes du brouillon. Le relecteur
+        avait relu la référence. Un tel constat est gardé, visible, et ne
+        bloque jamais."""
+        class _EchoingLLM(_CapturingLLM):
+            async def generate(self, request):
+                self.requests.append(request)
+                return LLMResponse(content=json.dumps({"findings": [
+                    {"code": "unsupported_claim", "severity": "high",
+                     "category": "ROI",
+                     "message": "Le taux de rendement est désormais bien "
+                                "supérieur à l'objectif initial."},
+                    {"code": "unsupported_claim", "severity": "high",
+                     "category": "ROI",
+                     "message": "Une installation standard est rentabilisée "
+                                "au bout de 5 ans sans que le texte le "
+                                "justifie."},
+                ]}), provider="stub", model="stub",
+                    usage=LLMUsage(input_tokens=1, output_tokens=1,
+                                   total_tokens=2), latency_ms=1)
+
+        result = await qa_service.run_llm_qa(
+            {"title": "t", "meta_description": "d",
+             "body": "En Wallonie, une installation standard est rentabilisée "
+                     "au bout de 5 ans."},
+            {"primary_query": "q", "search_intent": "INFORMATIONAL",
+             "content_type": "GUIDE", "target_audience": "a",
+             "cta_strategy": {}},
+            llm=_EchoingLLM(), correlation_id="t",
+            sourced_claims=["Le taux de rendement est désormais bien supérieur "
+                            "à l'objectif initial."])
+        codes = [(f["code"], f["blocking"]) for f in result["findings"]]
+        assert ("reference_echo", False) in codes
+        assert ("unsupported_claim", True) in codes
+        assert len(result["blocking_issues"]) == 1
 
 
 # ─── 4. Relancer le rédacteur sur un paquet existant ────────────────────────
@@ -398,8 +448,10 @@ class TestSupportFreeClaim:
         "category": "SUBSIDY", "region": "BE-WAL", "has_dated_support": True,
         "best_source_quality": "OFFICIAL"}
 
+    NO_OFFICIAL_CARRIER = claims_without(CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL)
+
     def test_fails_without_an_official_textual_carrier(self, solar_profile):
-        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS, solar_profile)
+        verdict = _run(self.FAQ3, self.NO_OFFICIAL_CARRIER, solar_profile)
         hits = _findings(verdict, "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE")
         assert hits and self.FAQ3[:40] in hits[0]["detail"]
         assert hits[0]["blocking"]
@@ -407,18 +459,25 @@ class TestSupportFreeClaim:
     def test_the_second_draft_wording_fails_too(self, solar_profile):
         verdict = _run("En résumé, investir dans des panneaux solaires est, "
                        "aujourd'hui, un placement rentable sans aide ni subside "
-                       "grâce à la baisse des prix.", PUBLISHED_CLAIMS,
+                       "grâce à la baisse des prix.", self.NO_OFFICIAL_CARRIER,
                        solar_profile)
         assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict)
 
     def test_a_specialist_carrier_is_not_enough(self, solar_profile):
         specialist = {**self.OFFICIAL_CARRIER, "best_source_quality": "SPECIALIST"}
-        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS + [specialist], solar_profile)
+        verdict = _run(self.FAQ3, self.NO_OFFICIAL_CARRIER + [specialist],
+                       solar_profile)
         assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict)
 
     def test_an_official_carrier_saying_the_same_thing_passes(self, solar_profile):
-        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS + [self.OFFICIAL_CARRIER],
+        verdict = _run(self.FAQ3, self.NO_OFFICIAL_CARRIER + [self.OFFICIAL_CARRIER],
                        solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in _codes(verdict)
+
+    def test_the_real_package_carries_it_officially(self, solar_profile):
+        """Ce que le paquet d'août dit vraiment : la formule est portée par
+        une source OFFICIELLE. La garde passe sur la phrase publiée."""
+        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS, solar_profile)
         assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in _codes(verdict)
 
     def test_an_official_carrier_that_does_not_say_it_is_not_a_carrier(
