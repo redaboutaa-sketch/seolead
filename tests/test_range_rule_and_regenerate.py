@@ -895,3 +895,59 @@ class TestSentenceLevelSources:
         from app.site.publication import _source_date
         assert _source_date(self.FLEMISH) == "1 januari 2024"
         assert _source_date({"published_at": "2024-03-01T00:00:00+00:00"}) == "2024-03-01"
+
+
+# ─── 15. Deux mesures qui refusaient le septième brouillon à tort ───────────
+
+class TestRoiRuleNeedsRoiFigures:
+    CONSUMPTION = ("Par exemple, un ménage de 4 personnes consomme en moyenne "
+                   "5000 kWh par an, ce qui doit être pris en compte lors de "
+                   "l'évaluation de la rentabilité d'une installation.")
+
+    def test_a_consumption_fact_that_says_the_word_is_not_a_payback_statement(
+            self, solar_profile):
+        verdict = _run(self.CONSUMPTION, PUBLISHED_CLAIMS, solar_profile)
+        assert "ROI_WITHOUT_DATED_SOURCE" not in _codes(verdict), verdict["findings"]
+
+    def test_a_payback_duration_from_an_undated_source_still_fails(
+            self, solar_profile):
+        verdict = _run("En Belgique, l'installation est rentabilisée en 5 à 7 ans.",
+                       [CLAIM_ROI_5_TO_7_SPECIALIST], solar_profile)
+        assert "ROI_WITHOUT_DATED_SOURCE" in _codes(verdict)
+
+    def test_a_figure_less_payback_statement_is_outside_this_rule(self, solar_profile):
+        """Documenté, pas maquillé : les contrôles déterministes ne lisent que
+        les phrases qui portent un chiffre ou une année. « rentabilisée
+        rapidement » sans chiffre relève de l'arbitrage lexical et du
+        relecteur assisté, pas de la règle de fraîcheur."""
+        undated = {**CLAIM_ROI_5_TO_7_SPECIALIST,
+                   "claim": "Une installation photovoltaïque est rentabilisée "
+                            "rapidement pour le ménage."}
+        verdict = _run("Une installation photovoltaïque est rentabilisée "
+                       "rapidement pour le ménage.", [undated], solar_profile)
+        assert "ROI_WITHOUT_DATED_SOURCE" not in _codes(verdict)
+
+
+class TestFactUsedByItsFigures:
+    def test_the_walloon_fact_is_used_when_its_figure_is_stated(self):
+        body = ("En Wallonie, une installation standard est généralement "
+                "rentabilisée au bout de 5 ans.")
+        from app.services.intent import normalize_query
+        figures = qa_service._body_figures(body)
+        assert qa_service._fact_echoed(CLAIM_PROSUMER_5_ANS["claim"],
+                                       normalize_query(body), figures)
+
+    def test_the_same_digits_under_another_unit_do_not_count(self):
+        body = "Une installation de 5 kWc convient à ce ménage."
+        from app.services.intent import normalize_query
+        figures = qa_service._body_figures(body)
+        assert not qa_service._fact_echoed(CLAIM_PROSUMER_5_ANS["claim"],
+                                           normalize_query(body), figures)
+
+    def test_a_fact_with_no_figure_still_needs_its_words(self):
+        from app.services.intent import normalize_query
+        fact = "Une carte solaire permet de connaître le potentiel de chaque toit bruxellois."
+        body = "Il existe une carte solaire du potentiel de chaque toit bruxellois."
+        figures = qa_service._body_figures(body)
+        assert qa_service._fact_echoed(fact, normalize_query(body), figures)
+        assert not qa_service._fact_echoed(fact, normalize_query("Rien."), figures)
