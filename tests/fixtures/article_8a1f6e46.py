@@ -52,11 +52,11 @@ PUBLISHED_BODY = "\n\n".join([
 # ── Les affirmations du registre que ces phrases ont rencontrées ─────────────
 
 def _claim(text, *, status, risk, category, region="BE", regionally=False,
-           dated=False, reason="fixture 8a1f6e46"):
+           dated=False, quality="SPECIALIST", reason="fixture 8a1f6e46"):
     return {"claim": text, "evidence_status": status, "claim_risk": risk,
             "category": category, "region": region,
             "regionally_determined": regionally, "has_dated_support": dated,
-            "reason": reason}
+            "best_source_quality": quality, "reason": reason}
 
 # Le rival étayé qui a « gagné » la phrase A (paires 1, 2, 3) — un passage sur
 # le MÉCANISME du tarif prosumer, sans aucun chiffre de rentabilité.
@@ -66,7 +66,7 @@ CLAIM_PROSUMER_MECHANISM = _claim(
     "utilisateurs du réseau de distribution d'électricité à l'entretien du "
     "réseau - une installation reste rentable.",
     status="SUPPORTED", risk="LOW", category="GENERAL", region="BE-WAL",
-    dated=True)
+    dated=True, quality="OFFICIAL")
 
 # L'affirmation contestée de la paire 1 : « moins de 7 ans », NON étayée, et
 # déjà plus prudente que le « 5 ans » publié.
@@ -118,13 +118,13 @@ CLAIM_YIELD_7_3_TO_8_4_OFFICIAL = _claim(
     "La rentabilité atteinte par les petites installations photovoltaïques "
     "est aujourd'hui comprise entre 7,3% et 8,4%.",
     status="SUPPORTED", risk="HIGH", category="ROI", region="BE-WAL",
-    regionally=True, dated=True)   # energie.wallonie.be, UNDATED_CURRENT
+    regionally=True, dated=True, quality="OFFICIAL")   # energie.wallonie.be, UNDATED_CURRENT
 
 CLAIM_REVERSE_METER_2030 = _claim(
     "Les installations mises en service avant le 31 décembre 2023 conservent "
     "le compteur qui tourne à l'envers jusqu'au 31 décembre 2030.",
     status="SUPPORTED", risk="HIGH", category="GRID_RULE", region="BE-WAL",
-    regionally=True, dated=True)
+    regionally=True, dated=True, quality="OFFICIAL")
 
 PUBLISHED_CLAIMS = [
     CLAIM_PROSUMER_MECHANISM, CLAIM_ROI_UNDER_7,

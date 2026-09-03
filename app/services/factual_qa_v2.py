@@ -51,7 +51,7 @@ _MATCH_MARGIN = 0.05
 # string on purpose: it is the knob that decides every arbitration, and a
 # re-judgement under a different setting must read as a different engine rather
 # than as an unexplained reversal.
-ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}/segments-2"
+ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}/segments-3"
 # Conflicting evidence blocks by default; a vertical may downgrade it to an
 # explicit unresolved note instead.
 _CONFLICT_POLICY_BLOCK = True
@@ -96,6 +96,31 @@ _RISKY_RANGE = re.compile(
     rf"({_QUANTITY})\s*(?:{_RISKY_UNIT})",
     re.IGNORECASE)
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+# The unit a figure carries is part of the figure (2026-09-03, second
+# regenerated draft): « rentabilisée au bout de 5 ans » was read as covered by
+# a supported passage that stated a 5 of another kind. Digits alone are not a
+# statement; « 5 kWc » does not source « 5 ans ».
+_UNIT_CLASSES: tuple[tuple[str, re.Pattern], ...] = (
+    ("duration", re.compile(r"^(?:ans?|mois|jours?|years?|jaar)$", re.I)),
+    ("percent", re.compile(r"^%$")),
+    ("money", re.compile(r"^(?:€|eur|euros?)$", re.I)),
+    ("energy", re.compile(r"^(?:kwh)$", re.I)),
+    ("power", re.compile(r"^(?:kwc|kwp|kva|kwe|kw|wc|wp)$", re.I)),
+    ("area", re.compile(r"^(?:m²|m2)$", re.I)),
+    ("persons", re.compile(r"^personnes?$", re.I)),
+)
+BARE = "bare"
+YEAR = "year"
+
+
+def _unit_class(unit: str) -> str:
+    unit = unit.strip()
+    for name, pattern in _UNIT_CLASSES:
+        if pattern.match(unit):
+            return name
+    return BARE
+
+
 _ANY_QUANTITY = re.compile(rf"(?<![\w/])({_QUANTITY})")
 # « 1.000 kWh X 5 kWe = 5.000 kWh » : un calcul explicite porte ses propres
 # chiffres ; ils n'ont pas à être sourcés un par un.
@@ -107,6 +132,14 @@ _ARITHMETIC = re.compile(
     rf"=\s*\(?{_QUANTITY}", re.IGNORECASE)
 # Ce qui fait d'une phrase une affirmation de retour sur investissement, quelle
 # que soit la catégorie où le classifieur a rangé l'affirmation qu'elle reprend.
+# « sans soutien public », « sans aide ni subside », « malgré l'arrêt des
+# primes » — a statement about the present of public support.
+_SUPPORT_FREE = re.compile(
+    r"\b(?:sans|malgr[ée]\s+(?:l['’]arr[êe]t|la\s+fin|la\s+suppression|"
+    r"la\s+disparition)\s+(?:des?|du|de\s+la|de\s+l['’]|de)?)\s*"
+    r"(?:tout\s+|toute\s+|aucun[e]?\s+)?"
+    r"(?:soutien(?:\s+public)?|aides?(?:\s+publiques?|\s+financi[èe]res?)?|"
+    r"subsides?|primes?|subventions?)\b", re.IGNORECASE)
 _ROI_SHAPE = re.compile(
     r"rentabilis|amorti|retour sur investissement|temps de retour|payback|"
     r"rentabilit[ée]\s+(?:est|atteint|comprise|de|des|d')|taux de rendement|"
@@ -134,18 +167,40 @@ def _quantities(text: str) -> set[str]:
     return {f for f in found if f}
 
 
-def _range_spans(text: str) -> list[tuple[int, int, str, str]]:
-    return [(m.start(), m.end(), _digits(m.group(1)), _digits(m.group(2)))
-            for m in _RISKY_RANGE.finditer(text)]
+def _range_spans(text: str) -> list[tuple[int, int, str, str, str]]:
+    """(start, end, low, high, unit class) for every range a text states."""
+    out = []
+    for m in _RISKY_RANGE.finditer(text):
+        unit = m.group(0)[m.end(2) - m.start():]
+        out.append((m.start(), m.end(), _digits(m.group(1)),
+                    _digits(m.group(2)), _unit_class(unit)))
+    return out
 
 
-def risky_ranges(text: str) -> set[tuple[str, str]]:
-    """The ranges a text states, as (low, high) digit pairs."""
-    return {(lo, hi) for _, _, lo, hi in _range_spans(text) if lo and hi}
+def risky_ranges(text: str) -> set[tuple[str, str, str]]:
+    """The ranges a text states, as (low, high, unit class)."""
+    return {(lo, hi, cls) for _, _, lo, hi, cls in _range_spans(text)
+            if lo and hi}
 
 
-def claim_figures(text: str) -> tuple[set[str], set[tuple[str, str]]]:
-    """What a claim states: its standalone figures, and its ranges.
+def risky_units(text: str) -> dict[str, set[str]]:
+    """Each risky segment of a sentence → the unit class(es) it carries."""
+    units: dict[str, set[str]] = {}
+    for m in _RISKY_SEGMENT.finditer(text):
+        unit = m.group(0)[m.end(1) - m.start():]
+        units.setdefault(_digits(m.group(1)), set()).add(_unit_class(unit))
+    for _, _, lo, hi, cls in _range_spans(text):
+        units.setdefault(lo, set()).add(cls)
+        units.setdefault(hi, set()).add(cls)
+    for year in _YEAR.findall(text):
+        units.setdefault(year, set()).add(YEAR)
+    return {k: v for k, v in units.items() if k}
+
+
+def claim_figures(text: str) -> tuple[dict[str, set[str]],
+                                      set[tuple[str, str, str]]]:
+    """What a claim states: its standalone figures (with their unit classes)
+    and its ranges.
 
     A figure that appears only as one end of a range is NOT a standalone
     figure. Measured 2026-09-03 on the second draft of the payback article:
@@ -154,31 +209,45 @@ def claim_figures(text: str) -> tuple[set[str], set[tuple[str, str]]]:
     The « 5 » existed in the ledger; the statement did not.
     """
     spans = _range_spans(text)
-    ranges = {(lo, hi) for _, _, lo, hi in spans if lo and hi}
-    standalone: set[str] = set()
+    ranges = {(lo, hi, cls) for _, _, lo, hi, cls in spans if lo and hi}
+    standalone: dict[str, set[str]] = {}
+    unit_bearing = {m.start(): m for m in _RISKY_SEGMENT.finditer(text)}
     for m in _ANY_QUANTITY.finditer(text):
-        if any(start <= m.start() < end for start, end, _, _ in spans):
+        if any(start <= m.start() < end for start, end, *_ in spans):
             continue
         digits = _digits(m.group(1))
-        if digits:
-            standalone.add(digits)
-    standalone |= set(_YEAR.findall(text))
+        if not digits:
+            continue
+        seg = unit_bearing.get(m.start())
+        cls = (_unit_class(seg.group(0)[seg.end(1) - seg.start():])
+               if seg is not None else BARE)
+        standalone.setdefault(digits, set()).add(cls)
+    for year in _YEAR.findall(text):
+        standalone.setdefault(year, set()).add(YEAR)
     return standalone, ranges
 
 
 def covers(claim: dict, segments: set[str],
-           ranges: set[tuple[str, str]] | frozenset = frozenset()) -> bool:
+           ranges: set[tuple[str, str, str]] | frozenset = frozenset(),
+           units: dict[str, set[str]] | None = None) -> bool:
     """Whether a claim carries every risky segment of a sentence.
 
-    A segment is carried by a standalone figure of the claim, or by a range
-    of the claim that the sentence states in full (`ranges` are the
-    sentence's own). One end of a range is not the range.
+    A segment is carried by a standalone figure of the claim of the same
+    unit class, or by a range of the claim that the sentence states in full
+    (`ranges` are the sentence's own). One end of a range is not the range;
+    a figure of another unit is another figure. With `units` absent the
+    class is not checked — the lenient form the explain report uses to show
+    what was excluded and why.
     """
     standalone, claim_ranges = claim_figures(str(claim.get("claim", "")))
     for segment in segments:
-        if segment in standalone:
+        wanted = (units or {}).get(segment)
+        if segment in standalone and (wanted is None
+                                      or standalone[segment] & wanted):
             continue
-        if any(segment in r and r in ranges for r in claim_ranges):
+        if any(segment in (lo, hi) and (lo, hi, cls) in ranges
+               and (wanted is None or cls in wanted)
+               for lo, hi, cls in claim_ranges):
             continue
         return False
     return True
@@ -187,7 +256,15 @@ def covers(claim: dict, segments: set[str],
 def endpoint_only(claim: dict, segment: str) -> bool:
     """Whether a claim carries this figure only as one end of a range."""
     standalone, claim_ranges = claim_figures(str(claim.get("claim", "")))
-    return segment not in standalone and any(segment in r for r in claim_ranges)
+    return segment not in standalone and any(segment in (lo, hi)
+                                             for lo, hi, _ in claim_ranges)
+
+
+def unit_only(claim: dict, segment: str, units: dict[str, set[str]]) -> bool:
+    """Whether a claim carries this figure only under another unit."""
+    standalone, _ = claim_figures(str(claim.get("claim", "")))
+    wanted = units.get(segment) or set()
+    return segment in standalone and not (standalone[segment] & wanted)
 
 
 def quantity_labels(text: str) -> dict[str, str]:
@@ -215,11 +292,19 @@ def body_segments(body: str) -> set[str]:
     return segments
 
 
-def body_ranges(body: str) -> set[tuple[str, str]]:
-    ranges: set[tuple[str, str]] = set()
+def body_ranges(body: str) -> set[tuple[str, str, str]]:
+    ranges: set[tuple[str, str, str]] = set()
     for sentence in _all_sentences(body):
         ranges |= risky_ranges(sentence)
     return ranges
+
+
+def body_units(body: str) -> dict[str, set[str]]:
+    units: dict[str, set[str]] = {}
+    for sentence in _all_sentences(body):
+        for digits, classes in risky_units(sentence).items():
+            units.setdefault(digits, set()).update(classes)
+    return units
 
 
 def _clean_markdown(body: str) -> str:
@@ -340,6 +425,7 @@ def _best_rival(sentence: str, claim: dict,
     """
     segments = risky_segments(sentence)
     ranges = risky_ranges(sentence)
+    units = risky_units(sentence)
     best, rival = 0.0, None
     for candidate in supported:
         if candidate is claim:
@@ -347,7 +433,7 @@ def _best_rival(sentence: str, claim: dict,
         strength = _match_strength(sentence, candidate)
         if strength <= 0.0:
             continue
-        if segments and not covers(candidate, segments, ranges):
+        if segments and not covers(candidate, segments, ranges, units):
             continue
         if strength > best:
             best, rival = strength, candidate
@@ -445,14 +531,17 @@ def explain_arbitration(draft: dict, package: dict,
                 nearest_strength, nearest = strength, candidate
         verdict, _ = _arbitrate(sentence, claim, supported)
         ranges = risky_ranges(sentence)
+        units = risky_units(sentence)
         rows.append({
             "risky_segments": sorted(segments),
+            "risky_units": {k: sorted(v) for k, v in units.items()},
             "rival_covers_segments": bool(rival) and covers(rival, segments,
-                                                            ranges),
+                                                            ranges, units),
             "nearest_supported_claim": (str(nearest.get("claim"))[:200]
                                         if nearest is not None else None),
             "nearest_excluded_for": (
-                sorted(s for s in segments if not covers(nearest, {s}, ranges))
+                sorted(s for s in segments
+                       if not covers(nearest, {s}, ranges, units))
                 if nearest is not None and nearest is not rival else []),
             "check": check,
             "verdict": verdict,
@@ -620,20 +709,27 @@ def run_factual_qa_v2(draft: dict, package: dict,
     for sentence in _all_sentences(body):
         segments = risky_segments(sentence)
         ranges = risky_ranges(sentence)
+        units = risky_units(sentence)
         extracted_any = extracted_any or bool(segments) or bool(_numbers(sentence))
         if not segments or _ARITHMETIC.search(sentence):
             continue
         missing = sorted(s for s in segments
-                         if not any(covers(c, {s}, ranges) for c in supported))
+                         if not any(covers(c, {s}, ranges, units)
+                                    for c in supported))
         if missing:
             # A figure the ledger carries only as one end of a range is the
             # case worth naming: the writer did not invent it, it collapsed a
             # range to its edge, and the fix is to state the range.
             collapsed = sorted(s for s in missing
                                if any(endpoint_only(c, s) for c in supported))
+            other_unit = sorted(s for s in missing if s not in collapsed
+                                and any(unit_only(c, s, units) for c in supported))
             hint = (f" Figure(s) {', '.join(collapsed)} exist in the evidence "
                     f"only as one end of a range: state the range, not its "
                     f"edge." if collapsed else "")
+            hint += (f" Figure(s) {', '.join(other_unit)} exist in the "
+                     f"evidence only with another unit: a 5 of one kind does "
+                     f"not source a 5 of another." if other_unit else "")
             add(_finding(
                 "NUMBER_WITHOUT_SOURCE",
                 f"The draft states figure(s) {', '.join(missing)} that no "
@@ -661,9 +757,11 @@ def run_factual_qa_v2(draft: dict, package: dict,
             continue
         segments = risky_segments(sentence)
         ranges = risky_ranges(sentence)
+        units = risky_units(sentence)
         # The claims that could carry this statement: those stating its
         # figures — or, for a figure-less one, those it lexically matches.
-        candidates = ([c for c in supported if covers(c, segments, ranges)]
+        candidates = ([c for c in supported
+                       if covers(c, segments, ranges, units)]
                       if segments
                       else [c for c in supported if _matches_claim(sentence, c)])
         if not candidates:
@@ -676,6 +774,30 @@ def run_factual_qa_v2(draft: dict, package: dict,
                 f"({', '.join(sorted({str(c.get('category')) for c in candidates}))}). "
                 f"Payback depends on prices and support schemes that move; an "
                 f"undated figure cannot describe the present.",
+                blocking=True, detail=sentence[:280]))
+
+    # ── 5. « Rentable sans soutien public » : official, textually, or gone ──
+    # Owner's rule B.4 (2026-09-03). The sentence carries no figure, so no
+    # numeric check sees it, and the model-assisted reviewer stopped
+    # flagging it once it saw the sourced facts. It is a SUBSIDY statement
+    # about the present that only a public authority may make: it must
+    # match a SUPPORTED claim whose best source is OFFICIAL and whose own
+    # text says the same thing about support.
+    for sentence in _all_sentences(body):
+        if not _SUPPORT_FREE.search(sentence):
+            continue
+        carriers = [
+            c for c in supported
+            if _matches_claim(sentence, c)
+            and _SUPPORT_FREE.search(str(c.get("claim", "")))
+            and str(c.get("best_source_quality") or "").upper() == "OFFICIAL"]
+        if not carriers:
+            add(_finding(
+                "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE",
+                "The draft states that an installation pays off without public "
+                "support (or despite the end of a scheme). No SUPPORTED claim "
+                "from an OFFICIAL source says so in those terms; delete the "
+                "statement rather than soften it.",
                 blocking=True, detail=sentence[:280]))
 
     if not supported and draft_claims:
