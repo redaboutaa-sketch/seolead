@@ -31,7 +31,8 @@ from app.providers.llm.base import LLMResponse, LLMUsage
 from app.services import draft_retry, factual_qa_v2, qa_service
 from app.services.draft_stage import write_and_judge
 from app.services.factual_qa_v2 import (_UNREAD, _arbitrate, claim_figures,
-                                        covers, endpoint_only, risky_ranges)
+                                        covers, endpoint_only, risky_ranges,
+                                        risky_units, unit_only)
 from app.services.provider_usage import UsageRecorder
 from app.services.research_planner import (AuthoritativeQuery, ResearchPlan,
                                            pending_plan)
@@ -67,18 +68,18 @@ def _findings(verdict, code):
 class TestRangeEndpoints:
     def test_a_range_yields_no_standalone_figure(self):
         standalone, ranges = claim_figures(CLAIM_ROI_5_TO_7_SPECIALIST["claim"])
-        assert ("5", "7") in ranges
+        assert ("5", "7", "duration") in ranges
         assert "5" not in standalone and "7" not in standalone
 
     def test_a_percentage_range_is_a_range(self):
-        assert ("73", "84") in risky_ranges("comprise entre 7,3% et 8,4%")
+        assert ("73", "84", "percent") in risky_ranges("comprise entre 7,3% et 8,4%")
 
     def test_one_end_alone_is_not_covered(self):
         assert not covers(CLAIM_ROI_5_TO_7_SPECIALIST, {"5"})
         assert endpoint_only(CLAIM_ROI_5_TO_7_SPECIALIST, "5")
 
     def test_the_same_range_stated_in_full_is_covered(self):
-        assert covers(CLAIM_ROI_5_TO_7_SPECIALIST, {"5", "7"}, {("5", "7")})
+        assert covers(CLAIM_ROI_5_TO_7_SPECIALIST, {"5", "7"}, {("5", "7", "duration")})
         assert covers(CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, {"73", "84"},
                       risky_ranges("comprise entre 7,3% et 8,4%"))
 
@@ -329,3 +330,110 @@ class TestPendingPlan:
 
     def test_an_unrecorded_package_owes_everything(self):
         assert len(pending_plan(self._plan(), None).queries) == 2
+
+
+# ─── 6. Une unité fait partie du chiffre ────────────────────────────────────
+
+class TestUnitsArePartOfTheFigure:
+    """Deuxième brouillon régénéré (9cbebf5e) : la lecture étayée qui
+    « couvrait » le 5 ans était le passage officiel sur le tarif prosumer,
+    qui porte un 5 d'une autre espèce. Seize AMBIGUOUS_MATCH en sont sortis."""
+
+    OFFICIAL_5_KWC = {"claim": "Même à la suite de l'entrée en vigueur du tarif "
+                               "prosumer, une installation de 5 kWc reste "
+                               "rentable pour le ménage.",
+                      "evidence_status": "SUPPORTED", "claim_risk": "LOW",
+                      "category": "GENERAL", "region": "BE-WAL",
+                      "has_dated_support": True, "best_source_quality": "OFFICIAL"}
+    OFFICIAL_5_ANS = {**OFFICIAL_5_KWC,
+                      "claim": "Même à la suite de l'entrée en vigueur du tarif "
+                               "prosumer, une installation reste rentable et "
+                               "est amortie en 5 ans."}
+    FAQ = ("Oui, en Wallonie, les installations sont rentabilisées au bout de "
+           "5 ans, même avec le tarif prosumer en vigueur.")
+
+    def test_a_sentence_figure_carries_its_unit_class(self):
+        assert risky_units(self.FAQ) == {"5": {"duration"}}
+        assert risky_units("avant le 31 décembre 2023") == {"31": {"bare"},
+                                                            "2023": {"year"}} \
+            or risky_units("avant le 31 décembre 2023")["2023"] == {"year"}
+
+    def test_five_kwc_does_not_source_five_years(self):
+        units = risky_units(self.FAQ)
+        assert not covers(self.OFFICIAL_5_KWC, {"5"}, set(), units)
+        assert unit_only(self.OFFICIAL_5_KWC, "5", units)
+        assert covers(self.OFFICIAL_5_ANS, {"5"}, set(), units)
+
+    def test_the_faq_sentence_is_a_figure_without_source_not_an_ambiguity(
+            self, solar_profile):
+        claims = TestUnreadIsNotAmbiguous.CONTESTED + [self.OFFICIAL_5_KWC]
+        verdict = _run(self.FAQ, claims, solar_profile)
+        assert "AMBIGUOUS_MATCH" not in _codes(verdict), verdict["findings"]
+        hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
+        assert hits and "another unit" in hits[0]["message"]
+
+    def test_an_official_dated_five_years_would_source_it(self, solar_profile):
+        """La mutation qui compte : si le portail wallon disait « amortie en
+        5 ans », la phrase serait sourcée — et la garde la laisserait passer."""
+        verdict = _run(self.FAQ, [self.OFFICIAL_5_ANS], solar_profile)
+        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict)
+        assert "ROI_WITHOUT_DATED_SOURCE" not in _codes(verdict)
+
+    def test_the_lenient_form_still_shows_what_was_excluded(self):
+        # explain rows use covers() without units to show the nearest reading
+        assert covers(self.OFFICIAL_5_KWC, {"5"})
+
+
+# ─── 7. « Rentable sans soutien public » : officiel, textuellement, ou rien ─
+
+class TestSupportFreeClaim:
+    # Phrase du brouillon régénéré dc2a88d9, sans aucun chiffre : invisible
+    # aux gardes numériques, plus signalée par le relecteur assisté.
+    FAQ3 = ("Oui, même sans soutien public, les petites installations restent "
+            "intéressantes.")
+    OFFICIAL_CARRIER = {
+        "claim": "Même sans soutien public, les petites installations "
+                 "photovoltaïques restent intéressantes pour les ménages.",
+        "evidence_status": "SUPPORTED", "claim_risk": "HIGH",
+        "category": "SUBSIDY", "region": "BE-WAL", "has_dated_support": True,
+        "best_source_quality": "OFFICIAL"}
+
+    def test_fails_without_an_official_textual_carrier(self, solar_profile):
+        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS, solar_profile)
+        hits = _findings(verdict, "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE")
+        assert hits and self.FAQ3[:40] in hits[0]["detail"]
+        assert hits[0]["blocking"]
+
+    def test_the_second_draft_wording_fails_too(self, solar_profile):
+        verdict = _run("En résumé, investir dans des panneaux solaires est, "
+                       "aujourd'hui, un placement rentable sans aide ni subside "
+                       "grâce à la baisse des prix.", PUBLISHED_CLAIMS,
+                       solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict)
+
+    def test_a_specialist_carrier_is_not_enough(self, solar_profile):
+        specialist = {**self.OFFICIAL_CARRIER, "best_source_quality": "SPECIALIST"}
+        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS + [specialist], solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict)
+
+    def test_an_official_carrier_saying_the_same_thing_passes(self, solar_profile):
+        verdict = _run(self.FAQ3, PUBLISHED_CLAIMS + [self.OFFICIAL_CARRIER],
+                       solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in _codes(verdict)
+
+    def test_an_official_carrier_that_does_not_say_it_is_not_a_carrier(
+            self, solar_profile):
+        """Le passage officiel sur le mécanisme du tarif prosumer ressemble à
+        la phrase mais ne dit rien du soutien public : il ne la porte pas."""
+        assert CLAIM_PROSUMER_MECHANISM["best_source_quality"] == "OFFICIAL"
+        verdict = _run("Même avec le tarif prosumer et sans aucune prime, une "
+                       "installation reste rentable en Wallonie.",
+                       [CLAIM_PROSUMER_MECHANISM], solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict)
+
+    def test_the_revised_article_makes_no_such_claim(self, solar_profile):
+        verdict = _run(REVISED_BODY, PUBLISHED_CLAIMS, solar_profile)
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in _codes(verdict)
+
+    def test_the_rewrite_is_a_writing_fault_the_writer_may_answer(self):
+        assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in draft_retry.NOT_RETRIABLE

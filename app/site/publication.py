@@ -345,6 +345,7 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
     """
     needed = factual_qa_v2.body_segments(body)
     ranges = factual_qa_v2.body_ranges(body)
+    units = factual_qa_v2.body_units(body)
     if not needed:
         return []
     supported = [c for c in claims
@@ -356,7 +357,8 @@ def render_sources(body: str, claims: list[dict]) -> list[dict]:
         # The same coverage rule as the gate: one end of a range does not
         # source a figure, so it is not listed as its source either.
         figures = {s for s in needed
-                   if s in labels and factual_qa_v2.covers(claim, {s}, ranges)}
+                   if s in labels
+                   and factual_qa_v2.covers(claim, {s}, ranges, units)}
         if not figures:
             continue
         for evidence in claim.get("evidence") or []:
