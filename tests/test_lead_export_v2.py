@@ -12,6 +12,7 @@ Ce fichier prouve, sans qu'aucune requête ne quitte le processus :
 2. la corrélation `sl-<uuid4>` et l'empreinte tiennent sur un rejeu : même
    corrélation, corps octet pour octet identique, 200 REPLAY ;
 3. une charge v1 gelée n'est jamais déposée sur la route v2 ;
+4. un lead archivé n'est jamais sélectionné par `leads export`.
 
 Le digest golden v2 de la PLATEFORME n'existe pas dans ce dépôt ; celui
 épinglé ici est l'identité producteur d'une charge synthétique gelée.
@@ -359,3 +360,64 @@ class TestRejeu:
         assert lead.external_correlation_id == correlation
         assert lead.state == LeadState.PENDING_EXPORT.value
         assert lead.export_error.startswith("STALE_CONTRACT")
+
+
+# ── 5 — archiver : hors sélection d'export, journalisé, dry-run par défaut ──
+
+@pytest.mark.asyncio
+class TestArchivage:
+
+    async def test_un_lead_archive_n_est_jamais_selectionne(self, session,
+                                                            solar_site):
+        lead = await _capturer(session, solar_site)
+        assert [l.id for l in await lead_export.leads_a_exporter(
+            session, vertical_code="SOLAR_BE")] == [lead.id]
+        r = await lead_export.archiver_lead(session, lead, by="reda",
+                                            reason="soumission de test",
+                                            apply=True)
+        assert r.applied and r.previous_state == LeadState.PENDING_EXPORT.value
+        assert lead.state == LeadState.ARCHIVED.value
+        assert await lead_export.leads_a_exporter(session,
+                                                  vertical_code="SOLAR_BE") == []
+        # Un export lancé ensuite ne le touche pas non plus.
+        faux = FauxProspect360()
+        for attente in await lead_export.leads_a_exporter(session,
+                                                          vertical_code="SOLAR_BE"):
+            await _exporter(session, attente, faux)
+        assert faux.recu == []
+
+    async def test_le_journal_porte_qui_pourquoi_quand(self, session, solar_site):
+        lead = await _capturer(session, solar_site)
+        await lead_export.archiver_lead(session, lead, by="reda",
+                                        reason="soumission de test", apply=True)
+        journal = lead.qualification["_archive"]
+        assert journal["recorded_by"] == "reda"
+        assert journal["reason"] == "soumission de test"
+        assert journal["previous_state"] == LeadState.PENDING_EXPORT.value
+        assert journal["recorded_at"]
+
+    async def test_sans_apply_rien_n_est_ecrit(self, session, solar_site):
+        lead = await _capturer(session, solar_site)
+        r = await lead_export.archiver_lead(session, lead, by="reda",
+                                            reason="test", apply=False)
+        assert not r.applied and r.state == LeadState.PENDING_EXPORT.value
+        assert lead.state == LeadState.PENDING_EXPORT.value
+        assert "_archive" not in (lead.qualification or {})
+
+    async def test_un_lead_exporte_ne_s_archive_pas(self, session, solar_site):
+        lead = await _capturer(session, solar_site)
+        await _exporter(session, lead, FauxProspect360())
+        assert lead.state == LeadState.EXPORTED.value
+        with pytest.raises(lead_export.ExportRefuse):
+            await lead_export.archiver_lead(session, lead, by="reda",
+                                            reason="x", apply=True)
+        assert lead.state == LeadState.EXPORTED.value
+
+    async def test_qui_et_pourquoi_sont_obligatoires(self, session, solar_site):
+        lead = await _capturer(session, solar_site)
+        with pytest.raises(ValueError):
+            await lead_export.archiver_lead(session, lead, by="", reason="x",
+                                            apply=True)
+        with pytest.raises(ValueError):
+            await lead_export.archiver_lead(session, lead, by="reda", reason=" ",
+                                            apply=True)

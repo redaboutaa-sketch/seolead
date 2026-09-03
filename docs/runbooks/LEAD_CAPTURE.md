@@ -160,3 +160,18 @@ Issues possibles par lead : `CREATED` (201), `REPLAY` (200, prospect
 d'origine), `CONFLICT` (409, terminal), `UNAUTHORIZED`, `REJECTED`,
 `RETRYABLE`, `STALE_CONTRACT` (charge gelée d'une autre version : jamais
 déposée, lead inchangé, regard humain).
+
+## Archiver un lead — hors sélection d'export
+
+Un lead de test, ou un lead qui ne doit pas être déposé, se sort de la
+sélection sans être effacé :
+
+```bash
+seolead leads archive <id ou préfixe> --by "reda" --reason "soumission de test"           # dry-run : dit ce qu'il ferait
+seolead leads archive <id ou préfixe> --by "reda" --reason "soumission de test" --apply   # écrit ARCHIVED
+```
+
+Refusé pour un lead `EXPORTED` / `EXPORTING`. Qui, pourquoi, quand et l'état
+précédent sont conservés sur le lead (`qualification._archive`). Un lead
+`ARCHIVED` n'est jamais sélectionné par `leads export` (test
+`TestArchivage`).

@@ -239,3 +239,54 @@ async def leads_a_exporter(session: AsyncSession, *, vertical_code: str,
         .limit(limit))
     return list(resultat.scalars().all())
 
+
+# ── Archiver un lead (2026-09-03) ────────────────────────────────────────────
+# Un lead de test du propriétaire attend en PENDING_EXPORT et serait déposé au
+# premier `leads export`. Aucune commande ne l'écartait. L'archivage est
+# l'acte humain qui le sort de la sélection d'export sans l'effacer.
+
+ETATS_ARCHIVABLES = (LeadState.NEW.value, LeadState.PENDING_EXPORT.value,
+                     LeadState.EXPORT_FAILED.value, LeadState.REJECTED_SPAM.value)
+
+
+@dataclass(frozen=True)
+class ResultatArchivage:
+    lead_id: str
+    previous_state: str
+    state: str
+    applied: bool
+
+
+async def archiver_lead(session: AsyncSession, lead: CapturedLead, *,
+                        by: str, reason: str, apply: bool) -> ResultatArchivage:
+    """Passer un lead en ARCHIVED — hors sélection d'export, journalisé.
+
+    Refusé pour un lead exporté ou en cours d'export : il est déjà chez la
+    destination, et l'archiver ici prétendrait le contraire. Sans `apply`,
+    rien n'est écrit : la commande dit ce qu'elle ferait.
+    """
+    if not by.strip() or not reason.strip():
+        raise ValueError("archiving needs who and why")
+    if lead.state not in ETATS_ARCHIVABLES:
+        raise ExportRefuse(
+            f"a lead in state {lead.state} cannot be archived: it is, or is "
+            f"being, exported")
+    previous = lead.state
+    if not apply:
+        return ResultatArchivage(lead_id=str(lead.id), previous_state=previous,
+                                 state=previous, applied=False)
+    now = datetime.now(timezone.utc)
+    lead.state = LeadState.ARCHIVED.value
+    # Réaffectation complète : muter le dict en place échappe au détecteur de
+    # changement de la colonne JSON. Même clé réservée que `_manual_followup`.
+    lead.qualification = {**(lead.qualification or {}),
+                          "_archive": {"recorded_by": by.strip(),
+                                       "reason": reason.strip(),
+                                       "previous_state": previous,
+                                       "recorded_at": now.isoformat()}}
+    await session.flush()
+    await session.commit()
+    logger.info("lead archived", extra={"lead_id": str(lead.id),
+                                        "previous_state": previous})
+    return ResultatArchivage(lead_id=str(lead.id), previous_state=previous,
+                             state=lead.state, applied=True)
