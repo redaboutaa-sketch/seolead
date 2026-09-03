@@ -1,18 +1,25 @@
 """Tranche structurelle (lot C, 2026-09-03) — six gardes et une règle.
 
-Le cas d'épreuve est l'article `8a1f6e46` tel qu'il a été publié le 2026-08-31
-(`tests/fixtures/article_8a1f6e46.py`, repris au caractère près des rapports
-de l'hôte). La règle du propriétaire pour chaque garde :
+Le cas d'épreuve est l'article `8a1f6e46` tel qu'il a été publié le
+2026-08-31 : son corps exact et les 199 affirmations de son paquet
+(`tests/fixtures/article_8a1f6e46.py`). La règle du propriétaire :
 
-    elle doit ÉCHOUER sur cette version et PASSER sur la version révisée.
-    Une garde qui passe sur les deux ne prouve rien.
+    chaque garde doit ÉCHOUER sur cette version et PASSER sur la version
+    révisée. Une garde qui passe sur les deux ne prouve rien.
 
-Chaque classe ci-dessous porte donc au moins une paire de tests : le rendu
-publié, le rendu révisé. Là où une garde ne mord PAS sur l'article publié
-avec les données réelles du paquet (la couverture numérique, C.3 : chaque
-chiffre de l'article existe dans une affirmation étayée — c'est la fraîcheur
-et l'arbitrage qui le condamnent, pas la couverture), le test le dit et
-prouve la garde sur la mutation la plus proche de l'article.
+Ce que les données réelles disent, et que ce fichier ne maquille pas : le
+« 5 ans » publié était porté textuellement par le portail wallon (OFFICIEL,
+Wallonie, en vigueur), et « même sans soutien public » par une affirmation
+OFFICIELLE datée. Sur l'article publié, l'arbitrage (C.1), la couverture
+numérique (C.3), la fraîcheur (C.4) et la garde « sans soutien public »
+PASSENT — à raison. Elles sont prouvées sur la mutation la plus proche :
+le passage prosumer tel que le rapport --explain l'avait tronqué, sans le
+chiffre — l'erreur qui a fait croire, un matin, que rien ne portait le 5 ans.
+
+Ce qui ÉCHOUE réellement sur l'article publié : la règle 2023/2030 sans
+région (C.1, portée régionale), le relecteur assisté (C.2), les cinq
+recherches proposées jamais lancées (C.5), l'approbation sans empreinte, et
+l'absence de toute source rendue (B.7). La version révisée passe tout.
 """
 from __future__ import annotations
 
@@ -40,10 +47,13 @@ from app.site.publication import (PublicationRefused, compute_fingerprint,
                                   evaluate_gate, render_sources, stage_content,
                                   to_dto)
 from tests.fixtures.article_8a1f6e46 import (
-    CLAIM_FAMILY_5000, CLAIM_PROSUMER_MECHANISM, CLAIM_REVERSE_METER_2030,
+    CLAIM_FAMILY_5000, CLAIM_PROSUMER_5_ANS, CLAIM_PROSUMER_MECHANISM,
+    CLAIM_PROSUMER_MECHANISM_TRUNCATED, CLAIM_REVERSE_METER_2030,
     CLAIM_ROI_5_TO_7_SPECIALIST, CLAIM_ROI_UNDER_7,
-    CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, PUBLISHED_BODY, PUBLISHED_CLAIMS,
-    REVISED_BODY, REVISED_SENTENCE_A, SENTENCE_A, SENTENCE_B, SENTENCE_C)
+    CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL, CLAIM_YIELD_7_3_TO_8_4_OFFICIAL,
+    PUBLISHED_BODY, PUBLISHED_CLAIMS, REVISED_BODY, REVISED_SENTENCE_A,
+    SENTENCE_A, SENTENCE_B, SENTENCE_C, SENTENCE_E, SENTENCE_F,
+    claims_without)
 
 # ─── Outils ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +73,12 @@ def _findings(verdict, code):
 
 
 SUPPORTED = [c for c in PUBLISHED_CLAIMS if c["evidence_status"] == "SUPPORTED"]
+# La mutation : le paquet tel que le rapport --explain le montrait, le passage
+# prosumer tronqué avant « … rentabilisée au bout de 5 ans ».
+TRUNCATED_CLAIMS = [CLAIM_PROSUMER_MECHANISM_TRUNCATED if c is CLAIM_PROSUMER_5_ANS
+                    else c for c in PUBLISHED_CLAIMS]
+TRUNCATED_SUPPORTED = [c for c in TRUNCATED_CLAIMS
+                       if c["evidence_status"] == "SUPPORTED"]
 
 # Les preuves derrière deux affirmations, telles que le paquet les porte :
 # URL, qualité, région, date. La page n'en montre jamais l'URL.
@@ -83,33 +99,44 @@ CLAIMS_WITH_EVIDENCE = [
     {**CLAIM_YIELD_7_3_TO_8_4_OFFICIAL, "evidence": [OFFICIAL_EVIDENCE]},
     {**CLAIM_FAMILY_5000, "evidence": [COMMERCIAL_EVIDENCE]},
     {**CLAIM_REVERSE_METER_2030, "evidence": [OFFICIAL_EVIDENCE]},
-    CLAIM_ROI_5_TO_7_SPECIALIST, CLAIM_PROSUMER_MECHANISM, CLAIM_ROI_UNDER_7,
+    {**CLAIM_PROSUMER_5_ANS, "evidence": [OFFICIAL_EVIDENCE]},
+    CLAIM_ROI_5_TO_7_SPECIALIST, CLAIM_ROI_UNDER_7,
 ]
 
 
 # ─── C.1 — arbitrage par couverture des segments à risque ────────────────────
 
 class TestArbitrationCoversRiskySegments:
-    def test_the_published_sentence_is_now_asserted_not_absolved(self):
-        """Paires 1–3 du rapport --explain : verdict RIVAL le 2026-08-30.
-        Le rival étayé parle du mécanisme du tarif prosumer et ne porte pas
-        « 5 ans ». Il ne peut plus absoudre la phrase."""
+    def test_the_published_sentence_is_read_as_the_official_walloon_claim(self):
+        """Paires 1–3 du rapport --explain : verdict RIVAL le 2026-08-30. Avec
+        le passage prosumer ENTIER — celui du paquet, « … rentabilisée au
+        bout de 5 ans » — ce verdict était le bon : la phrase reprend une
+        affirmation officielle wallonne qui porte le chiffre."""
         verdict, rival = _arbitrate(SENTENCE_A, CLAIM_ROI_UNDER_7, SUPPORTED)
+        assert verdict == _RIVAL
+        assert rival is CLAIM_PROSUMER_5_ANS
+        assert factual_qa_v2.covers(rival, {"5"}, set(), {"5": {"duration"}})
+
+    def test_without_the_figure_the_passage_cannot_absolve_it(self):
+        """La mutation : le même passage tronqué avant le chiffre — ce que le
+        rapport --explain montrait, et ce que la première fixture croyait.
+        Un rival qui ne porte pas « 5 ans » ne peut pas absoudre « 5 ans »."""
+        verdict, rival = _arbitrate(SENTENCE_A, CLAIM_ROI_UNDER_7,
+                                    TRUNCATED_SUPPORTED)
         assert verdict == _ASSERTED
         assert rival is None or factual_qa_v2.covers(rival, {"5"})
 
-    def test_whole_sentence_similarity_would_still_absolve_it(self):
-        """La preuve que la garde mord là où l'ancienne passait : jugée sur la
-        ressemblance de phrase entière, la lecture prosumer gagne d'une marge
-        supérieure au seuil d'arbitrage — c'est le verdict publié."""
-        rival = _match_strength(SENTENCE_A, CLAIM_PROSUMER_MECHANISM)
+    def test_whole_sentence_similarity_would_still_absolve_the_mutation(self):
+        """Jugée sur la ressemblance de phrase entière, la lecture prosumer
+        tronquée gagne d'une marge supérieure au seuil : c'est là que
+        l'ancienne règle laissait passer un chiffre que rien ne portait."""
+        rival = _match_strength(SENTENCE_A, CLAIM_PROSUMER_MECHANISM_TRUNCATED)
         contested = _match_strength(SENTENCE_A, CLAIM_ROI_UNDER_7)
         assert rival - contested > _MATCH_MARGIN
 
     def test_a_rival_that_carries_the_figures_still_wins(self):
         """Paires 4–5 : la phrase sur la famille de 4 personnes / 5000 kWh est
-        portée par une affirmation étayée qui énonce les deux chiffres. Là,
-        l'arbitrage avait raison et doit le rester."""
+        portée par une affirmation étayée qui énonce les deux chiffres."""
         verdict, rival = _arbitrate(SENTENCE_B, CLAIM_ROI_UNDER_7, SUPPORTED)
         assert verdict == _RIVAL
         assert rival is CLAIM_FAMILY_5000
@@ -124,18 +151,28 @@ class TestArbitrationCoversRiskySegments:
         report = explain_arbitration(
             {"title": "t", "body": SENTENCE_A, "meta_title": "t",
              "meta_description": "d"},
-            {"claims": PUBLISHED_CLAIMS}, solar_profile)
+            {"claims": TRUNCATED_CLAIMS}, solar_profile)
         rows = [r for r in report if r["risky_segments"] == ["5"]]
         assert rows, report
         assert any(r["nearest_excluded_for"] == ["5"] for r in rows)
 
-    def test_published_fails_revised_passes(self, solar_profile):
+    def test_published_fails_on_the_region_alone_and_revised_passes(self, solar_profile):
+        """Ce que les six gardes disent de l'article publié, avec ses vraies
+        affirmations : une seule faute déterministe, la règle 2023/2030
+        énoncée sans région. La version révisée la nomme et passe tout."""
         published = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
-        assert "HIGH_RISK_CLAIM_ASSERTED" in _codes(published)
         assert published["status"] == "FAILED"
+        assert sorted({f["code"] for f in published["blocking_issues"]}) == [
+            "REGIONAL_SCOPE_NOT_STATED"]
+        assert any(SENTENCE_C[:50] in f["detail"]
+                   for f in _findings(published, "REGIONAL_SCOPE_NOT_STATED"))
         revised = _run(REVISED_BODY, PUBLISHED_CLAIMS, solar_profile)
-        assert "HIGH_RISK_CLAIM_ASSERTED" not in _codes(revised)
         assert revised["status"] == "PASSED", revised["findings"]
+
+    def test_the_mutation_fails_on_the_figure_too(self, solar_profile):
+        published = _run(PUBLISHED_BODY, TRUNCATED_CLAIMS, solar_profile)
+        assert "HIGH_RISK_CLAIM_ASSERTED" in _codes(published)
+        assert "NUMBER_WITHOUT_SOURCE" in _codes(published)
 
 
 # ─── C.2 — le relecteur assisté bloque sur SUBSIDY / ROI / GRID_RULE ─────────
@@ -176,32 +213,27 @@ class TestLlmHighSeverityBlocksOnLegalCategories:
 # ─── C.3 — couverture numérique et canari d'extraction ───────────────────────
 
 class TestNumericCoverage:
-    def test_the_published_five_years_is_one_end_of_a_range_and_fails(
-            self, solar_profile):
-        """Première version de cette garde (matin du 2026-09-03) : le « 5 »
-        de « 5 ans » existait dans « 5 à 7 ans » et la garde le laissait
-        passer — elle ne mordait pas sur l'article. L'après-midi, le
-        brouillon régénéré a refait exactement cela : « 5 à 7 ans » réduit à
-        « 5 ans ». Une borne n'est pas la fourchette ; la garde mord."""
+    def test_every_figure_of_the_published_article_is_sourced(self, solar_profile):
+        """Avec les vraies affirmations, la garde PASSE sur l'article publié :
+        5 ans (portail wallon), 4 personnes / 5000 kWh (commercial), 2 à 3
+        personnes / 3000 à 3500 kWh / 8 m² (Bruxelles Environnement), 7,3 à
+        8,4 % (portail wallon), 2023 / 2030 (portail wallon)."""
         verdict = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
+        assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict), verdict["findings"]
+        assert "NUMERIC_EXTRACTION_FAILED" not in _codes(verdict)
+
+    def test_the_mutation_collapses_a_range_and_fails(self, solar_profile):
+        """Sans le passage officiel, le seul « 5 » d'une durée est la borne
+        basse de « 5 à 7 ans » (spécialiste). Une borne n'est pas la
+        fourchette : la garde mord, et dit pourquoi."""
+        verdict = _run(PUBLISHED_BODY, TRUNCATED_CLAIMS, solar_profile)
         hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
         assert hits and any(SENTENCE_A[:60] in f["detail"] for f in hits)
         assert any("one end of a range" in f["message"] for f in hits)
-        assert "NUMERIC_EXTRACTION_FAILED" not in _codes(verdict)
-
-    def test_the_published_sentence_fails_once_no_supported_claim_carries_its_figure(
-            self, solar_profile):
-        """La mutation la plus proche de l'article : le même « 5 ans », sans
-        l'affirmation spécialiste qui porte un 5. Le chiffre est inventé."""
-        claims = [c for c in PUBLISHED_CLAIMS if c is not CLAIM_ROI_5_TO_7_SPECIALIST]
-        verdict = _run(PUBLISHED_BODY, claims, solar_profile)
-        hits = _findings(verdict, "NUMBER_WITHOUT_SOURCE")
-        assert hits and any(SENTENCE_A[:60] in f["detail"] for f in hits)
         assert all(f["blocking"] for f in hits)
 
-    def test_the_revised_article_passes_with_the_same_claims(self, solar_profile):
-        claims = [c for c in PUBLISHED_CLAIMS if c is not CLAIM_ROI_5_TO_7_SPECIALIST]
-        verdict = _run(REVISED_BODY, claims, solar_profile)
+    def test_the_revised_article_passes(self, solar_profile):
+        verdict = _run(REVISED_BODY, PUBLISHED_CLAIMS, solar_profile)
         assert "NUMBER_WITHOUT_SOURCE" not in _codes(verdict)
 
     def test_an_explicit_calculation_carries_its_own_figures(self, solar_profile):
@@ -228,14 +260,20 @@ class TestNumericCoverage:
 # ─── C.4 — fraîcheur obligatoire sur toute affirmation de rentabilité ────────
 
 class TestRoiNeedsDatedSupport:
-    def test_published_fails(self, solar_profile):
-        """Le « 5 ans » publié tombe d'abord sous C.3 (une borne n'est pas la
-        fourchette : aucun chiffre sourcé). Écrit honnêtement — la fourchette
-        entière, « 5 à 7 ans » — il tombe sous C.4 : la seule source qui la
-        porte est spécialiste et non datée. Les deux versions échouent."""
+    def test_the_published_five_years_rests_on_a_source_presented_as_current(
+            self, solar_profile):
+        """Le portail wallon est non daté mais se présente comme en vigueur ;
+        la politique de fraîcheur compte cela comme un support daté. La
+        garde passe sur l'article publié, et la page rendue dira « non
+        datée » à côté du chiffre."""
+        assert CLAIM_PROSUMER_5_ANS["has_dated_support"] is True
         verdict = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
-        assert any(SENTENCE_A[:60] in f["detail"]
-                   for f in _findings(verdict, "NUMBER_WITHOUT_SOURCE"))
+        assert "ROI_WITHOUT_DATED_SOURCE" not in _codes(verdict)
+
+    def test_stated_as_the_specialist_range_it_fails_for_want_of_a_date(
+            self, solar_profile):
+        """« 5 à 7 ans » n'est porté que par une source spécialiste non datée.
+        Écrite ainsi, la phrase tombe sous C.4."""
         honest = SENTENCE_A.replace("au bout de 5 ans", "en 5 à 7 ans")
         verdict = _run(honest, PUBLISHED_CLAIMS, solar_profile)
         hits = _findings(verdict, "ROI_WITHOUT_DATED_SOURCE")
@@ -254,9 +292,28 @@ class TestRoiNeedsDatedSupport:
     def test_revised_passes_on_the_dated_official_figure(self, solar_profile):
         verdict = _run(REVISED_BODY, PUBLISHED_CLAIMS, solar_profile)
         assert "ROI_WITHOUT_DATED_SOURCE" not in _codes(verdict), verdict["findings"]
-        # The sentence is ROI-shaped and its figures are carried by a claim
-        # whose support is dated: exactly the shape the rule admits.
         assert factual_qa_v2._ROI_SHAPE.search(REVISED_SENTENCE_A)
+
+
+# ─── B.4 — « sans soutien public » : ce que l'article publié disait ─────────
+
+class TestSupportFreeOnThePublishedArticle:
+    def test_the_published_wording_is_carried_by_an_official_source(
+            self, solar_profile):
+        """Votre condition : supprimer sauf source OFFICIELLE textuelle. Le
+        paquet d'août porte « Bref, les petites installations sont
+        intéressantes même sans soutien public » en source officielle
+        datée. La condition est remplie ; la formule peut rester, attribuée."""
+        assert CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL["best_source_quality"] == "OFFICIAL"
+        for sentence in (SENTENCE_E, SENTENCE_F):
+            verdict = _run(sentence, PUBLISHED_CLAIMS, solar_profile)
+            assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" not in _codes(verdict), sentence
+
+    def test_without_that_source_both_sentences_fail(self, solar_profile):
+        claims = claims_without(CLAIM_SMALL_WITHOUT_SUPPORT_OFFICIAL)
+        for sentence in (SENTENCE_E, SENTENCE_F):
+            verdict = _run(sentence, claims, solar_profile)
+            assert "SUPPORT_FREE_CLAIM_WITHOUT_OFFICIAL_SOURCE" in _codes(verdict), sentence
 
 
 # ─── Base : un brouillon, son paquet, sa porte ───────────────────────────────
@@ -548,11 +605,13 @@ async def _pending(session, package):
 # ─── B.7 — les sources sont rendues, sans URL ────────────────────────────────
 
 class TestRenderedSources:
-    def test_the_published_page_had_no_source_to_show(self):
-        """Avec les affirmations telles que le paquet les portait pour les
-        chiffres publiés : rien d'officiel derrière « 5 ans »."""
+    def test_the_published_five_years_has_an_official_source_to_show(self):
+        """Ce que la page publiée aurait pu montrer et n'a pas montré : le
+        portail wallon, non daté, derrière « 5 ans »."""
         sources = render_sources(SENTENCE_A, CLAIMS_WITH_EVIDENCE)
-        assert sources == []
+        assert sources and sources[0]["name"] == "energie.wallonie.be"
+        assert sources[0]["date"] is None
+        assert any("5 ans" in f for f in sources[0]["figures"])
 
     def test_the_revised_page_shows_its_sources_with_their_figures(self):
         sources = render_sources(REVISED_BODY, CLAIMS_WITH_EVIDENCE)
