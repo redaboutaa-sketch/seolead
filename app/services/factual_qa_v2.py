@@ -344,6 +344,33 @@ def _finding(code: str, message: str, *, blocking: bool, detail: str = "") -> di
             "detail": detail[:300]}
 
 
+_SUBNATIONAL = tuple(r for r in Region if getattr(r, "is_subnational", False))
+
+
+def paragraph_scopes(body: str) -> dict[str, Region | None]:
+    """For each sentence, the one sub-national region the SAME PARAGRAPH named
+    before it — the scope a reader carries from one sentence to the next.
+
+    Seventh regenerated draft (2026-09-03): « En Wallonie, une installation
+    standard est rentabilisée au bout de 5 ans. De plus, les ménages ayant
+    installé des panneaux avant le 31 décembre 2023 … » was refused for not
+    naming the region in the second sentence. Nobody writes the region into
+    every sentence of a paragraph; a reader scopes the paragraph. A sentence
+    naming two regions, or a new paragraph, resets the scope.
+    """
+    scopes: dict[str, Region | None] = {}
+    for paragraph in re.split(r"\n+", _clean_markdown(body)):
+        current: Region | None = None
+        for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            scopes.setdefault(sentence, current)
+            named = [r for r in _SUBNATIONAL if names_region(sentence, r)]
+            current = named[0] if len(named) == 1 else (None if named else current)
+    return scopes
+
+
 def _all_sentences(body: str) -> list[str]:
     cleaned = _clean_markdown(body)
     return [s.strip() for s in _SENTENCE_SPLIT.split(cleaned) if s.strip()]
@@ -637,6 +664,7 @@ def run_factual_qa_v2(draft: dict, package: dict,
             blocking.append(finding)
 
     draft_sentences = extract_draft_claims(body) if body else []
+    scopes = paragraph_scopes(body) if body else {}
 
     # ── 1. Ledger-level policy, independent of what the draft says ───────────
     for claim in claims:
@@ -675,7 +703,8 @@ def run_factual_qa_v2(draft: dict, package: dict,
             for sentence in draft_sentences:
                 if not _matches_claim(sentence, claim):
                     continue
-                if names_region(sentence, claim_region):
+                if (names_region(sentence, claim_region)
+                        or scopes.get(sentence) is claim_region):
                     break
                 verdict, rival = _arbitrate(sentence, claim, supported)
                 if verdict in (_RIVAL, _UNREAD):
@@ -693,8 +722,8 @@ def run_factual_qa_v2(draft: dict, package: dict,
                     f"holds for {claim_region.value} without naming the "
                     f"region. Written flat it reads as country-wide, and no "
                     f"source establishes it for the country. Name the region "
-                    f"IN THIS SENTENCE — « {_REGION_FRENCH.get(claim_region.value, claim_region.value)} » — "
-                    f"not by a pronoun and not in a previous sentence.",
+                    f"— « {_REGION_FRENCH.get(claim_region.value, claim_region.value)} » — "
+                    f"in this sentence or earlier in the same paragraph.",
                     blocking=True, detail=sentence[:280]))
                 break
 

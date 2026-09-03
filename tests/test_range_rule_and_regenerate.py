@@ -612,7 +612,7 @@ class TestWriterFeedbackNamesTheFix:
             "message": "…without naming the region…",
             "detail": "En effet, la rentabilité est comprise entre 7,3% et 8,4%."}])
         assert carried[0]["fix"].startswith("Rewrite the sentence quoted")
-        assert "INSIDE that same sentence" in carried[0]["fix"]
+        assert "open its paragraph with the region" in carried[0]["fix"]
         assert carried[0]["in_your_text"].startswith("En effet")
 
     def test_every_carried_finding_has_a_fix(self):
@@ -642,7 +642,7 @@ class TestWriterFeedbackNamesTheFix:
                 {"code": "REGIONAL_SCOPE_NOT_STATED", "message": "m",
                  "detail": "phrase"}]))
         assert "apply the fix to THAT sentence" in system
-        assert '"fix"' in user and "INSIDE that same sentence" in user
+        assert '"fix"' in user and "open its paragraph with the region" in user
 
 
 # ─── 10. Le registre l'emporte sur le relecteur pour le sourcing ────────────
@@ -809,3 +809,89 @@ class TestContestedMustCoverTheFigure:
                                "standard est généralement rentabilisée au "
                                "bout de 5 ans selon le portail wallon."}]
         assert _arbitrate(self.SIXTH, contested, supported)[0] == "AMBIGUOUS"
+
+
+# ─── 13. La portée régionale vaut pour le paragraphe ────────────────────────
+
+class TestParagraphScope:
+    SEVENTH = ("En Wallonie, une installation standard est généralement "
+               "rentabilisée au bout de 5 ans. De plus, les ménages ayant "
+               "installé des panneaux avant le 31 décembre 2023 peuvent "
+               "bénéficier du « compteur qui tourne à l'envers » jusqu'au 31 "
+               "décembre 2030, ce qui peut encore améliorer leur rentabilité.")
+
+    def test_the_seventh_draft_paragraph_names_its_region_once(self, solar_profile):
+        verdict = _run(self.SEVENTH, PUBLISHED_CLAIMS, solar_profile)
+        assert "REGIONAL_SCOPE_NOT_STATED" not in _codes(verdict), verdict["findings"]
+
+    def test_the_published_paragraph_named_no_region_and_still_fails(
+            self, solar_profile):
+        from tests.fixtures.article_8a1f6e46 import PUBLISHED_BODY
+        verdict = _run(PUBLISHED_BODY, PUBLISHED_CLAIMS, solar_profile)
+        assert "REGIONAL_SCOPE_NOT_STATED" in _codes(verdict)
+
+    def test_a_new_paragraph_resets_the_scope(self, solar_profile):
+        body = self.SEVENTH.replace(" De plus,", "\n\nDe plus,")
+        verdict = _run(body, PUBLISHED_CLAIMS, solar_profile)
+        assert "REGIONAL_SCOPE_NOT_STATED" in _codes(verdict)
+
+    def test_another_region_named_in_between_breaks_the_scope(self, solar_profile):
+        body = self.SEVENTH.replace(
+            " De plus,", " À Bruxelles, les règles diffèrent. De plus,")
+        verdict = _run(body, PUBLISHED_CLAIMS, solar_profile)
+        assert "REGIONAL_SCOPE_NOT_STATED" in _codes(verdict)
+
+    def test_the_pronoun_after_a_named_region_in_the_paragraph_is_fine(
+            self, solar_profile):
+        body = ("En Wallonie, malgré la fin du système de compensation, "
+                "installer des panneaux solaires reste rentable. De plus, la "
+                "rentabilité atteinte par les petites installations "
+                "photovoltaïques y est comprise entre 7,3% et 8,4%.")
+        verdict = _run(body, PUBLISHED_CLAIMS, solar_profile)
+        assert "REGIONAL_SCOPE_NOT_STATED" not in _codes(verdict)
+
+
+# ─── 14. Les sources sont attribuées phrase par phrase ──────────────────────
+
+class TestSentenceLevelSources:
+    WALLOON = {
+        "url": "https://energie.wallonie.be/x", "source_quality": "OFFICIAL",
+        "supports": True, "region": "BE-WAL", "authority_type": "GOVERNMENT",
+        "published_at": None, "effective_from": None,
+        "freshness_status": "UNDATED_CURRENT"}
+    FLEMISH = {
+        "url": "https://www.vlaanderen.be/y", "source_quality": "OFFICIAL",
+        "supports": True, "region": "BE-VLG", "authority_type": "GOVERNMENT",
+        "published_at": None, "effective_from": "1 januari 2024",
+        "freshness_status": "DATED_CURRENT"}
+
+    def test_a_page_carrying_one_figure_of_two_is_not_listed(self):
+        from app.site.publication import render_sources
+        claims = [
+            {**CLAIM_REVERSE_METER_2030, "evidence": [self.WALLOON]},
+            {"claim": "De premie kon tot 31 december 2023 aangevraagd worden.",
+             "evidence_status": "SUPPORTED", "claim_risk": "LOW",
+             "category": "GENERAL", "region": "BE-VLG",
+             "evidence": [self.FLEMISH]},
+        ]
+        sources = render_sources(
+            "En Wallonie, les ménages ayant installé des panneaux avant le 31 "
+            "décembre 2023 gardent le compteur qui tourne à l'envers jusqu'au "
+            "31 décembre 2030.", claims)
+        assert [s["name"] for s in sources] == ["energie.wallonie.be"]
+        assert sources[0]["figures"] == ["2023", "2030"]
+
+    def test_two_claims_covering_different_figures_are_both_listed(self):
+        from app.site.publication import render_sources
+        from tests.fixtures.article_8a1f6e46 import REVISED_SENTENCE_A
+        claims = [{**CLAIM_PROSUMER_5_ANS, "evidence": [self.WALLOON]},
+                  {**CLAIM_YIELD_7_3_TO_8_4_OFFICIAL,
+                   "evidence": [{**self.WALLOON, "url": "https://energie.wallonie.be/z"}]}]
+        sources = render_sources(REVISED_SENTENCE_A, claims)
+        figures = sorted(f for s in sources for f in s["figures"])
+        assert figures == ["5 ans", "7,3%", "8,4%"]
+
+    def test_a_date_written_in_words_keeps_its_year(self):
+        from app.site.publication import _source_date
+        assert _source_date(self.FLEMISH) == "1 januari 2024"
+        assert _source_date({"published_at": "2024-03-01T00:00:00+00:00"}) == "2024-03-01"
