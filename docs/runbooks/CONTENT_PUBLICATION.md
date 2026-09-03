@@ -62,6 +62,22 @@ aucun lien sortant) :
   (`research abandon-search --package <id> --query "…" --reason "…" --by …`) ;
 - `approved_render` — l'approbation nomme l'empreinte du rendu courant.
 
+## 3 bis. Refusé par les gardes ? Relancer le rédacteur, pas la recherche
+
+```bash
+seolead draft regenerate <brief-id>
+```
+
+Un brouillon refusé n'est pas une recherche refusée. Le paquet et le brief
+existent ; cette commande demande un nouveau brouillon au rédacteur sur ce
+même paquet, le juge par les mêmes gardes (factuelle, SEO, relecteur assisté
+avec la liste des faits sourcés), et l'enregistre à côté des précédents avec
+sa propre approbation `PENDING`. Elle ne crée pas de paquet : la résolution
+des recherches proposées (`authoritative-run`, `abandon-search`) reste acquise.
+
+`research authoritative-run --package <id>` ne lance que les recherches
+encore dues ; `--all` relance tout le plan.
+
 ## 4. Stage
 
 ```bash

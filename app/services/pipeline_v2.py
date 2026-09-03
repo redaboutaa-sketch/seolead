@@ -37,6 +37,7 @@ from app.providers.research.base import ResearchProvider
 from app.providers.search.base import SearchIntelligenceProvider
 from app.providers.search.location import get_search_context
 from app.services.authoritative_research import execute_plan
+from app.services.draft_stage import write_and_judge
 from app.services.authority_registry import build_registry
 from app.services.research_planner import (ResearchPlan,
                                            plan_authoritative_research,
@@ -693,170 +694,46 @@ async def run_pipeline_v2(
         await _persist_usage(session, usage, correlation_id)
         return result
 
-    # The writer sees supported claims, unresolved facts and forbidden topics —
-    # never a rejected source and never a raw page excerpt.
-    writer_view = package_builder_v3.writer_payload(payload, allow_partial=False)
+    outcome = await write_and_judge(
+        session, brief=brief, brief_payload=brief_payload,
+        package_payload=payload, profile=profile, llm=llm, usage=usage,
+        correlation_id=correlation_id, keyword_id=keyword.id,
+        vertical_code=vertical.code)
+    result.draft_attempts = outcome.attempts
+    if outcome.draft is None:
+        result.stopped_at = "draft"
+        result.error_code = outcome.error_code
+        result.error_detail = outcome.error_detail
+        result.usage_summary = usage.summary()
+        await _persist_usage(session, usage, correlation_id)
+        return result
 
-    # ── Stage 8+9: draft, judged, and re-emitted at most twice ───────────────
-    # The gates run here, in memory, before anything is persisted. A refused
-    # draft is not a refused run: everything expensive is already bought and
-    # unchanged, so what gets re-emitted is the writer's call alone, carrying
-    # the findings that refused it. See `draft_retry` for what may not be
-    # retried and why.
-    existing_titles = await title_registry.competing_titles_for_keyword(
-        session, keyword.id)
-    # The first-party offer registry of this vertical's site: which figures a
-    # draft may present as OUR offer. None reads as an empty registry —
-    # fail-closed — never as permission.
-    offer = offer_for_vertical(vertical.code)
-    attempts: list[dict] = []
-    previous_findings: list[dict] | None = None
-    draft_payload = llm_response = factual = seo = None
-
-    for attempt in range(1, draft_retry.MAX_ATTEMPTS + 1):
-        try:
-            draft_payload, llm_response = await draft_service.generate_draft(
-                brief_payload, {**payload, "writer_view": writer_view},
-                llm=llm, correlation_id=correlation_id,
-                previous_findings=previous_findings)
-        except (LLMNotConfigured, SeoLeadError) as exc:
-            result.stopped_at = "draft"
-            result.error_code = exc.code or ErrorCode.CONTENT_GENERATION_FAILED
-            result.error_detail = exc.detail
-            result.usage_summary = usage.summary()
-            await _persist_usage(session, usage, correlation_id)
-            return result
-
-        usage.record(provider=llm_response.provider, operation="draft",
-                     correlation_id=correlation_id, requests=1,
-                     units=llm_response.usage.total_tokens,
-                     cost_usd=None, cost_is_actual=False,
-                     duration_ms=llm_response.latency_ms)
-
-        factual = factual_qa_v2.run_factual_qa_v2(draft_payload, payload, profile)
-        seo = qa_service.run_seo_qa_v2(draft_payload, brief_payload, payload,
-                                       profile, existing_titles=existing_titles,
-                                       offer=offer)
-        blocking_now = factual["blocking_issues"] + seo["blocking_issues"]
-        decision = draft_retry.decide(blocking_now, attempt=attempt)
-        attempts.append({**decision.as_dict(),
-                         "factual_score": factual["score"],
-                         "seo_score": seo["score"],
-                         "provider": llm_response.provider})
-        if not decision.retry:
-            break
-        previous_findings = draft_retry.carried(blocking_now)
-
-    result.draft_attempts = attempts
-
-    draft = ContentDraft(
-        content_brief_id=brief.id, provider=llm_response.provider,
-        model=llm_response.model, title=draft_payload["title"],
-        body=draft_payload["body"], meta_title=draft_payload["meta_title"],
-        meta_description=draft_payload["meta_description"],
-        status=ContentStatus.DRAFT_CREATED.value,
-        usage=llm_response.usage.model_dump(), latency_ms=llm_response.latency_ms,
-    )
-    session.add(draft)
-    brief.status = ContentStatus.DRAFT_CREATED.value
-    await session.commit()
-    result.content_draft_id = draft.id
-
-    # ── Stage 9: QA ──────────────────────────────────────────────────────────
-    # Already judged above, once per attempt. What is persisted is the verdict on
-    # the draft that was kept, plus the history of what was discarded.
-    factual_row = QAReview(content_draft_id=draft.id,
-                           qa_type=QAType.DETERMINISTIC.value,
-                           layer=QALayer.FACTUAL.value,
-                           status=factual["status"], score=factual["score"],
-                           findings=factual["findings"] + [
-                               {"code": "CLAIM_LEDGER",
-                                "message": "atomic claim ledger",
-                                "blocking": False, "detail": "",
-                                "ledger": factual["claim_ledger"]},
-                               # The discarded attempts leave no row of their
-                               # own, so the count and the reason live here.
-                               # Without it a re-emitted run is indistinguishable
-                               # from a first-time pass.
-                               {"code": "DRAFT_ATTEMPTS",
-                                "message": (f"{len(attempts)} draft call(s); "
-                                            f"{attempts[-1]['reason']}"),
-                                "blocking": False, "detail": "",
-                                "attempts": attempts}],
-                           blocking_issues=factual["blocking_issues"],
-                           revision=1,
-                           engine_version=factual_qa_v2.ENGINE_VERSION)
-    session.add(factual_row)
-    await session.flush()
-    result.qa_review_ids.append(factual_row.id)
-    result.factual_qa = {"status": factual["status"], "score": factual["score"],
-                         "claim_ledger": factual["claim_ledger"],
-                         "blocking": len(factual["blocking_issues"])}
-
-    seo_row = QAReview(content_draft_id=draft.id, qa_type=QAType.DETERMINISTIC.value,
-                       layer=QALayer.SEO.value, status=seo["status"], score=seo["score"],
-                       # Same pattern as CLAIM_LEDGER above: the offer-registry
-                       # version this verdict was judged against rides along as
-                       # an informational entry, so the row stays traceable
-                       # after the registry moves on to a new version.
-                       findings=seo["findings"] + [
-                           {"code": "OFFER_REGISTRY",
-                            "message": (f"judged against offer registry "
-                                        f"{seo['offer_registry']['version']}"),
-                            "blocking": False, "detail": "",
-                            "offer_registry": seo["offer_registry"]}],
-                       blocking_issues=seo["blocking_issues"],
-                       revision=1, engine_version=qa_service.ENGINE_VERSION)
-    session.add(seo_row)
-    await session.flush()
-    result.qa_review_ids.append(seo_row.id)
-    result.seo_qa = {"status": seo["status"], "score": seo["score"],
-                     "findings": len(seo["findings"]),
-                     "blocking": len(seo["blocking_issues"])}
-
-    advisory = await qa_service.run_llm_qa(draft_payload, brief_payload, llm=llm,
-                                           correlation_id=correlation_id)
-    advisory_row = QAReview(content_draft_id=draft.id,
-                            qa_type=QAType.LLM_ASSISTED.value,
-                            layer=QALayer.ADVISORY.value, **advisory)
-    session.add(advisory_row)
-    await session.flush()
-    result.qa_review_ids.append(advisory_row.id)
-
-    # The model-assisted reviewer blocks on SUBSIDY, ROI and GRID_RULE at
-    # severity high (2026-09-03). It said « needs more data or references »
-    # about profitability without public support on draft 8a1f6e46, and the
-    # draft went to approval as QA_PASSED because nothing it said counted.
-    qa_passed = not (factual["blocking_issues"] or seo["blocking_issues"]
-                     or advisory["blocking_issues"])
-    result.advisory_qa = {"status": advisory["status"],
-                          "findings": len(advisory["findings"]),
-                          "blocking": len(advisory["blocking_issues"])}
-    draft.status = (ContentStatus.QA_PASSED.value if qa_passed
-                    else ContentStatus.QA_FAILED.value)
-
-    # ── Stage 10: approval gate ──────────────────────────────────────────────
-    approval = Approval(content_draft_id=draft.id, state=ApprovalState.PENDING.value)
-    session.add(approval)
-    if qa_passed:
-        draft.status = ContentStatus.PENDING_APPROVAL.value
-    await session.commit()
-
-    result.approval_id = approval.id
+    result.content_draft_id = outcome.draft.id
+    result.qa_review_ids.extend(outcome.qa_review_ids)
+    result.factual_qa = {"status": outcome.factual["status"],
+                         "score": outcome.factual["score"],
+                         "claim_ledger": outcome.factual["claim_ledger"],
+                         "blocking": len(outcome.factual["blocking_issues"])}
+    result.seo_qa = {"status": outcome.seo["status"],
+                     "score": outcome.seo["score"],
+                     "findings": len(outcome.seo["findings"]),
+                     "blocking": len(outcome.seo["blocking_issues"])}
+    result.advisory_qa = {"status": outcome.advisory["status"],
+                          "findings": len(outcome.advisory["findings"]),
+                          "blocking": len(outcome.advisory["blocking_issues"])}
+    result.approval_id = outcome.approval.id
     result.approval_state = ApprovalState.PENDING.value
     result.stopped_at = "approval"
-    if not qa_passed:
-        result.error_code = ErrorCode.QA_FAILED
-        result.error_detail = (
-            f"{len(factual['blocking_issues'])} factual, "
-            f"{len(seo['blocking_issues'])} SEO and "
-            f"{len(advisory['blocking_issues'])} model-assisted blocking issue(s)")
+    if not outcome.qa_passed:
+        result.error_code = outcome.error_code
+        result.error_detail = outcome.error_detail
 
     result.usage_summary = usage.summary()
     await _persist_usage(session, usage, correlation_id)
 
     logger.info("pipeline v2 complete", extra={
-        **log_ctx, "status": draft.status, "draft_id": str(draft.id)})
+        **log_ctx, "status": outcome.draft.status,
+        "draft_id": str(outcome.draft.id)})
     return result
 
 

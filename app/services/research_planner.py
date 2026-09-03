@@ -252,6 +252,15 @@ def abandon_query(package, query: str, *, reason: str, by: str) -> dict:
     return record
 
 
+def pending_plan(plan: ResearchPlan, record: dict | None) -> ResearchPlan:
+    """The plan reduced to what is still owed: queries neither executed nor
+    abandoned. Re-launching a query already paid for is not resolution."""
+    pending = {q["query"] for q in unresolved_queries(plan, record)}
+    return ResearchPlan(queries=[q for q in plan.queries if q.query in pending],
+                        skipped_reason=(None if pending
+                                        else "every proposed query is resolved"))
+
+
 def unresolved_queries(plan: ResearchPlan, record: dict | None) -> list[dict]:
     """Planned queries that were neither executed nor abandoned with a reason.
 
