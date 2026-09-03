@@ -311,7 +311,11 @@ class TestMatchStrength:
         """
         body = "Une installation de 5000 euros se rentabilise en 12 ans."
         claims = [
-            _claim(body),
+            # Dated, because « se rentabilise en 12 ans » is a payback statement
+            # and since 2026-09-03 a payback statement needs dated support
+            # whatever its category. This test is about arbitration; the
+            # freshness rule has its own tests in test_lot_c_gardes.py.
+            {**_claim(body), "has_dated_support": True},
             _claim("Une installation de 5000 euros se rentabilise en 18 ans.",
                    status=EvidenceStatus.UNSUPPORTED, risk=ClaimRisk.HIGH,
                    category="ROI"),

@@ -31,8 +31,13 @@ from app.services.intent import normalize_query
 from app.services.region import Region, names_region
 from app.verticals.profile import VerticalProfile
 
+# A dated rule is a factual sentence too. « avant le 31 décembre 2023 … jusqu'au
+# 31 décembre 2030 » carried no unit, so it was invisible to every sentence-level
+# check on the published article — including the one that asks whether a
+# regional rule names its region. Measured 2026-09-03.
 _FACTUAL_SENTENCE = re.compile(
-    r"\d[\d\s.,]*\s*(?:%|€|\$|£|eur|euros?|kwh|kwc|kwp|wc|wp|m²|m2|ans?|jaar|years?)",
+    r"\d[\d\s.,]*\s*(?:%|€|\$|£|eur|euros?|kwh|kwc|kwp|wc|wp|m²|m2|ans?|jaar|years?)"
+    r"|(?<!\d)(?:19|20)\d{2}(?!\d)",
     re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _NUMBER = re.compile(r"(?<![\w/])(\d{1,3}(?:[  ., ]\d{3})+|\d+[.,]\d+|\d{2,})")
@@ -46,7 +51,7 @@ _MATCH_MARGIN = 0.05
 # string on purpose: it is the knob that decides every arbitration, and a
 # re-judgement under a different setting must read as a different engine rather
 # than as an unexplained reversal.
-ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}"
+ENGINE_VERSION = f"factual_qa_v2/arbitration-{_MATCH_MARGIN}/segments-1"
 # Conflicting evidence blocks by default; a vertical may downgrade it to an
 # explicit unresolved note instead.
 _CONFLICT_POLICY_BLOCK = True
@@ -65,6 +70,104 @@ def _content_words(text: str) -> set[str]:
     return {w for w in normalize_query(text).split() if len(w) > 4}
 
 
+# ── Segments à risque (2026-09-03) ───────────────────────────────────────────
+# L'arbitrage comparait des ressemblances de phrase ENTIÈRE. Mesuré sur l'article
+# 8a1f6e46 publié : « rentabilisée au bout de 5 ans, même avec l'entrée en
+# vigueur du tarif prosumer, qui vise à faire contribuer équitablement… » a
+# remporté son duel grâce à sa longue queue, reprise presque mot pour mot d'un
+# passage étayé sur le MÉCANISME du tarif — pendant que sa tête, « 5 ans »,
+# n'était couverte par rien. Trois demandes… non : une page publique affirmant
+# un retour sur investissement qu'aucune source ne porte.
+#
+# Un chiffre, une durée, un pourcentage, une règle datée sont des segments à
+# risque : c'est EUX que la lecture étayée doit couvrir, pas la phrase autour.
+# Une lecture rivale qui ne porte pas les figures de la phrase ne peut pas
+# l'absoudre, quelle que soit sa ressemblance ailleurs.
+_RISKY_UNIT = (r"ans?\b|mois\b|jours?\b|%|€|eur\b|euros?\b|kwh\b|kwc\b|kwp\b|"
+               r"m²|m2\b|personnes?\b|kva\b|kwe\b|kw\b|wc\b|wp\b")
+_QUANTITY = r"\d+(?:[  .,]\d{3})*(?:[.,]\d+)?"
+_RISKY_SEGMENT = re.compile(
+    rf"(?<![\w/])({_QUANTITY})\s*(?:{_RISKY_UNIT})", re.IGNORECASE)
+# « entre 7 et 11 ans », « 2 à 3 personnes » : le premier chiffre d'une
+# fourchette n'a pas d'unité à lui, il emprunte celle du second.
+_RISKY_RANGE = re.compile(
+    rf"(?<![\w/])({_QUANTITY})\s*(?:à|a|-|–|et|ou)\s*({_QUANTITY})\s*(?:{_RISKY_UNIT})",
+    re.IGNORECASE)
+_YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+_ANY_QUANTITY = re.compile(rf"(?<![\w/])({_QUANTITY})")
+# « 1.000 kWh X 5 kWe = 5.000 kWh » : un calcul explicite porte ses propres
+# chiffres ; ils n'ont pas à être sourcés un par un.
+# Units and parentheses sit between the operands in the CWaPE's own layout —
+# « (1.000 kWh X 5 kWe) = 5.000 kWh » — so the operands are matched loosely
+# and the « = » followed by a figure is what makes it a calculation.
+_ARITHMETIC = re.compile(
+    rf"{_QUANTITY}[^=\n]{{0,30}}[x×*+/–-][^=\n]{{0,30}}{_QUANTITY}[^=\n]{{0,20}}"
+    rf"=\s*\(?{_QUANTITY}", re.IGNORECASE)
+# Ce qui fait d'une phrase une affirmation de retour sur investissement, quelle
+# que soit la catégorie où le classifieur a rangé l'affirmation qu'elle reprend.
+_ROI_SHAPE = re.compile(
+    r"rentabilis|amorti|retour sur investissement|temps de retour|payback|"
+    r"rentabilit[ée]\s+(?:est|atteint|comprise|de|des|d')|taux de rendement|"
+    r"rendement\s+(?:financier|annuel|de l'investissement)", re.IGNORECASE)
+
+
+def risky_segments(text: str) -> set[str]:
+    """The figures of a sentence that a source must carry: quantities with a
+    unit, both ends of a range, and years (a dated rule is a figure too)."""
+    segments: set[str] = set()
+    for m in _RISKY_SEGMENT.finditer(text):
+        segments.add(_digits(m.group(1)))
+    for m in _RISKY_RANGE.finditer(text):
+        segments.add(_digits(m.group(1)))
+        segments.add(_digits(m.group(2)))
+    for m in _YEAR.finditer(text):
+        segments.add(m.group(1))
+    return {seg for seg in segments if seg}
+
+
+def _quantities(text: str) -> set[str]:
+    """Every figure a claim states, in the digit form `risky_segments` uses."""
+    found = {_digits(m.group(1)) for m in _ANY_QUANTITY.finditer(text)}
+    found |= set(_YEAR.findall(text))
+    return {f for f in found if f}
+
+
+def covers(claim: dict, segments: set[str]) -> bool:
+    """Whether a claim carries every risky segment of a sentence."""
+    return segments <= _quantities(str(claim.get("claim", "")))
+
+
+def quantity_labels(text: str) -> dict[str, str]:
+    """Each figure of a text in digit form → as the text writes it (« 7,3% »
+    rather than « 73 »), for rendering a source with the figures it carries."""
+    labels: dict[str, str] = {}
+    for m in _RISKY_SEGMENT.finditer(text):
+        labels.setdefault(_digits(m.group(1)), m.group(0).strip())
+    for m in _RISKY_RANGE.finditer(text):
+        unit = m.group(0)[m.end(2) - m.start():].strip()
+        labels.setdefault(_digits(m.group(1)), f"{m.group(1)} {unit}".strip())
+        labels.setdefault(_digits(m.group(2)), f"{m.group(2)} {unit}".strip())
+    for m in _YEAR.finditer(text):
+        labels.setdefault(m.group(1), m.group(1))
+    for m in _ANY_QUANTITY.finditer(text):
+        labels.setdefault(_digits(m.group(1)), m.group(1))
+    return {k: v for k, v in labels.items() if k}
+
+
+def body_segments(body: str) -> set[str]:
+    """Every risky segment a body states, over all its sentences."""
+    segments: set[str] = set()
+    for sentence in _all_sentences(body):
+        segments |= risky_segments(sentence)
+    return segments
+
+
+def _clean_markdown(body: str) -> str:
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", body, flags=re.M)
+    cleaned = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", cleaned, flags=re.M)
+    return cleaned
+
+
 def _region_of(claim: dict) -> Region:
     try:
         return Region(str(claim.get("region") or "").upper())
@@ -77,11 +180,13 @@ def _finding(code: str, message: str, *, blocking: bool, detail: str = "") -> di
             "detail": detail[:300]}
 
 
+def _all_sentences(body: str) -> list[str]:
+    cleaned = _clean_markdown(body)
+    return [s.strip() for s in _SENTENCE_SPLIT.split(cleaned) if s.strip()]
+
+
 def extract_draft_claims(body: str) -> list[str]:
-    cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", body, flags=re.M)
-    cleaned = re.sub(r"^\s*[-*+]\s+", "", cleaned, flags=re.M)
-    sentences = [s.strip() for s in _SENTENCE_SPLIT.split(cleaned) if s.strip()]
-    return [s for s in sentences if _FACTUAL_SENTENCE.search(s)][:60]
+    return [s for s in _all_sentences(body) if _FACTUAL_SENTENCE.search(s)][:60]
 
 
 def _matches_claim(sentence: str, claim: dict) -> bool:
@@ -156,17 +261,35 @@ def _match_strength(sentence: str, claim: dict) -> float:
     return 0.6 * topic + 0.4 * figures
 
 
-def _arbitrate(sentence: str, claim: dict,
-               supported: list[dict]) -> tuple[str, dict | None]:
-    """Compare this sentence read as `claim` against its best supported reading."""
-    this = _match_strength(sentence, claim)
+def _best_rival(sentence: str, claim: dict,
+                supported: list[dict]) -> tuple[float, dict | None, set[str]]:
+    """The strongest supported reading that carries the sentence's own figures.
+
+    A candidate that resembles the sentence but does not state its risky
+    segments is not a reading of it — it is a reading of the words around
+    them. It is skipped here, whatever its strength, and `explain_arbitration`
+    shows it as the nearest non-covering reading so the exclusion is visible.
+    """
+    segments = risky_segments(sentence)
     best, rival = 0.0, None
     for candidate in supported:
         if candidate is claim:
             continue
         strength = _match_strength(sentence, candidate)
+        if strength <= 0.0:
+            continue
+        if segments and not covers(candidate, segments):
+            continue
         if strength > best:
             best, rival = strength, candidate
+    return best, rival, segments
+
+
+def _arbitrate(sentence: str, claim: dict,
+               supported: list[dict]) -> tuple[str, dict | None]:
+    """Compare this sentence read as `claim` against its best supported reading."""
+    this = _match_strength(sentence, claim)
+    best, rival, _ = _best_rival(sentence, claim, supported)
     if this - best > _MATCH_MARGIN:
         return _ASSERTED, rival
     if best - this > _MATCH_MARGIN:
@@ -239,15 +362,25 @@ def explain_arbitration(draft: dict, package: dict,
 
     def row(check: str, claim: dict, sentence: str) -> None:
         contested = _match_strength(sentence, claim)
-        best, rival = 0.0, None
+        best, rival, segments = _best_rival(sentence, claim, supported)
+        # The nearest reading of any kind, covering or not: when it differs
+        # from `rival`, the report shows exactly which figure excluded it.
+        nearest_strength, nearest = 0.0, None
         for candidate in supported:
             if candidate is claim:
                 continue
             strength = _match_strength(sentence, candidate)
-            if strength > best:
-                best, rival = strength, candidate
+            if strength > nearest_strength:
+                nearest_strength, nearest = strength, candidate
         verdict, _ = _arbitrate(sentence, claim, supported)
         rows.append({
+            "risky_segments": sorted(segments),
+            "rival_covers_segments": bool(rival) and covers(rival, segments),
+            "nearest_supported_claim": (str(nearest.get("claim"))[:200]
+                                        if nearest is not None else None),
+            "nearest_excluded_for": (sorted(segments - _quantities(
+                str(nearest.get("claim", ""))))
+                if nearest is not None and nearest is not rival else []),
             "check": check,
             "verdict": verdict,
             "would_have_blocked_before": True,
@@ -402,6 +535,65 @@ def run_factual_qa_v2(draft: dict, package: dict,
             f"to any SUPPORTED claim in the evidence ledger.",
             blocking=True,
             detail=" | ".join(s[:90] for s in unmatched[:3])))
+
+    # ── 3. Un chiffre sans source, quelle que soit la phrase ──────────────
+    # Mesuré le 2026-09-03 : « rentabilisée au bout de 5 ans » est passée
+    # parce que le « 5 » — un seul chiffre — n'était pas un nombre pour
+    # `_numbers`, et parce que la phrase ressemblait à autre chose. Chaque
+    # segment à risque du rendu doit se retrouver dans une affirmation
+    # étayée, ou dans un calcul explicite. Rien d'autre ne le couvre.
+    pool: set[str] = set()
+    for claim in supported:
+        pool |= _quantities(str(claim.get("claim", "")))
+    extracted_any = False
+    for sentence in _all_sentences(body):
+        segments = risky_segments(sentence)
+        extracted_any = extracted_any or bool(segments) or bool(_numbers(sentence))
+        if not segments or _ARITHMETIC.search(sentence):
+            continue
+        missing = sorted(segments - pool)
+        if missing:
+            add(_finding(
+                "NUMBER_WITHOUT_SOURCE",
+                f"The draft states figure(s) {', '.join(missing)} that no "
+                f"SUPPORTED claim carries and no explicit calculation "
+                f"produces. A number the evidence does not state is a "
+                f"number the page invents.",
+                blocking=True, detail=sentence[:280]))
+    # The canary: a body that contains digits from which the extractor read
+    # no figure at all is an extractor that stopped working, not a body
+    # without figures. It must fail loudly rather than certify by absence.
+    if re.search(r"\d", _clean_markdown(body)) and not extracted_any:
+        add(_finding(
+            "NUMERIC_EXTRACTION_FAILED",
+            "The body contains digits but the numeric extractor found no "
+            "figure to check. The coverage check cannot vouch for anything.",
+            blocking=True))
+
+    # ── 4. Every return-on-investment statement needs DATED support ───────
+    # The classifier ranged « rentabilisation en 5 à 7 ans » under GENERAL,
+    # where freshness is not required; the sentence quoting it was a payback
+    # promise all the same. What a sentence asserts is read from the
+    # sentence, not from the category of the claim it happens to resemble.
+    for sentence in draft_sentences:
+        if not _ROI_SHAPE.search(sentence):
+            continue
+        segments = risky_segments(sentence)
+        # The claims that could carry this statement: those stating its
+        # figures — or, for a figure-less one, those it lexically matches.
+        candidates = ([c for c in supported if covers(c, segments)] if segments
+                      else [c for c in supported if _matches_claim(sentence, c)])
+        if not candidates:
+            continue   # nothing supports it at all: the checks above say so
+        if not any(c.get("has_dated_support", False) for c in candidates):
+            add(_finding(
+                "ROI_WITHOUT_DATED_SOURCE",
+                f"A return-on-investment statement rests only on claims whose "
+                f"support carries no date and no current-tense marker "
+                f"({', '.join(sorted({str(c.get('category')) for c in candidates}))}). "
+                f"Payback depends on prices and support schemes that move; an "
+                f"undated figure cannot describe the present.",
+                blocking=True, detail=sentence[:280]))
 
     if not supported and draft_claims:
         add(_finding(
