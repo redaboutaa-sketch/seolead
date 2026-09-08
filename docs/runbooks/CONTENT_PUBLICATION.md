@@ -106,6 +106,45 @@ jusqu'au visiteur avec sa base : la page dit « document daté de 2013 », pas
 nouveau brouillon ou re-jugement → nouvelle empreinte → relecture et
 ré-approbation.
 
+## 3 quater. Republier une page lancée en douceur (lever son `noindex`)
+
+Une page publiée pendant que le site entier était `noindex` garde ce `noindex`
+gelé dans son instantané, et un instantané publié ne peut plus évoluer que vers
+l'archivage. Le site est devenu indexable ; la page, elle, reste invisible pour
+Google jusqu'à une NOUVELLE publication, qui recalcule `noindex` depuis l'état
+courant du site.
+
+La porte exige une approbation qui nomme le rendu. Une page approuvée avant le
+2026-09-03 n'en nomme aucun : il faut ré-affirmer l'approbation sur l'empreinte
+du rendu tel qu'il est aujourd'hui. `APPROVED → APPROVED` est la seule
+transition ouverte depuis un état approuvé, et le CLI refuse toujours une
+empreinte qui n'est pas celle du rendu courant.
+
+```bash
+# 1. Le contenu passe-t-il les gardes d'aujourd'hui ? Lecture seule.
+seolead draft rejudge <draft-id>
+# 2. La porte complète, y compris relecteur assisté et recherches résolues.
+seolead site preview-draft <draft-id>
+# 3. Relire le rendu, puis nommer son empreinte.
+seolead content fingerprint <draft-id>
+seolead content approve <draft-id> --by "…" --fingerprint <sha256> \
+    --note "exposition à l'indexation"
+# 4. Nouvel instantané, puis mise en ligne : `noindex` recalculé, v1 archivée.
+seolead content stage <draft-id>
+seolead content publish <content-id>
+```
+
+La décision précédente n'est pas perdue : elle est empilée dans
+`approval.history` (état, décideur, instant, note, empreinte nommée) avant que
+la ligne ne soit écrasée. `content approve` rapporte
+`superseded_decisions`.
+
+Vérifier ensuite que la balise a changé :
+
+```bash
+curl -s https://<domaine>/<slug> | grep -i 'name="robots"'
+```
+
 ## 4. Stage
 
 ```bash

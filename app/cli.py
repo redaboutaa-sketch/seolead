@@ -892,6 +892,22 @@ async def _decide(draft_id: str, target: ApprovalState, by: str,
         else:
             approval.render_fingerprint = None
 
+        # ── Re-approving never erases the previous decision (2026-09-08) ──
+        # The row is overwritten in place because there is exactly one per
+        # draft; what the overwrite would destroy is appended first. Full
+        # reassignment: mutating the list in place escapes the JSON column's
+        # change detection.
+        if approval.decided_at is not None or approval.decided_by:
+            approval.history = [*(approval.history or []), {
+                "state": approval.state,
+                "decided_by": approval.decided_by,
+                "decided_at": (approval.decided_at.isoformat()
+                               if approval.decided_at else None),
+                "note": approval.note,
+                "render_fingerprint": approval.render_fingerprint,
+                "superseded_at": datetime.now(timezone.utc).isoformat(),
+            }]
+
         approval.state = target.value
         approval.decided_by = by
         approval.decided_at = datetime.now(timezone.utc)
@@ -903,6 +919,7 @@ async def _decide(draft_id: str, target: ApprovalState, by: str,
         _emit({"draft_id": draft_id, "approval_state": target.value,
                "decided_by": by,
                "render_fingerprint": approval.render_fingerprint,
+               "superseded_decisions": len(approval.history or []),
                "publishable": approval_service.is_publishable(target)})
     return EXIT_OK
 

@@ -6,9 +6,21 @@ Two invariants, both enforced here rather than by convention:
    draft whose QA passed is `PENDING`, exactly like one whose QA failed. The only
    way to reach `APPROVED` is for a person to say so, and the actor is recorded.
 
-2. **A decision is not silently reversible.** `APPROVED` and `REJECTED` are
-   terminal. Reopening means `NEEDS_REVISION`, which is a decision an operator
-   takes deliberately and which leaves the previous state in the audit trail.
+2. **A decision is not silently reversible.** `REJECTED` is terminal, and
+   `APPROVED` may only be re-affirmed, never turned into a refusal behind the
+   page's back. Reopening means `NEEDS_REVISION`, which is a decision an
+   operator takes deliberately and which leaves the previous state in the
+   audit trail.
+
+3. **An approval names a render** (2026-09-03). The corollary, found on
+   2026-09-08: a page approved BEFORE that rule carries an approval that names
+   nothing, so the gate refuses to publish it again and tells the operator to
+   « re-approve with --fingerprint » — an instruction that was unreachable,
+   because `APPROVED` was fully terminal. The remedy the gate names must
+   exist. `APPROVED → APPROVED` is therefore legal, and only that: it is a
+   person reading the render again and quoting its fingerprint, which the CLI
+   recomputes and refuses on any mismatch. The superseded decision is kept in
+   `approval.history`, so re-affirming never erases who decided what, when.
 """
 from __future__ import annotations
 
@@ -23,7 +35,13 @@ _ALLOWED: dict[ApprovalState, frozenset[ApprovalState]] = {
     ApprovalState.NEEDS_REVISION: frozenset({
         ApprovalState.APPROVED, ApprovalState.REJECTED, ApprovalState.NEEDS_REVISION,
     }),
-    ApprovalState.APPROVED: frozenset(),
+    # Re-affirmation only. An approved page can be approved again — naming the
+    # render as it stands — because republishing it (a content refresh, a
+    # soft-launch noindex lifted) needs an approval that names a render, and a
+    # legacy approval names none. It can never become a rejection here: that
+    # would retire a live page through a state change rather than through the
+    # publication path, which is where unpublishing belongs.
+    ApprovalState.APPROVED: frozenset({ApprovalState.APPROVED}),
     ApprovalState.REJECTED: frozenset(),
 }
 

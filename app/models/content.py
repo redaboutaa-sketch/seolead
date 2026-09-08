@@ -193,6 +193,14 @@ class Approval(Base):
     # render and refuses on any difference — and on its absence.
     render_fingerprint: Mapped[str | None] = mapped_column(String(64),
                                                            nullable=True)
+    # Every decision this row has held before the current one (2026-09-08).
+    # Re-approving a published page overwrites `state`, `decided_by`,
+    # `decided_at`, `note` and `render_fingerprint`; without this list the
+    # earlier decision would vanish, and « qui a approuvé quoi, quand » is
+    # exactly what an approval record exists to answer. Appended, never
+    # rewritten. The unique constraint above stays: one row, full history.
+    history: Mapped[list] = mapped_column(JSONType, nullable=False,
+                                          default=list)
     created_at = created_column()
 
     draft: Mapped[ContentDraft] = relationship(back_populates="approval")
