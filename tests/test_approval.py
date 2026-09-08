@@ -26,11 +26,23 @@ class TestTransitions:
     def test_needs_revision_can_be_resolved(self, target):
         assert can_transition(ApprovalState.NEEDS_REVISION, target)
 
-    @pytest.mark.parametrize("terminal", [ApprovalState.APPROVED,
-                                          ApprovalState.REJECTED])
     @pytest.mark.parametrize("target", list(ApprovalState))
-    def test_terminal_states_are_final(self, terminal, target):
-        assert not can_transition(terminal, target)
+    def test_a_refusal_is_final(self, target):
+        assert not can_transition(ApprovalState.REJECTED, target)
+
+    @pytest.mark.parametrize("target", [t for t in ApprovalState
+                                        if t is not ApprovalState.APPROVED])
+    def test_an_approval_never_becomes_something_else(self, target):
+        """Une page approuvée ne se refuse pas par un changement d'état : le
+        retrait passe par la publication, pas par la porte d'approbation."""
+        assert not can_transition(ApprovalState.APPROVED, target)
+
+    def test_an_approval_can_be_re_affirmed(self):
+        """2026-09-08 : la porte refuse une approbation qui ne nomme aucun
+        rendu et dit « ré-approuver avec --fingerprint ». Le remède qu'elle
+        nomme doit exister. Seule la ré-affirmation est ouverte, et le CLI
+        exige l'empreinte du rendu courant."""
+        assert can_transition(ApprovalState.APPROVED, ApprovalState.APPROVED)
 
     def test_pending_to_pending_is_refused(self):
         """A no-op decision would create a decision record with no decision."""
