@@ -43,8 +43,21 @@ class VatStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-_AMOUNT = re.compile(r"(\d[\d\s.,]*)\s*(?:€|eur\b|euros?\b)", re.IGNORECASE)
-_AMOUNT_PREFIX = re.compile(r"(?:€|\$|£)\s*(\d[\d\s.,]*)")
+# Un nombre tel qu'un texte l'écrit : chiffres, séparateurs de milliers
+# (espace, espace insécable, point) et séparateur décimal (virgule).
+_NUM = r"\d[\d\s\u00a0\u202f.,]*\d|\d"
+
+_AMOUNT = re.compile(rf"({_NUM})\s*(?:€|eur\b|euros?\b)", re.IGNORECASE)
+_AMOUNT_PREFIX = re.compile(rf"(?:€|\$|£)\s*({_NUM})")
+# « entre 6.000 et 10.000 € » : la devise ne suit que la borne haute, et
+# `_AMOUNT` ne voyait donc que 10.000. Une fourchette réduite à sa borne haute
+# est une valeur fausse affichée comme une mesure — le même défaut que
+# « 5 ans » tiré de « 5 à 7 ans » (lot C), de l'autre côté du mur : la règle
+# existait pour les affirmations du corps, jamais pour les montants extraits.
+_RANGE_BOUNDS = re.compile(
+    rf"(?:entre|de)\s+({_NUM})\s*(?:€|eur\b|euros?\b)?"
+    rf"\s*(?:et|à|a|–|—|-)\s*({_NUM})\s*(?:€|eur\b|euros?\b)",
+    re.IGNORECASE)
 
 _BASIS_PATTERNS: tuple[tuple[PriceBasis, re.Pattern[str]], ...] = (
     (PriceBasis.PER_KWP, re.compile(r"(?:/|par\s+)\s*kw(?:c|p)\b", re.I)),
@@ -74,16 +87,58 @@ _INSTALL_OUT = re.compile(r"\bhors\s+pose|hors\s+installation|"
                           r"panneau\s+seul|mat[eé]riel\s+seul\b", re.I)
 
 
-def _digits(raw: str) -> int | None:
-    cleaned = re.sub(r"[^\d]", "", raw)
-    return int(cleaned) if cleaned else None
+def _amount(raw: str) -> float | None:
+    """Lire un nombre comme un texte français l'écrit — ou refuser.
+
+    L'ancienne lecture retirait tout ce qui n'était pas un chiffre : « 1,2 € »
+    devenait 12, et la page prix affichait « 1 € – 12 € par watt-crête » pour
+    une source qui disait 1 à 1,2 €/Wc. Un facteur dix sur une page
+    commerciale, publié pendant quatre semaines.
+
+    Les règles, dans l'ordre où l'ambiguïté se lève :
+      • l'espace, sous toutes ses formes, ne sépare que des milliers ;
+      • virgule ET point : le dernier des deux porte les décimales ;
+      • virgule seule : décimale (« 1,2 » → 1.2) — sauf devant exactement
+        trois chiffres, où « 1,500 » vaut 1,5 en français et 1500 en anglais.
+        Là on REFUSE : un chiffre faux sur une page de prix coûte plus cher
+        qu'un chiffre absent ;
+      • point seul : milliers devant exactement trois chiffres (« 6.000 »),
+        décimale sinon (« 1.2 »).
+    """
+    text = re.sub(r"[\s\u00a0\u202f]", "", raw or "")
+    if not text or not text[0].isdigit():
+        return None
+
+    has_comma, has_dot = "," in text, "." in text
+    if has_comma and has_dot:
+        if text.rindex(",") > text.rindex("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif has_comma:
+        if len(text.rsplit(",", 1)[1]) == 3:
+            return None
+        text = text.replace(",", ".")
+    elif has_dot:
+        if len(text.rsplit(".", 1)[1]) == 3:
+            text = text.replace(".", "")
+
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def plain(value: float) -> int | float:
+    """Un montant tel qu'il se transporte en JSON : entier quand il l'est."""
+    return int(value) if float(value).is_integer() else round(float(value), 2)
 
 
 @dataclass(frozen=True)
 class PriceContext:
     """Everything the source actually said about a price. Nothing inferred."""
 
-    amounts: tuple[int, ...]
+    amounts: tuple[float, ...]
     currency: str | None
     basis: PriceBasis
     vat: VatStatus
@@ -109,7 +164,8 @@ class PriceContext:
 
     def as_dict(self) -> dict:
         return {
-            "amounts": list(self.amounts), "currency": self.currency,
+            "amounts": [plain(a) for a in self.amounts],
+            "currency": self.currency,
             "basis": self.basis.value, "vat_status": self.vat.value,
             "system_size_kwp": list(self.system_size_kwp),
             "battery_included": self.battery_included,
@@ -121,8 +177,12 @@ class PriceContext:
 def extract_price_context(text: str) -> PriceContext | None:
     """Extract a price and its stated context, or None if there is no price."""
     text = text or ""
-    amounts = [_digits(m.group(1)) for m in _AMOUNT.finditer(text)]
-    amounts += [_digits(m.group(1)) for m in _AMOUNT_PREFIX.finditer(text)]
+    amounts = [_amount(m.group(1)) for m in _AMOUNT.finditer(text)]
+    amounts += [_amount(m.group(1)) for m in _AMOUNT_PREFIX.finditer(text)]
+    # Les deux bornes d'une fourchette, même quand la devise ne suit que la
+    # seconde. Ajoutées aux montants déjà vus : l'ensemble dédoublonne.
+    for match in _RANGE_BOUNDS.finditer(text):
+        amounts += [_amount(match.group(1)), _amount(match.group(2))]
     amounts = [a for a in amounts if a is not None]
     if not amounts:
         return None
@@ -173,10 +233,11 @@ def describe(context: PriceContext) -> str:
     """Human-readable qualification, for the brief and the writer."""
     parts: list[str] = []
     if context.is_range and len(context.amounts) >= 2:
-        parts.append(f"{context.amounts[0]}–{context.amounts[-1]} "
+        parts.append(f"{plain(context.amounts[0])}–{plain(context.amounts[-1])} "
                      f"{context.currency or ''}".strip())
     elif context.amounts:
-        parts.append(f"{context.amounts[0]} {context.currency or ''}".strip())
+        parts.append(f"{plain(context.amounts[0])} "
+                     f"{context.currency or ''}".strip())
 
     basis_label = {
         PriceBasis.TOTAL: "for the whole installation",
@@ -233,7 +294,8 @@ def observed_range(contexts: list[PriceContext], *, minimum: int = 2
     amounts = sorted(a for member in members for a in member.amounts)
     basis, vat, currency, battery, installation = key
     return {
-        "low": amounts[0], "high": amounts[-1], "currency": currency,
+        "low": plain(amounts[0]), "high": plain(amounts[-1]),
+        "currency": currency,
         "basis": basis, "vat_status": vat,
         "battery_included": battery, "installation_included": installation,
         "observation_count": len(members),

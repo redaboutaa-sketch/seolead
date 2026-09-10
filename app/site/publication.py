@@ -318,8 +318,9 @@ def render_fingerprint(draft: ContentDraft, brief: ContentBrief,
         "meta_title": draft.meta_title,
         "meta_description": draft.meta_description,
         "sections": parse_sections(draft.body or ""),
-        "answers": [_public_answer(a)
-                    for a in (core_evidence.get("answers") or [])],
+        "answers": [a for a in (_public_answer(x)
+                                for x in (core_evidence.get("answers") or []))
+                    if a is not None],
         "sources": sources,
     }
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False,
@@ -531,8 +532,9 @@ async def stage_content(
             "core_answer_status": brief.core_answer_status,
             # Only the qualification a visitor may see. Claim identifiers, source
             # URLs and evidence internals stay in the research tables.
-            "answers": [_public_answer(a)
-                        for a in (core_evidence.get("answers") or [])],
+            "answers": [a for a in (_public_answer(x)
+                                    for x in (core_evidence.get("answers") or []))
+                        if a is not None],
             "observed_range": core_evidence.get("observed_range"),
         },
         cta=brief.cta_strategy or {},
@@ -556,14 +558,43 @@ async def stage_content(
     return snapshot
 
 
-def _public_answer(answer: dict) -> dict:
-    """Strip a price answer down to what a visitor may see.
+# Les bases qu'une page n'affiche pas (propriétaire, 2026-09-10). Un prix au
+# watt-crête ne donne rien d'actionnable à quelqu'un qui cherche un budget, et
+# la source derrière celui-ci énonce un ordre de grandeur plutôt qu'un prix.
+# Retiré plutôt que corrigé. Une constante nommée plutôt qu'une clé de
+# configuration : une seule verticale la porte aujourd'hui, et la promouvoir
+# en configuration se fera le jour où une seconde en décide autrement.
+BASES_NOT_DISPLAYED = frozenset({"PER_WP"})
+
+
+def _public_answer(answer: dict) -> dict | None:
+    """Strip a price answer down to what a visitor may see, and re-read its
+    figures from the claim under today's rules.
 
     The claim text and its price context are public — they are the answer. The
     source URLs are not: Phase 3.3 shipped a competitor link, and a "sources"
     block in the page would reintroduce it by another route.
+
+    Les montants sont RELUS depuis le texte de l'affirmation, jamais repris du
+    contexte gelé dans le brief (2026-09-10). Celui-ci a été calculé le jour
+    du brief, par un lecteur de nombres qui rendait 12 pour « 1,2 » et ne
+    voyait qu'une borne de « entre 6.000 et 10.000 € ». Le texte de la source
+    est ce qui fait foi ; les chiffres n'en sont qu'une lecture, et une lecture
+    fausse se corrige sans réécrire la source — c'est déjà ce que le
+    re-jugement fait des verdicts QA.
+
+    Une affirmation que le lecteur d'aujourd'hui n'arrive pas à lire est
+    retirée, pas affichée avec ses anciens chiffres : mieux vaut une ligne de
+    moins qu'un montant faux.
     """
-    context = answer.get("price_context") or {}
+    from app.services.price_normalization import extract_price_context
+
+    context_obj = extract_price_context(str(answer.get("claim") or ""))
+    if context_obj is None or not context_obj.is_usable:
+        return None
+    context = context_obj.as_dict()
+    if str(context.get("basis")) in BASES_NOT_DISPLAYED:
+        return None
     return {
         "claim": answer.get("claim"),
         "category": answer.get("category"),
@@ -610,8 +641,9 @@ def draft_preview_dto(draft: ContentDraft, brief: ContentBrief,
         "price_evidence": {
             "core_question": brief.core_question,
             "core_answer_status": brief.core_answer_status,
-            "answers": [_public_answer(a)
-                        for a in (core_evidence.get("answers") or [])],
+            "answers": [a for a in (_public_answer(x)
+                                    for x in (core_evidence.get("answers") or []))
+                        if a is not None],
             "observed_range": core_evidence.get("observed_range"),
         },
         "cta": {"primary": config.conversion.primary_cta,
