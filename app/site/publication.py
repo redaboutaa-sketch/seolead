@@ -658,6 +658,16 @@ async def publish_content(session: AsyncSession, *, snapshot: PublishedContent,
     )).scalars().all()
     for row in live:
         row.state = PublicationState.ARCHIVED.value
+    # Flushed BEFORE the new row goes live (2026-09-10). Both updates were
+    # left pending in the same flush, and SQLAlchemy orders same-table UPDATEs
+    # by primary key, not by the order they were written here. Primary keys
+    # are random UUIDs, so roughly one publication in two emitted « the new row
+    # becomes PUBLISHED » before « the old row becomes ARCHIVED » and died on
+    # `uq_pub_live`. The republication of the price page is the one that lost
+    # the toss. Ordering a write that a constraint depends on is not a detail
+    # the ORM can be left to guess.
+    if live:
+        await session.flush()
 
     snapshot.state = PublicationState.PUBLISHED.value
     # Published is not the same as indexable. A page served on the public route

@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer,
-                        String, Text, UniqueConstraint)
+                        String, Text, UniqueConstraint, text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import (ConsentChannel, ConsentPurpose, ConversionType,
@@ -50,6 +50,15 @@ class PublishedContent(Base):
         UniqueConstraint("site_id", "locale", "slug", "version",
                          name="uq_pub_slug_version"),
         Index("ix_pub_lookup", "site_id", "locale", "slug", "state"),
+        # At most one live row per address. Declared here as well as in
+        # migration 0005 (2026-09-10): it existed ONLY in the migration, so
+        # `Base.metadata.create_all` — which is how the suite builds its
+        # schema — never created it, and every test ran against a database
+        # that could hold two live rows. A guard the tests cannot see is a
+        # guard that only production enforces, and production found it.
+        Index("uq_pub_live", "site_id", "locale", "slug", unique=True,
+              postgresql_where=text("state = 'PUBLISHED'"),
+              sqlite_where=text("state = 'PUBLISHED'")),
     )
 
     id: Mapped[uuid.UUID] = pk_column()
