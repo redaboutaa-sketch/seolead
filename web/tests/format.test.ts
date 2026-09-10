@@ -33,6 +33,26 @@ describe("price formatting", () => {
     expect(formatPrice(answer())).toMatch(/4[\s  .]?000/);
   });
 
+  it("renders a decimal amount without rounding it away", () => {
+    // 2026-09-10 : « 1,2 € » lu comme 12 était affiché « 12 € ». Le lecteur
+    // rend désormais des décimales, et elles doivent survivre au formatage.
+    const perWatt = formatPrice(answer({
+      amounts: [1, 1.2], basis: "PER_WP", is_range: true,
+      claim: "Comptez entre 1€ et 1,2€ par watt crête installé.",
+    }));
+    expect(perWatt).toMatch(/1,2/);
+    expect(perWatt).not.toMatch(/\b12\b/);
+  });
+
+  it("renders the low bound of a range that used to collapse", () => {
+    const kit = formatPrice(answer({
+      amounts: [6000, 10000], is_range: true,
+      claim: "… budget entre 6.000 et 10.000 € tout compris.",
+    }));
+    expect(kit).toMatch(/6[\s  .]?000/);
+    expect(kit).toContain("–");
+  });
+
   it("renders a single figure without a range dash", () => {
     const single = formatPrice(answer({ amounts: [6500], is_range: false }));
     expect(single).not.toContain("–");
