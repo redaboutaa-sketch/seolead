@@ -8,7 +8,7 @@ import { Prose } from "@/components/Prose";
 import { SourcesBlock } from "@/components/Sources";
 import { getPublished, getSiteConfig } from "@/lib/api";
 import { contentPath, localizedPath } from "@/lib/site";
-import { articleNode, graph, websiteNode } from "@/lib/jsonld";
+import { articleNode, graph, organizationNode, websiteNode } from "@/lib/jsonld";
 import { pageMetadata } from "@/lib/metadata";
 
 export const revalidate = 300;
@@ -75,10 +75,20 @@ export function ContentView({
     ],
   };
   // Article with its real dates, WebSite for the graph anchor, breadcrumb as
-  // before. Still no Organization unless the registry is ready, and no author:
-  // none exists, and an invented byline is fabrication with a schema.
+  // before. No author: none exists, and an invented byline is fabrication
+  // with a schema.
+  //
+  // `Organization` is IN the graph (2026-09-10), not merely pointed at.
+  // `articleNode` and `websiteNode` both carry `publisher: {"@id": …
+  // /#organization"}`, and that node was absent here: every published article
+  // referenced an entity its own graph did not define. A reader following the
+  // reference — a rich-results parser, an answer engine asked « qui exploite
+  // ce site ? » — landed on nothing. The node is still null until the
+  // registry carries a legal name and a BCE number, so nothing is fabricated;
+  // it is simply included when it exists.
   const jsonLd = graph(
     websiteNode(config),
+    organizationNode(config),
     articleNode(config, content, contentPath(config, content)),
     breadcrumbNode,
   );

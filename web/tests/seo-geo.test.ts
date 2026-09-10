@@ -14,6 +14,7 @@ import {
   graph,
   organizationNode,
   serviceNode,
+  webPageNode,
   websiteNode,
 } from "@/lib/jsonld";
 import { pageMetadata } from "@/lib/metadata";
@@ -274,5 +275,100 @@ describe("llms.txt gate", () => {
     expect(body).toContain("/demande-etude");
     expect(body).not.toContain("sans-apport");
     vi.doUnmock("@/lib/api");
+  });
+});
+
+/* ── Un graphe ne référence jamais un nœud qu'il ne contient pas ────────── */
+
+const READY = {
+  ...CONFIG,
+  organization: {
+    ...ORG_EMPTY, legal_name: "Beaver Data Group",
+    company_number: "935097675", registration_number: "935097675",
+    organization_schema_ready: true,
+  },
+} as SiteConfigDTO;
+
+const CONTENT = {
+  slug: "prix-panneaux-solaires-belgique",
+  locale: "fr",
+  title: "Prix des panneaux solaires en Belgique",
+  published_at: "2026-09-10T19:13:49.251481+00:00",
+  updated_at: "2026-09-10T19:13:49.253942+00:00",
+} as never;
+
+/** Les `@id` cités par un graphe et que ce même graphe ne définit pas. */
+function danglingReferences(document: string | null): string[] {
+  if (!document) return [];
+  const nodes = (JSON.parse(document)["@graph"] ?? []) as Record<string, unknown>[];
+  const defined = new Set(nodes.map((n) => n["@id"]).filter(Boolean) as string[]);
+  const referenced: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (!value || typeof value !== "object") return;
+    const entries = Object.entries(value as Record<string, unknown>);
+    const keys = entries.map(([k]) => k);
+    // Une référence est un objet qui ne porte QUE `@id` : le nœud défini, lui,
+    // porte aussi son `@type`.
+    if (keys.length === 1 && keys[0] === "@id") {
+      referenced.push(String((value as Record<string, unknown>)["@id"]));
+      return;
+    }
+    entries.forEach(([, v]) => walk(v));
+  };
+  nodes.forEach(walk);
+  return referenced.filter((id) => !defined.has(id));
+}
+
+describe("graph integrity — every @id a graph cites, it defines", () => {
+  it("detects the dangling publisher an article page used to emit", () => {
+    // Le défaut du 2026-09-10, tel qu'il était : `articleNode` et
+    // `websiteNode` portaient tous deux `publisher: {@id: …/#organization}`,
+    // et ce nœud n'était pas dans le graphe de la page article. Le détecteur
+    // doit le voir, sinon le test suivant ne prouve rien.
+    const incomplet = graph(
+      websiteNode(READY),
+      articleNode(READY, CONTENT, "/prix-panneaux-solaires-belgique"),
+    );
+    expect(danglingReferences(incomplet)).toContain(
+      "https://monprojetsolaire.be/#organization",
+    );
+  });
+
+  it("an article page graph resolves every reference it makes", () => {
+    const complet = graph(
+      websiteNode(READY),
+      organizationNode(READY),
+      articleNode(READY, CONTENT, "/prix-panneaux-solaires-belgique"),
+    );
+    expect(danglingReferences(complet)).toEqual([]);
+  });
+
+  it("a home page graph resolves every reference it makes", () => {
+    const home = graph(
+      websiteNode(READY),
+      organizationNode(READY),
+      faqNode(READY, "/", [{ question: "Est-ce gratuit ?", answer: "Oui." }]),
+    );
+    expect(danglingReferences(home)).toEqual([]);
+  });
+
+  it("a conversion page graph resolves every reference it makes", () => {
+    const conversion = graph(
+      websiteNode(READY),
+      organizationNode(READY),
+      webPageNode(READY, "/demande-etude", "Demander une estimation", "…"),
+    );
+    expect(danglingReferences(conversion)).toEqual([]);
+  });
+
+  it("emits no organization node, and no reference to one, while the registry is empty", () => {
+    const sansIdentite = graph(
+      websiteNode(CONFIG),
+      organizationNode(CONFIG),
+      articleNode(CONFIG, CONTENT, "/prix-panneaux-solaires-belgique"),
+    );
+    expect(danglingReferences(sansIdentite)).toEqual([]);
+    expect(sansIdentite).not.toContain("#organization");
   });
 });

@@ -5,21 +5,26 @@ import { LeadForm } from "@/components/LeadForm";
 import Link from "next/link";
 
 import { getSiteConfig } from "@/lib/api";
+import { graph, organizationNode, webPageNode, websiteNode } from "@/lib/jsonld";
 import { pageMetadata } from "@/lib/metadata";
 import { FINANCING_PATH, financingLandingVisible, localizedPath } from "@/lib/site";
+
+// Le titre et la description sont écrits UNE fois : les métas et le balisage
+// diraient sinon deux choses de la même page, et c'est la contradiction qu'un
+// moteur de réponse fait remonter.
+const PATH = "/outils/estimation-solaire";
+const TITLE = "Cadrer votre projet solaire";
+const DESCRIPTION =
+  "Un questionnaire de qualification qui décrit votre projet — sans estimation " +
+  "financière tant qu'aucun calcul défendable n'est implémenté.";
 
 // Robots follow the site-wide gate, like /demande-etude: the declared route
 // table feeds the sitemap, and a hardcoded noindex would contradict it at
 // flip time.
 export async function generateMetadata(): Promise<Metadata> {
   const config = await getSiteConfig();
-  return pageMetadata({
-    config,
-    title: "Cadrer votre projet solaire",
-    description:
-      "Un questionnaire de qualification qui décrit votre projet — sans estimation financière tant qu'aucun calcul défendable n'est implémenté.",
-    path: "/outils/estimation-solaire",
-  });
+  return pageMetadata({ config, title: TITLE, description: DESCRIPTION,
+                        path: PATH });
 }
 
 export const dynamic = "force-dynamic";
@@ -44,9 +49,23 @@ export default async function EstimationTool() {
   }
 
   const steps = config.conversion.form_steps ?? [];
+  // Cette page ne portait aucune donnée structurée (2026-09-10). C'est celle
+  // qui répond à « ce site propose-t-il une estimation ? », l'une des sept
+  // questions du protocole GEO : elle doit se nommer, et nommer qui l'opère.
+  const jsonLd = graph(
+    websiteNode(config),
+    organizationNode(config),
+    webPageNode(config, PATH, TITLE, DESCRIPTION),
+  );
 
   return (
     <div className="container container--wide page">
+      {jsonLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLd }}
+        />
+      ) : null}
       <h1>Cadrer votre projet solaire</h1>
       <p className="hero__lede">
         Cet outil décrit votre projet et prépare une estimation faite par un
