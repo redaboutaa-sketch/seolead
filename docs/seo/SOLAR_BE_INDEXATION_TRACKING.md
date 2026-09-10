@@ -14,7 +14,7 @@ crawlable → discovered → crawled → indexed → ranking
 | URL | HTTP | canonical | meta robots | sitemap | Google indexed | Bing indexed | last checked |
 |---|---|---|---|---|---|---|---|
 | `https://monprojetsolaire.be/` | 200 | ✔ | index, follow | ✔ | **✔ indexée** (inspection GSC 31/08, confirmée par 43 impressions) | — | 2026-09-08 |
-| `https://monprojetsolaire.be/prix-panneaux-solaires-belgique` | 200 | ✔ | noindex (figé soft-launch — voir post-publication) | retirée (filtre noindex du sitemap) | n/a — état voulu | — | 2026-09-08 |
+| `https://monprojetsolaire.be/prix-panneaux-solaires-belgique` | 200 | ✔ | **index, follow** (depuis le 2026-09-10) | ✔ (sitemap à 6 URLs) | — *demande d'indexation à faire* | — | 2026-09-10 |
 | `https://monprojetsolaire.be/rentabilite-panneaux-solaires-belgique` | 200 | ✔ | index, follow | ✔ | **✔ indexée** (28 impressions, position 89) | — | 2026-09-08 |
 | `https://monprojetsolaire.be/outils/estimation-solaire` | 200 | ✔ | index, follow | ✔ | **✔ indexée** (1 impression, position 4) | — | 2026-09-08 |
 | `https://monprojetsolaire.be/demande-etude` | 200 | ✔ | index, follow | ✔ | **✔ indexée** (1 impression, position 3) | — | 2026-09-08 |
@@ -28,6 +28,28 @@ Journal des faits d'indexation (constatés, jamais déduits) :
   l'en-tête HTTP X-Robots-Tag » — l'en-tête contredisait la meta et Google
   suit le plus strict. Corrigé (PRs #39/#41 : une seule autorité, la meta
   pilotée par la config ; en-tête restreint à /preview et /api).
+- **2026-09-10** — la page prix devient indexable. Publiée en soft-launch le
+  13 août avec un `noindex` gelé dans son instantané, elle est restée
+  invisible six semaines : sur les 100 impressions mesurées jusqu'au 8
+  septembre, aucune requête contenant « prix ». Republiée en v2 puis v3,
+  elle sert désormais `index, follow`. Sitemap resoumis, 6 URLs.
+  **Reste à faire : demander l'indexation de cette URL dans Search Console** —
+  les quatre demandes du 2026-09-10 portaient sur les autres pages, à un
+  moment où celle-ci était encore `noindex`.
+
+  Trois défauts ont été trouvés en chemin, tous corrigés :
+  1. *l'impasse d'approbation* — la porte refusait de republier une page dont
+     l'approbation ne nommait aucun rendu, et prescrivait « ré-approuver avec
+     --fingerprint », remède inatteignable puisque `APPROVED` était terminal
+     (PR #65) ;
+  2. *l'ordre des écritures* — l'ancienne et la nouvelle ligne devenaient
+     vivantes dans le même flush, et SQLAlchemy ordonne par clé primaire :
+     une publication sur deux mourait sur `uq_pub_live`. L'index n'existait
+     que dans la migration, donc aucun test ne pouvait le voir (PR #66) ;
+  3. *deux montants faux* — « 1,2 € » lu comme 12, et « entre 6.000 et
+     10.000 € » réduit à sa borne haute. En ligne depuis le 13 août, retirés
+     ou corrigés dans la v3 (PR #67).
+
 - **2026-09-08** — premier export Search Console (7 jours, 31/08 au 06/09) :
   70 impressions, **0 clic**, position moyenne 66. Cinq URLs reçoivent des
   impressions, ce qui prouve leur indexation sans inspection manuelle : une
@@ -56,6 +78,20 @@ publiée) · 3. `/outils/estimation-solaire` · 4. `/demande-etude`.
 | 31/08–06/09 | `/demande-etude` | 1 | 0 | 0 % | 3,0 | ✔ | 0 |
 | 31/08–06/09 | `/outils/estimation-solaire` | 1 | 0 | 0 % | 4,0 | ✔ | 0 |
 | 31/08–06/09 | **tous** | **70** | **0** | **0 %** | **66** | — | **0** |
+| 30/08–08/09 | `/` | 61 | 0 | 0 % | 49,0 | ✔ | 0 |
+| 30/08–08/09 | `/rentabilite-…` | 40 | 0 | 0 % | 79,1 | ✔ | 0 |
+| 30/08–08/09 | `/confidentialite` | 1 | 0 | 0 % | 2,0 | ✔ | 0 |
+| 30/08–08/09 | `/demande-etude` | 1 | 0 | 0 % | 3,0 | ✔ | 0 |
+| 30/08–08/09 | `/outils/estimation-solaire` | 1 | 0 | 0 % | 4,0 | ✔ | 0 |
+| 30/08–08/09 | **tous** | **100** | **0** | **0 %** | **62,7** | — | **0** |
+
+La fenêtre du 2026-09-10 (28 jours, données à partir du 31/08) prolonge la
+précédente : 100 impressions, toujours zéro clic, position moyenne en
+amélioration de 66 à 62,7. Les deux derniers jours mesurés sont les meilleurs
+(55,8 puis 53,2) et l'article rentabilité passe de 89,0 à 79,1 — dix jours de
+données ne font pas une tendance, et ces positions restent hors de portée d'un
+clic. La page prix n'y figure toujours pas : elle n'est devenue indexable que
+le 10 septembre.
 
 Leads : zéro lead réel depuis le lancement. Les deux soumissions en base sont
 celles du propriétaire (voir `SOLAR_BE_MESURE_2026-09-08.md` §1).

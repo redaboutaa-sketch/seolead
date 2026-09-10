@@ -132,3 +132,24 @@ montrer.
   requêtes : DataForSEO est à court de crédits depuis le 2026-09-02.
 - Aucune donnée GEO. La grille J+7 (`SOLAR_BE_GEO_J7_2026-09-07.md`) est
   toujours vide.
+
+
+---
+
+## Suite au 2026-09-10 — la page prix est indexable
+
+Le cluster commercial était absent de la mesure du 8 septembre parce que la
+page qui le vise portait un `noindex` gelé depuis son lancement en douceur du
+13 août. Elle a été republiée le 10 septembre après ré-approbation sur
+empreinte, et sert désormais `index, follow`.
+
+La v3 corrige deux montants qui étaient faux depuis le 13 août : un prix au
+watt-crête lu « 1 € – 12 € » là où la source dit 1 à 1,2 € (retiré sur
+décision du propriétaire), et un budget « 10 000 € » là où la source dit
+6 000 à 10 000 € (corrigé). Vérifié en ligne : la fourchette complète est
+rendue, ni « 12 € » ni « watt-crête » n'apparaissent, la page servie porte
+bien l'horodatage de la v3.
+
+Ce que cela ne dit pas : rien sur les positions, rien sur les clics, rien sur
+les leads. Google n'a pas encore exploré la page dans son nouvel état, et la
+demande d'indexation reste à faire.
