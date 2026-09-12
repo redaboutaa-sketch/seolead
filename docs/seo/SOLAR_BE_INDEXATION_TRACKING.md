@@ -84,6 +84,49 @@ publiée) · 3. `/outils/estimation-solaire` · 4. `/demande-etude`.
 | 30/08–08/09 | `/demande-etude` | 1 | 0 | 0 % | 3,0 | ✔ | 0 |
 | 30/08–08/09 | `/outils/estimation-solaire` | 1 | 0 | 0 % | 4,0 | ✔ | 0 |
 | 30/08–08/09 | **tous** | **100** | **0** | **0 %** | **62,7** | — | **0** |
+| 30/08–10/09 | `/` | 75 | 0 | 0 % | 48,7 | ✔ | 0 |
+| 30/08–10/09 | `/rentabilite-…` | 52 | 0 | 0 % | 74,6 | ✔ | 0 |
+| 30/08–10/09 | `/confidentialite` | 1 | 0 | 0 % | 2,0 | ✔ | 0 |
+| 30/08–10/09 | `/demande-etude` | 1 | 0 | 0 % | 3,0 | ✔ | 0 |
+| 30/08–10/09 | `/outils/estimation-solaire` | 1 | 0 | 0 % | 4,0 | ✔ | 0 |
+| 30/08–10/09 | **tous** | **126** | **0** | **0 %** | **59,7** | — | **0** |
+
+### Export du 2026-09-12 (fenêtre 30/08–10/09)
+
+Position moyenne globale recalculée par pondération des impressions : 59,73
+par appareil et 59,73 par pays, les deux dimensions concordent. Google ne
+publie pas ce total ; les tableaux par dimension ne se recoupent pas
+exactement (126 par jour, par pays et par appareil ; 130 par page ; 124 par
+requête), et les écarts sont reportés tels quels.
+
+Trois mesures successives sur le même site :
+
+| fenêtre | impressions | clics | position |
+|---|---|---|---|
+| 31/08–06/09 | 70 | 0 | 66,0 |
+| 30/08–08/09 | 100 | 0 | 62,7 |
+| 30/08–10/09 | 126 | 0 | 59,7 |
+
+La progression est régulière et antérieure à tout ce qui a été fait le 10
+septembre : elle court du 1er au 10 et ne doit donc rien au `noindex` levé
+ce jour-là à 18:44. C'est la maturation ordinaire d'un domaine neuf, pas un
+effet de nos correctifs.
+
+L'article rentabilité progresse le plus vite : position 89,0 puis 79,1 puis
+74,6, pour 28 puis 40 puis 52 impressions. Il est servi sur ses requêtes
+cibles ; il lui manque l'autorité, pas la pertinence.
+
+Toujours neuf requêtes, les mêmes, et **toujours aucune contenant « prix »**.
+La page prix n'apparaît pas non plus dans le tableau par page : elle n'est
+devenue indexable que le 10 septembre à 18:44, soit le dernier jour de la
+fenêtre, et Google ne l'avait jamais explorée (inspection GSC : « Sans
+objet » partout). Cet export ne peut donc rien dire de son effet. La
+première mesure qui le pourra est celle de J+30.
+
+Le mobile reste derrière l'ordinateur pour la deuxième fenêtre consécutive
+(16 impressions en position 70,2 contre 110 en position 58,2 ; précédemment
+8 en 93,0 contre 62 en 60,8). L'écart se resserre et l'échantillon reste
+trop petit pour conclure — à revoir à J+30 avant d'en faire une hypothèse.
 
 La fenêtre du 2026-09-10 (28 jours, données à partir du 31/08) prolonge la
 précédente : 100 impressions, toujours zéro clic, position moyenne en
