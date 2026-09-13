@@ -313,7 +313,7 @@ def render_fingerprint(draft: ContentDraft, brief: ContentBrief,
     same value for the same render — and a different value for any other.
     """
     core_evidence = brief.core_answer_evidence or {}
-    payload = {
+    return _digest({
         "title": draft.title,
         "meta_title": draft.meta_title,
         "meta_description": draft.meta_description,
@@ -322,7 +322,33 @@ def render_fingerprint(draft: ContentDraft, brief: ContentBrief,
                                 for x in (core_evidence.get("answers") or []))
                     if a is not None],
         "sources": sources,
-    }
+    })
+
+
+def snapshot_fingerprint(snapshot: PublishedContent) -> str:
+    """La même empreinte, calculée sur ce qu'un instantané SERT réellement.
+
+    `render_fingerprint` dit ce que les règles d'aujourd'hui produiraient ;
+    celle-ci dit ce que la page en ligne montre. Les comparer, c'est demander
+    « la page servie est-elle encore ce que le système produirait ? » — la
+    question que personne ne posait quand « 1 € – 12 € » est resté quatre
+    semaines en ligne (2026-09-13).
+
+    Les deux passent par `_digest` : deux canonicalisations divergeraient un
+    jour, et le jour où elles divergeraient la comparaison dirait « dérive »
+    sur des pages saines, ce qui reviendrait à éteindre la veille.
+    """
+    return _digest({
+        "title": snapshot.title,
+        "meta_title": snapshot.meta_title,
+        "meta_description": snapshot.meta_description,
+        "sections": snapshot.sections or [],
+        "answers": (snapshot.price_evidence or {}).get("answers") or [],
+        "sources": list(snapshot.sources or []),
+    })
+
+
+def _digest(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False,
                            separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
