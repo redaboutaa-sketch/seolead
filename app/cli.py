@@ -956,6 +956,27 @@ async def _resolve_site(session, config):
     )).scalar_one_or_none()
 
 
+async def cmd_site_watch(args: argparse.Namespace) -> int:
+    """Relire les pages publiées sous les règles du jour. Lecture seule.
+
+    Sort en erreur quand une régression est trouvée, pour qu'un cron ou une
+    unité systemd puisse alerter sans lire le JSON. C'est la seule chose que
+    cette commande décide : dire, jamais corriger.
+    """
+    from app.services.regression_watch import veiller
+    from app.site.config import load_site
+
+    config = load_site(args.site)
+    async with get_sessionmaker()() as session:
+        site = await _resolve_site(session, config)
+        if site is None:
+            _emit({"error": f"site {config.site_id} is not seeded"})
+            return EXIT_ERROR
+        rapport = await veiller(session, site_id=site.id)
+    _emit({"site": config.site_id, **rapport.as_dict()})
+    return EXIT_OK if rapport.ok else EXIT_ERROR
+
+
 async def cmd_site_seed(args: argparse.Namespace) -> int:
     """Create the `site` row for a site config. Idempotent."""
     from app.site.config import load_site
@@ -1675,6 +1696,12 @@ def build_parser() -> argparse.ArgumentParser:
     site_seed = site_sub.add_parser("seed", help="create the site row")
     site_seed.add_argument("--site", default="solar_be")
     site_seed.set_defaults(func=cmd_site_seed)
+
+    site_watch = site_sub.add_parser(
+        "watch", help="relire les pages publiées sous les règles du jour — "
+                      "lecture seule ; sort en erreur si une page a régressé")
+    site_watch.add_argument("--site", default="solar_be")
+    site_watch.set_defaults(func=cmd_site_watch)
 
     site_list = site_sub.add_parser("list", help="configured sites")
     site_list.set_defaults(func=cmd_site_list)
